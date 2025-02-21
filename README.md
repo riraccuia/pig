@@ -13,6 +13,37 @@ pig is my playground for network protocol experimentation and a Swiss Army knife
 
 _*Windows support is implemented but not at all tested at this time_
 
+## Design Principles
+
+pig's architecture is built around a robust and flexible transport layer design that enables experimentation and reliable network protocol implementation:
+
+### Transport Architecture
+
+#### Unified Interface Design
+All transport protocols implement a common interface that provides consistent behavior across different protocols:
+* Standard connection lifecycle management
+* Common stream operations (Read, Write, Close, Flush)
+* Unified error handling patterns
+* Consistent configuration patterns
+
+#### Layered Protocol Stack
+* Clean separation between transport protocols
+* Support for protocol encapsulation (e.g., TLS-in-ICMP)
+* Composable transport layers (e.g., TLS over ICMP)
+* Pluggable design for easy addition of new protocols
+
+#### Stream Abstraction
+* Unified handling of both stream-oriented and packet-oriented protocols
+* Built-in support for stream multiplexing where protocol allows
+* Automatic stream management and lifecycle handling
+
+#### Flow Control (applies to ICMP based transports)
+* NewReno-style congestion control implementation
+* Window management and packet tracking
+* Fast retransmit and recovery mechanisms
+* Out-of-order packet handling with intelligent resequencing
+* Adaptive congestion window sizing based on network conditions
+
 ## Quick Start
 
 For quick testing with automatically generated certificates:
