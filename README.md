@@ -26,6 +26,12 @@ All transport protocols implement a common interface that provides consistent be
 * Unified error handling patterns
 * Consistent configuration patterns
 
+#### Extensible Transport Implementation
+* New transports can be added like building blocks under `pkg/transport/`
+* Each transport lives in its own dedicated folder (e.g., `pkg/transport/icmp/`, `pkg/transport/quic/`)
+* Implementation only requires wrapping the underlying protocol to match interfaces in `pkg/transport/transport.go`
+* Simple pathway to experiment with new transport protocols and ideas
+
 #### Layered Protocol Stack
 * Clean separation between transport protocols
 * Support for protocol encapsulation (e.g., TLS-in-ICMP)
