@@ -1,0 +1,231 @@
+# pig - packet insertion gear
+
+pig is my playground for network protocol experimentation and a Swiss Army knife for network encapsulation. Think of it as a sandbox where networking ideas come to life - from VPN-like tunneling to creative protocol encapsulation. It creates virtual network interfaces and can push packets through just about any transport protocol you throw at it. Whether you're doing serious network testing or just curious about how packets can dance between protocols, pig's got you covered.
+
+## Features
+
+* Multiple transport protocol support (QUIC, UDP, TLS, WebSocket, ICMP, TLS-in-ICMP)
+* Cross-platform support (Linux, macOS, Windows*)
+* Automatic self-signed certificate generation
+* Advanced congestion control with WRED (Weighted Random Early Detection)
+* Stream multiplexing (for supported protocols)
+* Configurable via command line flags or TOML configuration file
+
+_*Windows support is implemented but not at all tested at this time_
+
+## Quick Start
+
+For quick testing with automatically generated certificates:
+
+```bash
+# Terminal 1 - Server
+sudo pig -proto ws -s -l :8080 -tunnel 10.0.0.1/24 -k
+
+# Terminal 2 - Client
+sudo pig -proto ws -c localhost:8080 -k
+
+# Terminal 3 - Test connectivity
+ping 10.0.0.1
+```
+
+## Congestion Control
+
+pig implements WRED (Weighted Random Early Detection) to combat network bufferbloat. WRED helps maintain low latency by:
+
+* Proactively dropping packets before queues are full
+* Using weighted averaging to smooth out traffic bursts
+* Preventing global TCP synchronization
+
+Configuration options:
+
+## Transport Protocols
+
+### QUIC
+* Based on Go's standard library QUIC implementation
+* Provides native stream multiplexing
+* Handles connection migration
+* Future plans include migration to quic-go for enhanced features
+* Recommended for most use cases
+
+### TLS-in-ICMP
+* Encapsulates TLS traffic within ICMP packets
+* Provides additional layer of obfuscation
+* Currently recommended for Linux servers only due to OS-level ICMP handling on other platforms
+* Requires specific OS configuration for optimal performance
+
+### ICMP
+* Full-featured implementation with packet loss recovery
+* Useful in restricted networks where other protocols are blocked
+* Uses `golang.org/x/net/icmp`
+* Currently recommended for Linux servers only
+* Requires OS configuration to prevent interference with ICMP handling
+
+### TLS
+* Direct TLS connection using `crypto/tls`
+* Provides strong encryption
+
+### WebSocket
+* Wraps around `github.com/coder/websocket`
+* Works through HTTP proxies
+* Useful for bypassing certain firewalls
+
+### UDP
+* Basic UDP implementation
+* Lowest overhead
+* Suitable for high-performance requirements on trusted networks
+
+### Configuration File
+
+Example `config.toml`:
+
+```toml
+# Server configuration
+mode = "server"
+transport = "quic"
+tunnel_address = "10.0.0.1/24"
+mtu = 1500  # Adjust based on your network
+cert_file = "/path/to/cert.pem"
+key_file = "/path/to/key.pem"
+stream_count = 5
+log_level = "info"
+insecure = false  # Set to true to skip certificate verification
+
+[target]
+address = "0.0.0.0"
+port = 8080
+
+[wred]
+weight_factor = 5.0
+drop_probability = 0.25
+threshold = 0.1
+```
+
+Run with config file:
+```bash
+pig -config config.toml
+```
+
+## Configuration Options
+
+### Network Settings
+* `-mtu`: MTU size (default: 1300, adjust based on your network)
+* `-streams`: Number of multiplexed streams for supported protocols (default: 5)
+* `-retry`: Reconnection interval in seconds (default: 5)
+* `-bind-adapter`: Specific network adapter to bind to
+* `-I`: Network interface to use (e.g., wlan0, en0)
+
+### WRED Configuration
+* `-factor`: Weight factor for WRED (default: 5)
+* `-drop`: Drop probability (default: 0.25)
+* `-thresh`: Queue length threshold (default: 0.1)
+
+### Logging
+* `-v`: Verbosity level for logging (0-2, where 2 is most verbose)
+
+### Security
+* `-cert`: Path to certificate file (recommended for production)
+* `-key`: Path to private key file
+* `-k`: Disable certificate verification (insecure mode)
+
+#### Certificate Handling
+* If certificate files are not provided, pig automatically generates self-signed certificates
+* For testing, use the `-k` flag to skip certificate verification
+* For production use, it's strongly recommended to use your own certificates
+
+## Platform Support
+
+### Linux
+* Fully tested on both 32-bit and 64-bit architectures
+* Requires root privileges for TUN device creation
+* Supports all transport protocols
+* For server deployment, add the following to `/etc/rc.local`:
+```bash
+sysctl -w net.ipv4.ip_forward=1
+nft add table ip nat && sudo nft add chain ip nat postrouting { type nat hook postrouting priority 100 \; } && sudo nft add rule ip nat postrouting oifname "wlan0" masquerade
+```
+* This configuration enables IP forwarding and sets up NAT, which is essential for server operation
+
+### macOS (Darwin)
+* Fully tested on both 32-bit and 64-bit architectures
+* Requires root privileges for utun device creation
+* Supports all transport protocols
+
+### Windows
+* Not tested
+* Basic implementation available
+* Uses WinTun for TUN device creation
+* Further testing needed
+* Requires administrative privileges
+
+## Security Considerations
+
+### Certificate Management
+* Generate production certificates:
+```bash
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+```
+* Never use `-k` flag in production
+* Rotate certificates regularly
+
+### Protocol Selection
+* QUIC: Best balance of security and performance
+* TLS: Strong security, suitable for sensitive data
+* UDP: Use only in trusted networks
+* ICMP/TLS-IN-ICMP: May be blocked by some firewalls
+* WebSocket: Good for restrictive networks, works with proxies
+
+## Troubleshooting
+
+### Common Issues
+
+* **Permission Denied**: Make sure you're running with sufficient privileges (root/sudo) when creating tunnel interfaces
+* **Certificate Errors**: Use `-k` flag for testing, but ensure proper certificates for production
+* **Connection Refused**: Verify firewall rules allow the chosen protocol and port
+* **MTU Issues**: If experiencing packet fragmentation, try adjusting the MTU with `-mtu` flag
+
+### Debug Logging
+
+Enable verbose logging with `-v` flag:
+```bash
+pig -v 2 ...  # Increased verbosity for debugging
+```
+
+### Command Line Examples
+
+The `-proto` flag is used to specify the transport protocol for the tunnel. Valid values are: `quic`, `udp`, `tls`, `ws`, `icmp`, and `tls-in-icmp`.
+
+#### Server mode:
+```bash
+# Start a server using QUIC
+pig -s -l :8080 -tunnel 10.0.0.1/24 -proto quic -cert server.crt -key server.key
+
+# Start a server using UDP
+pig -s -l :8080 -tunnel 10.0.0.1/24 -proto udp -cert server.crt -key server.key
+
+# Start a server using ICMP (recommended on Linux)
+pig -proto icmp -I wlan0 -tunnel 10.0.0.1/28 -drop 0.50 -thresh 0.05 -k -v 2
+```
+
+#### Client mode:
+```bash
+# Connect to a server using QUIC
+pig -c example.com:8080 -tunnel 10.0.0.2/24 -proto quic -cert client.crt -key client.key
+
+# Connect to a server using UDP
+pig -c example.com:8080 -tunnel 10.0.0.2/24 -proto udp -cert client.crt -key client.key
+
+# Connect to a server using ICMP
+pig -proto icmp -c 192.168.2.100 -I en0 -drop 0.50 -thresh 0.01 -k -v 2
+```
+
+## Contributing
+
+Contributions are welcome! Some areas that need attention:
+* Windows platform testing
+* QUIC transport implementation using quic-go
+* Additional transport protocols
+* Performance optimizations
+
+## License
+
+[Insert License Information]

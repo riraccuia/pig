@@ -1,0 +1,107 @@
+package server
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"sync"
+
+	"github.com/riraccuia/pig/pkg/common"
+	"github.com/riraccuia/pig/pkg/config"
+	"github.com/riraccuia/pig/pkg/interfaces"
+	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/transport"
+)
+
+type Server struct {
+	logger     interfaces.Logger
+	config     *config.Config
+	adapter    interfaces.TunnelAdapter
+	listener   transport.Listener
+	clients    *sync.Map //*ash.Map
+	ipPool     *IPPool
+	bufferPool *sync.Pool
+	inbound    common.PacketQueue
+	outbound   common.PacketQueue
+	done       chan struct{}
+}
+
+func New(logger interfaces.Logger, cfg *config.Config) (*Server, error) {
+	adapter, err := common.NewAdapter(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return NewWithAdapter(logger, cfg, adapter)
+}
+
+func NewWithAdapter(logger interfaces.Logger, cfg *config.Config, adapter interfaces.TunnelAdapter) (*Server, error) {
+	logger.Infof("Creating server with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), cfg.MTU)
+	_, network, err := net.ParseCIDR(cfg.TunnelAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Server{
+		logger:   logger,
+		config:   cfg,
+		adapter:  adapter,
+		clients:  &sync.Map{}, //new(ash.Map).From(ash.NewSkipList(32)),
+		ipPool:   newIPPool(network),
+		inbound:  make(common.PacketQueue, common.QueueSize),
+		outbound: make(common.PacketQueue, common.QueueSize),
+		bufferPool: &sync.Pool{
+			New: func() interface{} {
+				return make(packet.IPv4Packet, cfg.MTU, cfg.MTU)
+			},
+		},
+	}, nil
+}
+
+func (s *Server) Start(ctx context.Context, listenFunc func() (transport.Listener, error)) error {
+	s.logger.Info("Starting server")
+
+	listener, err := listenFunc()
+	if err != nil {
+		return fmt.Errorf("failed to create listener: %w", err)
+	}
+	s.listener = listener
+	s.done = make(chan struct{})
+
+	s.logger.Infof("Listening on %s:%d", s.config.Target.Address, s.config.Target.Port)
+
+	go s.acceptClients(ctx)
+	go s.processInboundQueue(ctx)
+	go s.processOutboundQueue(ctx)
+	go s.readFromAdapter()
+
+	return nil
+}
+
+// GetAdapter returns the adapter
+func (s *Server) GetAdapter() interfaces.TunnelAdapter {
+	return s.adapter
+}
+
+func (s *Server) Close() error {
+	if s.done != nil {
+		close(s.done)
+	}
+
+	// Close all client connections
+	s.clients.Range(func(key any, value any) bool {
+		if client, ok := value.(*ClientTunnel); ok {
+			client.streams.CloseAll()
+			client.conn.Close()
+			s.ipPool.Release(client.sourceIP)
+		}
+		return true
+	})
+
+	// Clear the clients map
+	s.clients.Clear()
+
+	if s.listener != nil {
+		return s.listener.Close()
+	}
+	return nil
+}
