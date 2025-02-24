@@ -5,10 +5,10 @@ pig is my playground for network protocol experimentation and a Swiss Army knife
 ## Features
 
 * Multiple transport protocol support (QUIC, UDP, TLS, WebSocket, ICMP, TLS-in-ICMP)
-* Cross-platform support (Linux, macOS, Windows*)
+* Cross-platform (Linux, macOS, Windows*)
 * Automatic self-signed certificate generation
-* Advanced congestion control with WRED (Weighted Random Early Detection)
-* Stream multiplexing (for supported protocols)
+* Congestion control with WRED (Weighted Random Early Detection)
+* Stream multiplexing (for streamed protocols)
 * Configurable via command line flags or TOML configuration file
 
 _*Windows support is implemented but not at all tested at this time_
@@ -16,8 +16,6 @@ _*Windows support is implemented but not at all tested at this time_
 ## Design Principles
 
 pig's architecture is built around a robust and flexible transport layer design that enables experimentation and reliable network protocol implementation:
-
-### Transport Architecture
 
 #### Unified Interface Design
 All transport protocols implement a common interface that provides consistent behavior across different protocols:
@@ -35,7 +33,7 @@ All transport protocols implement a common interface that provides consistent be
 #### Layered Protocol Stack
 * Clean separation between transport protocols
 * Support for protocol encapsulation (e.g., TLS-in-ICMP)
-* Composable transport layers (e.g., TLS over ICMP)
+* Composable transport layers (e.g., TLS in ICMP)
 * Pluggable design for easy addition of new protocols
 
 #### Stream Abstraction
@@ -47,8 +45,6 @@ All transport protocols implement a common interface that provides consistent be
 * NewReno-style congestion control implementation
 * Window management and packet tracking
 * Fast retransmit and recovery mechanisms
-* Out-of-order packet handling with intelligent resequencing
-* Adaptive congestion window sizing based on network conditions
 
 ## Quick Start
 
@@ -56,7 +52,7 @@ For quick testing with automatically generated certificates:
 
 ```bash
 # Terminal 1 - Server
-sudo pig -proto ws -s -l :8080 -tunnel 10.0.0.1/24 -k
+sudo pig -proto ws -l :8080 -tunnel 10.0.0.1/24 -k
 
 # Terminal 2 - Client
 sudo pig -proto ws -c localhost:8080 -k
@@ -67,13 +63,12 @@ ping 10.0.0.1
 
 ## Congestion Control
 
-pig implements WRED (Weighted Random Early Detection) to combat network bufferbloat. WRED helps maintain low latency by:
+pig implements WRED (Weighted Random Early Detection) to combat network bufferbloat. 
+WRED helps maintain low latency by:
 
 * Proactively dropping packets before queues are full
 * Using weighted averaging to smooth out traffic bursts
 * Preventing global TCP synchronization
-
-Configuration options:
 
 ## Transport Protocols
 
@@ -82,34 +77,28 @@ Configuration options:
 * Provides native stream multiplexing
 * Handles connection migration
 * Future plans include migration to quic-go for enhanced features
-* Recommended for most use cases
 
 ### TLS-in-ICMP
 * Encapsulates TLS traffic within ICMP packets
 * Provides additional layer of obfuscation
 * Currently recommended for Linux servers only due to OS-level ICMP handling on other platforms
-* Requires specific OS configuration for optimal performance
+* Requires OS configuration to prevent interference with ICMP handling (except on Linux)
 
 ### ICMP
 * Full-featured implementation with packet loss recovery
-* Useful in restricted networks where other protocols are blocked
-* Uses `golang.org/x/net/icmp`
-* Currently recommended for Linux servers only
-* Requires OS configuration to prevent interference with ICMP handling
+* Uses raw sockets and `golang.org/x/net/icmp`
+* Currently recommended for Linux servers only due to OS-level ICMP handling on other platforms
+* Requires OS configuration to prevent interference with ICMP handling (except on Linux)
 
 ### TLS
 * Direct TLS connection using `crypto/tls`
-* Provides strong encryption
 
 ### WebSocket
 * Wraps around `github.com/coder/websocket`
-* Works through HTTP proxies
-* Useful for bypassing certain firewalls
 
 ### UDP
 * Basic UDP implementation
 * Lowest overhead
-* Suitable for high-performance requirements on trusted networks
 
 ### Configuration File
 
@@ -125,7 +114,7 @@ cert_file = "/path/to/cert.pem"
 key_file = "/path/to/key.pem"
 stream_count = 5
 log_level = "info"
-insecure = false  # Set to true to skip certificate verification
+insecure = true  # Set to true to skip certificate verification
 
 [target]
 address = "0.0.0.0"
@@ -148,7 +137,6 @@ pig -config config.toml
 * `-mtu`: MTU size (default: 1300, adjust based on your network)
 * `-streams`: Number of multiplexed streams for supported protocols (default: 5)
 * `-retry`: Reconnection interval in seconds (default: 5)
-* `-bind-adapter`: Specific network adapter to bind to
 * `-I`: Network interface to use (e.g., wlan0, en0)
 
 ### WRED Configuration
@@ -166,8 +154,7 @@ pig -config config.toml
 
 #### Certificate Handling
 * If certificate files are not provided, pig automatically generates self-signed certificates
-* For testing, use the `-k` flag to skip certificate verification
-* For production use, it's strongly recommended to use your own certificates
+* Use the `-k` flag to skip certificate verification
 
 ## Platform Support
 
@@ -183,33 +170,21 @@ nft add table ip nat && sudo nft add chain ip nat postrouting { type nat hook po
 * This configuration enables IP forwarding and sets up NAT, which is essential for server operation
 
 ### macOS (Darwin)
-* Fully tested on both 32-bit and 64-bit architectures
+* Fully tested on Apple Silicon 
 * Requires root privileges for utun device creation
 * Supports all transport protocols
 
 ### Windows
 * Not tested
-* Basic implementation available
 * Uses WinTun for TUN device creation
 * Further testing needed
 * Requires administrative privileges
-
-## Security Considerations
 
 ### Certificate Management
 * Generate production certificates:
 ```bash
 openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
 ```
-* Never use `-k` flag in production
-* Rotate certificates regularly
-
-### Protocol Selection
-* QUIC: Best balance of security and performance
-* TLS: Strong security, suitable for sensitive data
-* UDP: Use only in trusted networks
-* ICMP/TLS-IN-ICMP: May be blocked by some firewalls
-* WebSocket: Good for restrictive networks, works with proxies
 
 ## Troubleshooting
 
