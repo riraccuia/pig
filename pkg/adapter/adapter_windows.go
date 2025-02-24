@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/riraccuia/pig/pkg/interfaces"
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wintun"
 )
@@ -16,8 +17,8 @@ type WinTunAdapter struct {
 	ip      net.IP
 }
 
-func NewAdapter(config AdapterConfig) (TunnelAdapter, error) {
-	wintun.SetLogger(nil)
+func NewAdapter(config AdapterConfig) (interfaces.TunnelAdapter, error) {
+	//wintun.SetLogger(nil)
 
 	adapter, err := wintun.CreateAdapter(tunName, "pig", &windows.GUID{
 		Data1: 0x0000000,
@@ -44,11 +45,11 @@ func NewAdapter(config AdapterConfig) (TunnelAdapter, error) {
 
 	w := &WinTunAdapter{
 		adapter: adapter,
-		session: session,
+		session: &session,
 		ip:      ip,
 	}
 
-	if err := configureWinTun(adapter.Name(), config); err != nil {
+	if err := configureWinTun(tunName, config); err != nil {
 		w.Close()
 		return nil, fmt.Errorf("failed to configure adapter: %v", err)
 	}
@@ -67,7 +68,10 @@ func (w *WinTunAdapter) Read(b []byte) (int, error) {
 }
 
 func (w *WinTunAdapter) Write(b []byte) (int, error) {
-	packet := w.session.AllocateSendPacket(len(b))
+	packet, err := w.session.AllocateSendPacket(len(b))
+	if err != nil {
+		return 0, err
+	}
 	copy(packet, b)
 	w.session.SendPacket(packet)
 	return len(b), nil
@@ -80,4 +84,8 @@ func (w *WinTunAdapter) Close() error {
 
 func (w *WinTunAdapter) IP() net.IP {
 	return w.ip
+}
+
+func (w *WinTunAdapter) Name() string {
+	return tunName
 }
