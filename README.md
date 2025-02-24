@@ -209,24 +209,24 @@ The `-proto` flag is used to specify the transport protocol for the tunnel. Vali
 #### Server mode:
 ```bash
 # Start a server using QUIC
-pig -s -l :8080 -tunnel 10.0.0.1/24 -proto quic -cert server.crt -key server.key
+pig -s -l :8080 -tunnel 10.0.0.1/24 -proto quic
 
 # Start a server using UDP
-pig -s -l :8080 -tunnel 10.0.0.1/24 -proto udp -cert server.crt -key server.key
+pig -s -l :8080 -tunnel 10.0.0.1/24 -proto ws
 
-# Start a server using ICMP (recommended on Linux)
+# Start a server using ICMP with tail drop settings
 pig -proto icmp -I wlan0 -tunnel 10.0.0.1/28 -drop 0.50 -thresh 0.05 -k -v 2
 ```
 
 #### Client mode:
 ```bash
 # Connect to a server using QUIC
-pig -c example.com:8080 -tunnel 10.0.0.2/24 -proto quic -cert client.crt -key client.key
+pig -c example.com:8080 -tunnel 10.1.0.2/24 -proto quic
 
 # Connect to a server using UDP
-pig -c example.com:8080 -tunnel 10.0.0.2/24 -proto udp -cert client.crt -key client.key
+pig -c example.com:8080 -tunnel 10.1.0.2/24 -proto ws
 
-# Connect to a server using ICMP
+# Connect to a server using ICMP with tail drop settings
 pig -proto icmp -c 192.168.2.100 -I en0 -drop 0.50 -thresh 0.01 -k -v 2
 ```
 
@@ -234,10 +234,10 @@ pig -proto icmp -c 192.168.2.100 -I en0 -drop 0.50 -thresh 0.01 -k -v 2
 
 Contributions are welcome! Some areas that need attention:
 * Windows platform testing
-* QUIC transport implementation using quic-go
+* icmp testing on public networks
 * Additional transport protocols
 * Performance optimizations
 
 ## License
 
-[Insert License Information]
+[MIT License](LICENSE)
