@@ -5,15 +5,21 @@ package adapter
 
 import (
 	"fmt"
+	"net"
 	"os/exec"
 )
 
 func configureWinTun(ifaceName string, config AdapterConfig) error {
+	ip, network, err := net.ParseCIDR(config.Address)
+	if err != nil {
+		return fmt.Errorf("failed to parse IP: %v", err)
+	}
 	// Set IP address
 	cmd := exec.Command("netsh", "interface", "ip", "set", "address",
 		fmt.Sprintf("name=\"%s\"", ifaceName),
 		"static",
-		config.Address)
+		ip.String(),
+		network.Mask.String())
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to set IP: %v", err)
 	}
