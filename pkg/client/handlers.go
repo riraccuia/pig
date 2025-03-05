@@ -57,6 +57,7 @@ func (c *Client) processInbound(connOrStream io.ReadWriteCloser) {
 			totalLen := pkt.TotalLength()
 
 			if totalLen < 20 || totalLen > c.config.MTU {
+				c.logger.Debugf("received packet inbound with invalid length: %d", totalLen)
 				processed++
 				continue
 			}

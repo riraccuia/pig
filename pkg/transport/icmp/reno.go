@@ -24,14 +24,8 @@ func (c *connection) initNewReno() {
 	// Initial RTT estimate
 	c.rtt.Store(int64(500 * time.Millisecond))
 
-	c.rq = NewRetransmitQueue(c.clearMemory)
-	c.ooq = NewRetransmitQueue(c.clearMemory)
-}
-
-func (c *connection) clearMemory(m *rawSockBuffer) {
-	m.po = 0
-	m.len = 0
-	c.listener.bufPool.Put(m)
+	c.rq = NewRetransmitQueue(c.listener.clearMemory)
+	c.ooq = NewRetransmitQueue(c.listener.clearMemory)
 }
 
 func min(a, b uint32) uint32 {

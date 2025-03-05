@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/quic-go/quic-go"
 	"github.com/riraccuia/pig/pkg/config"
@@ -85,6 +86,18 @@ func (c *QuicConn) LocalAddr() net.Addr {
 
 func (c *QuicConn) RemoteAddr() net.Addr {
 	return c.conn.RemoteAddr()
+}
+
+func (c *QuicConn) SetDeadline(t time.Time) error {
+	return nil
+}
+
+func (c *QuicConn) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+func (c *QuicConn) SetWriteDeadline(t time.Time) error {
+	return nil
 }
 
 type QuicTransport struct {

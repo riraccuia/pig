@@ -15,7 +15,7 @@ import (
 
 // WSConn wraps a websocket connection to implement the transport.Conn interface
 type WSConn struct {
-	conn net.Conn
+	net.Conn
 }
 
 // WSTransport implements transport.Listener and transport.Dialer for WebSocket connections
@@ -35,20 +35,8 @@ func (t *WSConn) IsStreamed() bool {
 	return false
 }
 
-func (t *WSConn) Read(b []byte) (n int, err error) {
-	return t.conn.Read(b)
-}
-
-func (t *WSConn) Write(b []byte) (n int, err error) {
-	return t.conn.Write(b)
-}
-
 func (t *WSConn) Flush() {
 	// WebSocket messages are sent immediately, no need for explicit flushing
-}
-
-func (t *WSConn) Close() error {
-	return t.conn.Close()
 }
 
 func (t *WSConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
@@ -57,14 +45,6 @@ func (t *WSConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
 
 func (t *WSConn) NewStream(ctx context.Context) (transport.Stream, error) {
 	return t, transport.ErrNotImplemented
-}
-
-func (t *WSConn) LocalAddr() net.Addr {
-	return t.conn.LocalAddr()
-}
-
-func (t *WSConn) RemoteAddr() net.Addr {
-	return t.conn.RemoteAddr()
 }
 
 func (t *WSTransport) Accept(ctx context.Context) (transport.Conn, error) {
@@ -100,7 +80,7 @@ func (t *WSTransport) Dial(ctx context.Context, network string, address string, 
 	}
 
 	netConn := websocket.NetConn(context.Background(), wsConn, websocket.MessageBinary)
-	return &WSConn{conn: netConn}, nil
+	return &WSConn{Conn: netConn}, nil
 }
 
 func (t *WSTransport) Close() error {
@@ -117,7 +97,7 @@ func (t *WSTransport) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	netConn := websocket.NetConn(context.Background(), wsConn, websocket.MessageBinary)
-	conn := &WSConn{conn: netConn}
+	conn := &WSConn{Conn: netConn}
 
 	select {
 	case t.connChan <- conn:

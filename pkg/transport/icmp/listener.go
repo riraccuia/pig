@@ -41,8 +41,14 @@ type clientKey struct {
 	icmpID int
 }
 
+func (l *sharedListener) clearMemory(m *rawSockBuffer) {
+	m.po = 0
+	m.len = 0
+	l.bufPool.Put(m)
+}
+
 // newSharedListener creates a new shared ICMP socket listener
-func newSharedListener(ctx context.Context, bindAddr *net.IPAddr, iface *net.Interface) (*sharedListener, error) {
+func newSharedListener(ctx context.Context, bindAddr *net.IPAddr, iface *net.Interface, isServer bool) (*sharedListener, error) {
 	conn, err := net.ListenIP("ip4:icmp", bindAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ICMP socket: %w", err)
@@ -59,6 +65,7 @@ func newSharedListener(ctx context.Context, bindAddr *net.IPAddr, iface *net.Int
 
 	listenerCtx, cancel := context.WithCancel(ctx)
 	l := &sharedListener{
+		isServer:   isServer,
 		ip4Conn:    ip4Conn,
 		conn:       conn,
 		localAddr:  conn.LocalAddr(),
@@ -122,7 +129,7 @@ func (l *sharedListener) readPackets() {
 			n, _, _, ipSrc, err := l.conn.ReadMsgIP(buffer.b, nil)
 			if err != nil {
 				transport.Logger.Errorf("Error reading ICMP packet: %v", err)
-				l.bufPool.Put(buffer)
+				l.clearMemory(buffer)
 				continue
 			}
 
@@ -142,6 +149,7 @@ func (l *sharedListener) readPackets() {
 				buffer: buffer,
 			}:
 			default:
+				l.clearMemory(buffer)
 				transport.Logger.Errorf("packet channel full, dropping packet, icmp type: %d, icmp id: %d, icmp seq: %d", ipv4.ICMPType(payload[0]), binary.BigEndian.Uint16(payload[4:6]), binary.BigEndian.Uint16(payload[6:8]))
 			}
 
@@ -190,10 +198,12 @@ func (l *sharedListener) dispatchPackets() {
 
 			if l.isServer && icmpType != ipv4.ICMPTypeEcho {
 				transport.Logger.Errorf("received non-echo request, icmp type: %d", icmpType)
+				l.clearMemory(packet.buffer)
 				continue
 			}
 			if !l.isServer && icmpType != ipv4.ICMPTypeEchoReply {
 				transport.Logger.Errorf("received non-echo reply, icmp type: %d", icmpType)
+				l.clearMemory(packet.buffer)
 				continue
 			}
 
@@ -206,6 +216,8 @@ func (l *sharedListener) dispatchPackets() {
 			conn = l.getClientConn(packet.dst, key)
 
 			if conn == nil {
+				transport.Logger.Errorf("failed to find packet connection, ip: %s, icmp id: %d", packet.dst.String(), icmpID)
+				l.clearMemory(packet.buffer)
 				continue
 			}
 
@@ -214,6 +226,7 @@ func (l *sharedListener) dispatchPackets() {
 			case conn.incoming <- packet.buffer:
 				// transport.Logger.Infof("forwarded packet to connection, ip: %s, icmp id: %d, icmp seq: %d", packet.header.Src.String(), icmpID, binary.BigEndian.Uint16(packet.payload[6:8]))
 			default:
+				l.clearMemory(packet.buffer)
 				transport.Logger.Errorf("Connection buffer full, dropping packet")
 			}
 		}
@@ -226,7 +239,7 @@ func (l *sharedListener) getClientConn(ip net.IP, key clientKey) *connection {
 		return _conn.(*connection)
 	}
 
-	transport.Logger.Infof("tracking new client connection, ip: %s, icmp id: %d", key.ip, key.icmpID)
+	transport.Logger.Infof("New client connection, ip: %s, icmp id: %d", key.ip, key.icmpID)
 
 	conn := newConnection(
 		l.ctx,

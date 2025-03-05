@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"time"
 
 	"github.com/riraccuia/pig/pkg/log"
 )
@@ -36,4 +37,7 @@ type Conn interface {
 	NewStream(ctx context.Context) (Stream, error)
 	LocalAddr() net.Addr
 	RemoteAddr() net.Addr
+	SetDeadline(t time.Time) error
+	SetReadDeadline(t time.Time) error
+	SetWriteDeadline(t time.Time) error
 }
