@@ -64,6 +64,7 @@ func (s *Server) handleOutboundConn(ctx context.Context, client *ClientTunnel) {
 			n, err := client.conn.Write(batch)
 			batch = batch[n:]
 			if err != nil && err != io.ErrShortWrite {
+				s.logger.Errorf("failed to write outbound data to connection: %v", err)
 				return err
 			}
 		}
@@ -93,6 +94,7 @@ func (s *Server) handleOutboundConn(ctx context.Context, client *ClientTunnel) {
 			ipPkt := packet.IPv4Packet(pkt)
 			totalLen := ipPkt.TotalLength()
 			if totalLen <= 0 || totalLen > len(pkt) {
+				s.logger.Debugf("outbound packet with invalid length: %d", totalLen)
 				s.bufferPool.Put(pkt)
 				continue
 			}

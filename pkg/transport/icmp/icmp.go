@@ -58,12 +58,11 @@ func GetClientDialFunc(ctx context.Context, config *config.Config) func() (trans
 				}
 			}
 
-			sharedListener, err = newSharedListener(ctx, bindAddr, iface)
+			sharedListener, err = newSharedListener(ctx, bindAddr, iface, false)
 			if err != nil {
 				initErr = fmt.Errorf("failed to create shared listener: %w", err)
 				return
 			}
-			sharedListener.isServer = false
 		})
 
 		if initErr != nil {
@@ -111,12 +110,10 @@ func GetServerListenFunc(ctx context.Context, config *config.Config) func() (tra
 			return nil, fmt.Errorf("failed to initialize system: %w", err)
 		}
 
-		sharedListener, err := newSharedListener(ctx, bindAddr, iface)
+		sharedListener, err := newSharedListener(ctx, bindAddr, iface, true)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create shared listener: %w", err)
 		}
-
-		sharedListener.isServer = true
 
 		return sharedListener, nil
 	}
@@ -131,7 +128,7 @@ func (c *connection) processICMPPacket(dataBuf *rawSockBuffer) error {
 	echoID := int(binary.BigEndian.Uint16(payload[4:6]))
 	seq := uint32(binary.BigEndian.Uint16(payload[6:8]))
 	// strip the icmp header
-	data := payload[8:]
+	data := payload[icmpHeaderSize:]
 
 	if icmpType != c.wantType {
 		transport.Logger.Errorf("received unexpected icmp packet, icmp type: %d, icmp id: %d, icmp seq: %d", icmpType, binary.BigEndian.Uint16(payload[4:6]), binary.BigEndian.Uint16(payload[6:8]))
@@ -149,14 +146,14 @@ func (c *connection) processICMPPacket(dataBuf *rawSockBuffer) error {
 
 	// transport.Logger.Infof("Received ICMP packet, seq: %d, len: %d", echo.Seq, len(echo.Data))
 
-	if len(data) < 8 {
+	if len(data) < eHeaderSize {
 		return nil // Ignore packets without seq/ack
 	}
 
 	// Extract sequence and sequence and acknowledgment from payload
-	peerSeq, peerAck := getSeqAck(data[:8])
+	peerSeq, peerAck := getSeqAck(data[:eHeaderSize])
 	// strip our header
-	data = data[8:]
+	data = data[eHeaderSize:]
 
 	// transport.Logger.Infof("Received data packet, seq: %d, ack: %d, len: %d", peerSeq, peerAck, len(echo.Data))
 
@@ -213,7 +210,7 @@ func (c *connection) processICMPPacket(dataBuf *rawSockBuffer) error {
 	}
 
 	// Process data
-	if _, err := c.readBuf.Write(data); err != nil {
+	if n, err := c.readBuf.Write(data); err != nil || n != len(data) {
 		transport.Logger.Errorf("error writing to read buffer: %v", err)
 		return nil
 	}
@@ -224,6 +221,8 @@ func (c *connection) processICMPPacket(dataBuf *rawSockBuffer) error {
 	c.peerSeq = peerSeq + uint32(len(data))
 	// update our ack number
 	c.ack.Store(c.peerSeq)
+
+	c.listener.clearMemory(dataBuf)
 
 	if c.recovery {
 		c.recoverFromLoss(c.peerSeq)
@@ -284,7 +283,6 @@ func (c *connection) serializeAck(ack uint32) error {
 		return fmt.Errorf("error sending duplicate ack: %w", err)
 	}
 
-	// c.sentAck.Store(ack)
 	return nil
 }
 
@@ -307,34 +305,35 @@ func (c *connection) serializeData() error {
 	rawBuf.len = icmpHeaderSize
 	buf := rawBuf.b[icmpHeaderSize:]
 	// Read data from buffer, limited by EMSS
-	n, _ := c.writeBuf.Read(buf[eHeaderSize : eHeaderSize+c.emss])
-	if n == 0 {
-		return nil
+	n, err := c.writeBuf.Read(buf[eHeaderSize : eHeaderSize+c.emss])
+	if err != nil {
+		c.listener.clearMemory(rawBuf)
+		return fmt.Errorf("error reading data for sending: %w", err)
 	}
 
-	rawBuf.len += 8 + n
+	rawBuf.len += eHeaderSize + n
 
 	seq, ack := c.seq.Load(), c.ack.Load()
 
 	// update the sent ack number
 	c.sentAck.CompareAndSwap(c.sentAck.Load(), ack)
-	// c.sentAck.Store(ack)
 
 	// Prepare sequence and acknowledgment
 	binary.BigEndian.PutUint32(buf[0:4], seq)
 	binary.BigEndian.PutUint32(buf[4:8], ack)
-
-	// Store in retransmit queue before sending
-	// transport.Logger.Infof("Putting packet with seq %d, packets in queue: %d", seq, c.rq.Len())
-	c.rq.Put(rawBuf)
 
 	// Update sequence number and flight size
 	c.seq.Add(uint32(n))
 	c.flightSize.Add(uint32(n)) // Send data
 
 	if err := c.sendEchoMessage(buf[:eHeaderSize+n]); err != nil {
+		// Store in retransmit queue
+		c.rq.Put(rawBuf)
 		return fmt.Errorf("error sending data: %w", err)
 	}
+
+	// Store in retransmit queue
+	c.rq.Put(rawBuf)
 
 	c.rtoSeq.Store(&measurement{
 		sendTime: time.Now(),

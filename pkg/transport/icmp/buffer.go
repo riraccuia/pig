@@ -1,18 +1,18 @@
 package icmp
 
 import (
-	"io"
 	"sync"
 )
 
 // buffer provides a thread-safe fixed-size circular buffer
 type buffer struct {
 	mu       sync.Mutex
-	cond     *sync.Cond
+	rcond    *sync.Cond
+	wcond    *sync.Cond
 	data     []byte
 	size     int
-	readPos  int
-	writePos int
+	readPos  uint64
+	writePos uint64
 }
 
 // newBuffer creates a new buffer with the specified size
@@ -24,7 +24,8 @@ func newBuffer(size int) *buffer {
 		data: make([]byte, size),
 		size: size,
 	}
-	b.cond = sync.NewCond(&b.mu)
+	b.rcond = sync.NewCond(&b.mu)
+	b.wcond = sync.NewCond(&b.mu)
 	return b
 }
 
@@ -37,20 +38,23 @@ func (b *buffer) Write(data []byte) (n int, err error) {
 	b.mu.Lock()
 
 	// Calculate available space
-	used := b.writePos - b.readPos
-	if used >= b.size {
-		b.mu.Unlock()
-		return 0, io.ErrShortWrite
+	used := int(b.writePos - b.readPos)
+	available := b.size - used
+	for used >= b.size || available < len(data) {
+		b.wcond.Wait()
+		used = int(b.writePos - b.readPos)
+		available = b.size - used
 	}
 
-	available := b.size - used
+	isEmpty := b.writePos == b.readPos
+
 	writeLen := len(data)
 	if writeLen > available {
 		writeLen = available
 	}
 
 	// Calculate write position and handle wraparound
-	idx := b.writePos % b.size
+	idx := int(b.writePos % uint64(b.size))
 	remaining := b.size - idx // Space until end of buffer
 
 	if remaining >= writeLen {
@@ -62,11 +66,14 @@ func (b *buffer) Write(data []byte) (n int, err error) {
 		copy(b.data[0:writeLen-remaining], data[remaining:writeLen])
 	}
 
-	b.writePos += writeLen
-	b.cond.Signal()
-	b.mu.Unlock()
+	b.writePos += uint64(writeLen)
 
-	return writeLen, nil
+	if isEmpty {
+		b.rcond.Signal()
+	}
+
+	b.mu.Unlock()
+	return writeLen, err
 }
 
 // Read copies data from the buffer
@@ -79,17 +86,18 @@ func (b *buffer) Read(p []byte) (n int, err error) {
 
 	// Wait for data
 	for b.writePos == b.readPos {
-		b.cond.Wait()
+		b.rcond.Wait()
 	}
 
 	// Calculate available data
-	available := b.writePos - b.readPos
+	available := int(b.writePos - b.readPos)
+
 	if available > len(p) {
 		available = len(p)
 	}
 
 	// Calculate read position and handle wraparound
-	idx := b.readPos % b.size
+	idx := int(b.readPos % uint64(b.size))
 	remaining := b.size - idx // Space until end of buffer
 
 	if remaining >= available {
@@ -98,10 +106,12 @@ func (b *buffer) Read(p []byte) (n int, err error) {
 	} else {
 		// Wraparound case - split the copy
 		copy(p[:remaining], b.data[idx:])
-		copy(p[remaining:available], b.data[0:available-remaining])
+		copy(p[remaining:], b.data[0:available-remaining])
 	}
 
-	b.readPos += available
+	b.readPos += uint64(available)
+
+	b.wcond.Signal()
 	b.mu.Unlock()
 	return available, nil
 }
@@ -111,14 +121,15 @@ func (b *buffer) Reset() {
 	b.mu.Lock()
 	b.readPos = 0
 	b.writePos = 0
-	b.cond.Broadcast()
+	b.rcond.Broadcast()
+	b.wcond.Broadcast()
 	b.mu.Unlock()
 }
 
 // Len returns the number of bytes currently in the buffer
 func (b *buffer) Len() int {
 	b.mu.Lock()
-	n := b.writePos - b.readPos
+	n := int(b.writePos - b.readPos)
 	b.mu.Unlock()
 	return n
 }

@@ -11,7 +11,7 @@ import (
 )
 
 type TLSConn struct {
-	conn *tls.Conn
+	*tls.Conn
 }
 
 type TLSTransport struct {
@@ -23,31 +23,11 @@ func (t *TLSConn) IsStreamed() bool {
 }
 
 func NewTLSConn(conn *tls.Conn) *TLSConn {
-	return &TLSConn{conn: conn}
+	return &TLSConn{Conn: conn}
 }
 
 func NewTLSTransport(listener net.Listener) *TLSTransport {
 	return &TLSTransport{listener: listener}
-}
-
-func (t *TLSConn) Read(b []byte) (n int, err error) {
-	return t.conn.Read(b)
-}
-
-func (t *TLSConn) Write(b []byte) (n int, err error) {
-	return t.conn.Write(b)
-}
-
-func (t *TLSConn) LocalAddr() net.Addr {
-	return t.conn.LocalAddr()
-}
-
-func (t *TLSConn) RemoteAddr() net.Addr {
-	return t.conn.RemoteAddr()
-}
-
-func (t *TLSConn) Close() error {
-	return t.conn.Close()
 }
 
 func (t *TLSConn) AcceptStream(ctx context.Context) (transport.Stream, error) {

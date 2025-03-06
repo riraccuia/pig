@@ -29,16 +29,15 @@ func createTLSConfig(logger *log.Logger, cfg *config.Config) (*tls.Config, error
 			return nil, fmt.Errorf("failed to load TLS certificate: %w", err)
 		}
 		tlsCfg.Certificates = []tls.Certificate{cert}
+		return tlsCfg, nil
 	}
 
-	if cfg.CertFile == "" {
-		logger.Info("Generating self-signed TLS certificate")
-		cert, err := certificate.GenerateCertificate()
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate TLS certificate: %w", err)
-		}
-		tlsCfg.Certificates = []tls.Certificate{*cert}
+	logger.Info("Generating self-signed TLS certificate")
+	cert, err := certificate.GenerateCertificate()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate TLS certificate: %w", err)
 	}
+	tlsCfg.Certificates = []tls.Certificate{*cert}
 
 	return tlsCfg, nil
 }

@@ -140,6 +140,18 @@ func (c *connection) Write(b []byte) (n int, err error) {
 	}
 }
 
+func (c *connection) SetDeadline(t time.Time) error {
+	return nil
+}
+
+func (c *connection) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+func (c *connection) SetWriteDeadline(t time.Time) error {
+	return nil
+}
+
 // readLoop handles incoming data from the connection's incoming channel
 func (c *connection) readLoop() {
 	for {

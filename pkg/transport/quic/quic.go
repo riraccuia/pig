@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/transport"
@@ -20,7 +21,7 @@ type QuicTransport struct {
 	endpoint *quic.Endpoint
 }
 
-func (t *QuicConn) IsStreamed() bool {
+func (c *QuicConn) IsStreamed() bool {
 	return true
 }
 
@@ -32,40 +33,52 @@ func NewQuicTransport(endpoint *quic.Endpoint) *QuicTransport {
 	return &QuicTransport{endpoint: endpoint}
 }
 
-func (t *QuicConn) Read(b []byte) (n int, err error) {
+func (c *QuicConn) Read(b []byte) (n int, err error) {
 	return 0, transport.ErrNotImplemented
 }
 
-func (t *QuicConn) Write(b []byte) (n int, err error) {
+func (c *QuicConn) Write(b []byte) (n int, err error) {
 	return 0, transport.ErrNotImplemented
 }
 
-func (t *QuicConn) LocalAddr() net.Addr {
-	addr := t.conn.LocalAddr()
+func (c *QuicConn) LocalAddr() net.Addr {
+	addr := c.conn.LocalAddr()
 	return &net.UDPAddr{
 		IP:   net.IPv4(addr.Addr().As4()[0], addr.Addr().As4()[1], addr.Addr().As4()[2], addr.Addr().As4()[3]),
 		Port: int(addr.Port()),
 	}
 }
 
-func (t *QuicConn) RemoteAddr() net.Addr {
-	addr := t.conn.RemoteAddr()
+func (c *QuicConn) RemoteAddr() net.Addr {
+	addr := c.conn.RemoteAddr()
 	return &net.UDPAddr{
 		IP:   net.IPv4(addr.Addr().As4()[0], addr.Addr().As4()[1], addr.Addr().As4()[2], addr.Addr().As4()[3]),
 		Port: int(addr.Port()),
 	}
 }
 
-func (t *QuicConn) Close() error {
-	return t.conn.Close()
+func (c *QuicConn) Close() error {
+	return c.conn.Close()
 }
 
-func (t *QuicConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
-	return t.conn.AcceptStream(ctx)
+func (c *QuicConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
+	return c.conn.AcceptStream(ctx)
 }
 
-func (t *QuicConn) NewStream(ctx context.Context) (transport.Stream, error) {
-	return t.conn.NewStream(ctx)
+func (c *QuicConn) NewStream(ctx context.Context) (transport.Stream, error) {
+	return c.conn.NewStream(ctx)
+}
+
+func (c *QuicConn) SetDeadline(t time.Time) error {
+	return nil
+}
+
+func (c *QuicConn) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+func (c *QuicConn) SetWriteDeadline(t time.Time) error {
+	return nil
 }
 
 func (t *QuicTransport) Accept(ctx context.Context) (transport.Conn, error) {

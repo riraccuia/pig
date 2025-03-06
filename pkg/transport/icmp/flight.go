@@ -41,22 +41,18 @@ func (fc *FlightCounter) Sub(num uint32) {
 	fc.Lock()
 	if num > fc.bc {
 		fc.bc = 0
+		fc.cond.Signal()
 		fc.Unlock()
-		fc.cond.Broadcast()
 		return
 	}
 	fc.bc -= num
+	fc.cond.Signal()
 	fc.Unlock()
-	fc.cond.Broadcast()
 }
 
 func (fc *FlightCounter) WaitCwnd() {
 	fc.Lock()
-	if fc.bc == 0 {
-		fc.Unlock()
-		return
-	}
-	for fc.bc >= fc.cwnd.Load() {
+	for fc.bc > 0 && fc.bc >= fc.cwnd.Load() {
 		fc.cond.Wait()
 	}
 	fc.Unlock()
