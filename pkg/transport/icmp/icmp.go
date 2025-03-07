@@ -79,7 +79,7 @@ func GetClientDialFunc(ctx context.Context, config *config.Config) func() (trans
 
 		// Register connection with listener
 		key := clientKey{
-			ip:     conn.remoteAddr.(*net.IPAddr).IP.String(),
+			ip:     conn.remoteAddr.IP.String(),
 			icmpID: conn.icmpID,
 		}
 		sharedListener.clients.Store(key, conn)
@@ -366,5 +366,5 @@ func (c *connection) sendEchoMessage(data []byte) error {
 
 	// transport.Logger.Infof("Sending echo, seq: %d, cwnd: %d", seq, c.cwnd.Load())
 
-	return c.listener.writePacket(c.remoteAddr.(*net.IPAddr).IP.To4(), msg)
+	return c.listener.writePacket(c.remoteAddr.IP.To4(), msg)
 }

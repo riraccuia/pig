@@ -19,7 +19,7 @@ type sharedListener struct {
 	isServer   bool
 	ip4Conn    *ipv4.RawConn
 	conn       *net.IPConn
-	localAddr  net.Addr
+	localAddr  *net.IPAddr
 	ctx        context.Context
 	cancel     context.CancelFunc
 	mss        int
@@ -68,7 +68,7 @@ func newSharedListener(ctx context.Context, bindAddr *net.IPAddr, iface *net.Int
 		isServer:   isServer,
 		ip4Conn:    ip4Conn,
 		conn:       conn,
-		localAddr:  conn.LocalAddr(),
+		localAddr:  conn.LocalAddr().(*net.IPAddr),
 		ctx:        listenerCtx,
 		cancel:     cancel,
 		mss:        iface.MTU - ipHeaderSize - icmpHeaderSize,

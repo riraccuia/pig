@@ -17,8 +17,8 @@ type connection struct {
 	wantType   ipv4.ICMPType
 	incoming   chan *rawSockBuffer
 	listener   *sharedListener
-	localAddr  net.Addr
-	remoteAddr net.Addr
+	localAddr  *net.IPAddr
+	remoteAddr *net.IPAddr
 	readBuf    *buffer
 	writeBuf   *buffer
 	ctx        context.Context
@@ -50,7 +50,7 @@ type connection struct {
 }
 
 // newConnection creates a new connection with shared read/write loops
-func newConnection(ctx context.Context, listener *sharedListener, remoteAddr net.Addr, icmpID int) *connection {
+func newConnection(ctx context.Context, listener *sharedListener, remoteAddr *net.IPAddr, icmpID int) *connection {
 	connCtx, cancel := context.WithCancel(ctx)
 
 	wantType := ipv4.ICMPTypeEchoReply
@@ -115,7 +115,7 @@ func (c *connection) Close() error {
 
 	// Remove from listener's client map
 	key := clientKey{
-		ip:     c.remoteAddr.(*net.IPAddr).IP.String(),
+		ip:     c.remoteAddr.IP.String(),
 		icmpID: c.icmpID,
 	}
 	c.listener.clients.Delete(key)
