@@ -12,12 +12,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// InAddr represents the Windows IN_ADDR structure.
-// It is used to store IPv4 addresses in network byte order (big-endian).
-type InAddr struct {
-	SAddr uint32 // IPv4 address in network byte order
-}
-
 // MibIpinterfaceRow represents the Windows MIB_IPINTERFACE_ROW structure.
 // It contains configuration parameters for an IP interface.
 // See: https://learn.microsoft.com/en-us/windows-hardware/drivers/network/mib-ipinterface-row
@@ -63,7 +57,7 @@ type MibIpinterfaceRow struct {
 // It contains information about a unicast IP address assigned to an interface
 // See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-mib_unicastipaddress_row
 type MibUnicastipaddressRow struct {
-	Address            windows.RawSockaddrInet4
+	Address            [28]byte // SOCKADDR_INET
 	InterfaceLuid      uint64
 	InterfaceIndex     uint32
 	PrefixOrigin       uint32
@@ -176,10 +170,11 @@ func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
 	// Set the interface index
 	row.InterfaceIndex = uint32(ifIndex)
 
+	addr := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address))
 	// Set the IP address family and value
-	row.Address.Family = windows.AF_INET
+	addr.Family = windows.AF_INET
 	// Convert IP to network byte order (big-endian)
-	copy(row.Address.Addr[:], ip)
+	copy(addr.Addr[:], ip)
 
 	// Set the subnet prefix length
 	row.OnLinkPrefixLength = prefixLength
@@ -248,7 +243,7 @@ func waitForIPAddressReady(ifIndex int, ip net.IP, timeout time.Duration) error 
 		if notificationType == windows.MibAddInstance &&
 			row.InterfaceIndex == uint32(ifIndex) {
 			// Get the IP address from the notification
-			addrBytes := row.Address.Addr[:]
+			addrBytes := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address)).Addr[:]
 
 			// Compare with our target IP
 			if net.IP(addrBytes).Equal(ip) {
