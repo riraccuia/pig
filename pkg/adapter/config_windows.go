@@ -18,16 +18,13 @@ type InAddr struct {
 	SAddr uint32 // IPv4 address in network byte order
 }
 
-// NET_IFINDEX is a Windows type representing a network interface index.
-type NET_IFINDEX uint32
-
 // MibIpinterfaceRow represents the Windows MIB_IPINTERFACE_ROW structure.
 // It contains configuration parameters for an IP interface.
 // See: https://learn.microsoft.com/en-us/windows-hardware/drivers/network/mib-ipinterface-row
 type MibIpinterfaceRow struct {
-	Family                               uint32
+	Family                               uint16
 	InterfaceLuid                        uint64
-	InterfaceIndex                       NET_IFINDEX
+	InterfaceIndex                       uint32
 	MaxReassemblySize                    uint32
 	InterfaceIdentifier                  uint64
 	MinRouterAdvertisementInterval       uint32
@@ -62,29 +59,13 @@ type MibIpinterfaceRow struct {
 	DisableDefaultRoutes                 uint8
 }
 
-// SOCKADDR_IN represents the Windows sockaddr_in structure for IPv4 addresses
-type SOCKADDR_IN struct {
-	Family uint16
-	Port   uint16
-	Addr   InAddr
-	Zero   [8]byte
-}
-
-// SOCKADDR_INET represents the Windows SOCKADDR_INET union structure
-// It can hold either IPv4 or IPv6 addresses
-type SOCKADDR_INET struct {
-	Ipv4 SOCKADDR_IN
-	// IPv6 fields omitted as we're only using IPv4 in this implementation
-	// Ipv6 SOCKADDR_IN6
-}
-
 // MibUnicastipaddressRow represents the Windows MIB_UNICASTIPADDRESS_ROW structure
 // It contains information about a unicast IP address assigned to an interface
 // See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-mib_unicastipaddress_row
 type MibUnicastipaddressRow struct {
-	Address            SOCKADDR_INET
+	Address            windows.RawSockaddrInet4
 	InterfaceLuid      uint64
-	InterfaceIndex     NET_IFINDEX
+	InterfaceIndex     uint32
 	PrefixOrigin       uint32
 	SuffixOrigin       uint32
 	ValidLifetime      uint32
@@ -93,7 +74,7 @@ type MibUnicastipaddressRow struct {
 	SkipAsSource       uint8
 	DadState           uint32
 	ScopeId            uint32
-	CreationTimeStamp  uint64
+	CreationTimeStamp  int64
 }
 
 var (
@@ -193,12 +174,12 @@ func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
 	procInitializeUnicastIpAddressEntry.Call(uintptr(unsafe.Pointer(row)))
 
 	// Set the interface index
-	row.InterfaceIndex = NET_IFINDEX(ifIndex)
+	row.InterfaceIndex = uint32(ifIndex)
 
 	// Set the IP address family and value
-	row.Address.Ipv4.Family = windows.AF_INET
+	row.Address.Family = windows.AF_INET
 	// Convert IP to network byte order (big-endian)
-	row.Address.Ipv4.Addr.SAddr = bytesToIPv4(ip)
+	copy(row.Address.Addr[:], ip)
 
 	// Set the subnet prefix length
 	row.OnLinkPrefixLength = prefixLength
@@ -232,7 +213,7 @@ func setMTU(ifIndex int, mtu int) error {
 	procInitializeIpInterfaceEntry.Call(uintptr(unsafe.Pointer(row)))
 
 	row.Family = windows.AF_INET
-	row.InterfaceIndex = NET_IFINDEX(ifIndex)
+	row.InterfaceIndex = uint32(ifIndex)
 	row.NlMtu = uint32(mtu)
 
 	ret, _, err := procSetIpInterfaceEntry.Call(uintptr(unsafe.Pointer(row)))
@@ -265,9 +246,9 @@ func waitForIPAddressReady(ifIndex int, ip net.IP, timeout time.Duration) error 
 	callback := windows.NewCallback(func(callerContext uintptr, row *MibUnicastipaddressRow, notificationType uint32) uintptr {
 		// Check if this is an address add notification for our interface
 		if notificationType == windows.MibAddInstance &&
-			row.InterfaceIndex == NET_IFINDEX(ifIndex) {
+			row.InterfaceIndex == uint32(ifIndex) {
 			// Get the IP address from the notification
-			addrBytes := ipv4ToBytes(row.Address.Ipv4.Addr.SAddr)
+			addrBytes := row.Address.Addr[:]
 
 			// Compare with our target IP
 			if net.IP(addrBytes).Equal(ip) {
