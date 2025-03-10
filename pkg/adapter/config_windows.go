@@ -82,6 +82,7 @@ var (
 	procCreateUnicastIpAddressEntry     = modiphlpapi.NewProc("CreateUnicastIpAddressEntry")
 	procNotifyUnicastIpAddressChange    = modiphlpapi.NewProc("NotifyUnicastIpAddressChange")
 	procCancelMibChangeNotify2          = modiphlpapi.NewProc("CancelMibChangeNotify2")
+	procConvertInterfaceLuidToIndex     = modiphlpapi.NewProc("ConvertInterfaceLuidToIndex")
 )
 
 // ipv4ToBytes converts a uint32 IP address in network byte order to a byte slice.
@@ -186,9 +187,9 @@ func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
 	}
 
 	// Wait for the IP address to be ready (with a 5-second timeout)
-	// if err := waitForIPAddressReady(ifIndex, ip, 5*time.Second); err != nil {
-	// return fmt.Errorf("setIPAddressUnicast: %v", err)
-	// }
+	if err := waitForIPAddressReady(ifIndex, ip, 5*time.Second); err != nil {
+		return fmt.Errorf("setIPAddressUnicast: %v", err)
+	}
 
 	return nil
 }
@@ -239,17 +240,27 @@ func waitForIPAddressReady(ifIndex int, ip net.IP, timeout time.Duration) error 
 
 	// Define the callback function using windows.NewCallback
 	callback := windows.NewCallback(func(callerContext uintptr, row *MibUnicastipaddressRow, notificationType uint32) uintptr {
+		if notificationType != windows.MibAddInstance {
+			return 0
+		}
+		var gotIndex uint32
+		ret, _, _ := procConvertInterfaceLuidToIndex.Call(
+			uintptr(unsafe.Pointer(&row.InterfaceLuid)),
+			uintptr(unsafe.Pointer(&gotIndex)),
+		)
+		if ret != windows.NO_ERROR {
+			return 0
+		}
 		// Check if this is an address add notification for our interface
-		if notificationType == windows.MibAddInstance &&
-			row.InterfaceIndex == uint32(ifIndex) {
-			// Get the IP address from the notification
-			addrBytes := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address)).Addr[:]
-
-			// Compare with our target IP
-			if net.IP(addrBytes).Equal(ip) {
-				// Signal that the address is ready
-				readyChan <- true
-			}
+		if gotIndex != uint32(ifIndex) {
+			return 0
+		}
+		// Get the IP address from the notification
+		addrBytes := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address)).Addr[:]
+		// Compare with our target IP
+		if net.IP(addrBytes).Equal(ip) {
+			// Signal that the address is ready
+			readyChan <- true
 		}
 		return 0
 	})
@@ -257,7 +268,7 @@ func waitForIPAddressReady(ifIndex int, ip net.IP, timeout time.Duration) error 
 	// Register for IP address change notifications
 	ret, _, err := procNotifyUnicastIpAddressChange.Call(
 		uintptr(windows.AF_INET), // Family (IPv4)
-		uintptr(callback),        // Callback function
+		callback,                 // Callback function
 		0,                        // CallerContext
 		uintptr(0),               // InitialNotification (FALSE)
 		uintptr(unsafe.Pointer(&notificationHandle)), // NotificationHandle
