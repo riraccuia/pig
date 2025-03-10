@@ -87,7 +87,7 @@ func (s *Server) handleOutboundConn(ctx context.Context, client *ClientTunnel) {
 				return
 			}
 			if client.outbound.IsDrop() {
-				s.logger.Infof("dropping packet for client %s, queue length: %d", client.conn.RemoteAddr(), len(client.outbound.C))
+				client.dropLogger.Incr(1, uint64(pkt.TotalLength()))
 				s.bufferPool.Put(pkt)
 				continue
 			}
@@ -133,7 +133,7 @@ func (s *Server) handleOutboundStream(ctx context.Context, client *ClientTunnel)
 				return
 			}
 			if client.outbound.IsDrop() {
-				s.logger.Infof("dropping packet for client %s, queue length: %d", client.conn.RemoteAddr(), len(client.outbound.C))
+				client.dropLogger.Incr(1, uint64(pkt.TotalLength()))
 				s.bufferPool.Put(pkt)
 				continue
 			}

@@ -3,11 +3,11 @@ package adapter
 import (
 	"net"
 
-	"github.com/riraccuia/pig/pkg/interfaces"
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/songgao/water"
 )
 
-func NewAdapter(config AdapterConfig) (interfaces.TunnelAdapter, error) {
+func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
 	// First get the interface name and configure it
 	ifName, utun, err := configureTUN(config)
 	if err != nil {

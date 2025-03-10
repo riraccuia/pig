@@ -99,6 +99,7 @@ func (c *Client) processOutboundStream() {
 	for {
 		pkt := <-c.outbound.C
 		if c.outbound.IsDrop() {
+			c.dropLogger.Incr(1, uint64(pkt.TotalLength()))
 			c.bufferPool.Put(pkt)
 			continue
 		}
@@ -160,7 +161,7 @@ func (c *Client) processOutboundConn() {
 				return
 			}
 			if c.outbound.IsDrop() {
-				c.logger.Infof("dropping packet, queue length: %d", len(c.outbound.C))
+				c.dropLogger.Incr(1, uint64(pkt.TotalLength()))
 				c.bufferPool.Put(pkt)
 				continue
 			}

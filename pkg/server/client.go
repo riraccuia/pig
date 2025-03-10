@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"net"
+	"sync/atomic"
+	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/queue"
@@ -12,13 +14,14 @@ import (
 )
 
 type ClientTunnel struct {
-	conn      transport.Conn
-	streams   *streams.StreamManager
-	sourceIP  net.IP
-	inbound   common.PacketQueue
-	outbound  *queue.ChanQueue
-	connError chan error
-	cancel    context.CancelFunc
+	conn       transport.Conn
+	streams    *streams.StreamManager
+	sourceIP   net.IP
+	inbound    common.PacketQueue
+	outbound   *queue.ChanQueue
+	dropLogger *common.DelayedCounterProcessor
+	connError  chan error
+	cancel     context.CancelFunc
 }
 
 func (s *Server) handleNewClient(ctx context.Context, conn transport.Conn) {
@@ -46,14 +49,19 @@ func (s *Server) handleNewClient(ctx context.Context, conn transport.Conn) {
 	}
 
 	client := &ClientTunnel{
-		conn:      conn,
-		streams:   streams.New(),
-		sourceIP:  sourceIP,
-		inbound:   make(common.PacketQueue, common.QueueSize),
-		outbound:  outbound,
+		conn:     conn,
+		streams:  streams.New(),
+		sourceIP: sourceIP,
+		inbound:  make(common.PacketQueue, common.QueueSize),
+		outbound: outbound,
+		dropLogger: common.NewDelayedCounterProcessor(func(c1, c2 *atomic.Uint64) {
+			s.logger.Infof("Client %s dropped %d packets (%d bytes)", conn.RemoteAddr(), c1.Load(), c2.Load())
+		}).WithBackoff(time.Second, time.Second*15),
 		connError: make(chan error, 1),
 		cancel:    cancel,
 	}
+
+	client.dropLogger.Start(clientCtx)
 
 	s.clients.Store(client.sourceIP.String(), client)
 

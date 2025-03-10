@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/interfaces"
 	"github.com/riraccuia/pig/pkg/packet"
 	"github.com/riraccuia/pig/pkg/queue"
 	"github.com/riraccuia/pig/pkg/queue/wred"
@@ -19,11 +20,12 @@ import (
 // Client represents a QUIC tunnel client that handles traffic between
 // a local network adapter and a remote QUIC server.
 type Client struct {
-	logger            interfaces.Logger
+	logger            common.Logger
+	dropLogger        *common.DelayedCounterProcessor
 	config            *config.Config
 	conn              transport.Conn
 	streams           *streams.StreamManager
-	adapter           interfaces.TunnelAdapter
+	adapter           common.TunnelAdapter
 	inbound           common.PacketQueue
 	outbound          *queue.ChanQueue //common.PacketQueue
 	bufferPool        *sync.Pool
@@ -34,8 +36,8 @@ type Client struct {
 }
 
 // New creates a new Client instance with the default network adapter.
-func New(logger interfaces.Logger, cfg *config.Config) (*Client, error) {
-	adapter, err := common.NewAdapter(cfg)
+func New(logger common.Logger, cfg *config.Config) (*Client, error) {
+	adapter, err := adapter.NewAdapter(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adapter: %w", err)
 	}
@@ -43,7 +45,7 @@ func New(logger interfaces.Logger, cfg *config.Config) (*Client, error) {
 }
 
 // NewWithAdapter creates a new Client instance with a custom network adapter.
-func NewWithAdapter(logger interfaces.Logger, cfg *config.Config, adapter interfaces.TunnelAdapter) (*Client, error) {
+func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.TunnelAdapter) (*Client, error) {
 	logger.Infof("Creating client with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), cfg.MTU)
 
 	outbound := queue.NewChanQueue(common.QueueSize)
@@ -79,7 +81,10 @@ func NewWithAdapter(logger interfaces.Logger, cfg *config.Config, adapter interf
 // for handling traffic. The dialFunc parameter provides the connection to the server.
 func (c *Client) Start(ctx context.Context, dialFunc func() (transport.Conn, error)) error {
 	c.logger.Infof("Starting client with reconnect interval %d seconds", c.reconnectInterval/time.Second)
-
+	c.dropLogger = common.NewDelayedCounterProcessor(func(c1, c2 *atomic.Uint64) {
+		c.logger.Infof("Dropped %d packets (%d bytes)", c1.Load(), c2.Load())
+	}).WithBackoff(time.Second, time.Second*15)
+	c.dropLogger.Start(ctx)
 	go c.readFromAdapter(ctx)
 	go c.writeToAdapter(ctx)
 	go c.manageConnection(ctx, dialFunc)
@@ -138,7 +143,7 @@ func (c *Client) Close() error {
 }
 
 // GetAdapter returns the current network adapter
-func (c *Client) GetAdapter() interfaces.TunnelAdapter {
+func (c *Client) GetAdapter() common.TunnelAdapter {
 	return c.adapter
 }
 

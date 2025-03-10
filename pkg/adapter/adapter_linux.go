@@ -3,11 +3,11 @@ package adapter
 import (
 	"net"
 
-	"github.com/riraccuia/pig/pkg/interfaces"
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/songgao/water"
 )
 
-func NewAdapter(config AdapterConfig) (interfaces.TunnelAdapter, error) {
+func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
 	cfg := water.Config{
 		DeviceType: water.TUN,
 	}

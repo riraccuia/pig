@@ -21,7 +21,7 @@ func TestTUNAdapterCreation(t *testing.T) {
 		MTU:     1300,
 	}
 
-	adapter, err := NewAdapter(config)
+	adapter, err := newAdapter(config)
 	if err != nil {
 		t.Fatalf("Failed to create TUN adapter: %v", err)
 	}

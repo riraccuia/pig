@@ -6,17 +6,17 @@ import (
 	"net"
 	"sync"
 
+	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/interfaces"
 	"github.com/riraccuia/pig/pkg/packet"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
 type Server struct {
-	logger     interfaces.Logger
+	logger     common.Logger
 	config     *config.Config
-	adapter    interfaces.TunnelAdapter
+	adapter    common.TunnelAdapter
 	listener   transport.Listener
 	clients    *sync.Map //*ash.Map
 	ipPool     *IPPool
@@ -26,15 +26,15 @@ type Server struct {
 	done       chan struct{}
 }
 
-func New(logger interfaces.Logger, cfg *config.Config) (*Server, error) {
-	adapter, err := common.NewAdapter(cfg)
+func New(logger common.Logger, cfg *config.Config) (*Server, error) {
+	adapter, err := adapter.NewAdapter(cfg)
 	if err != nil {
 		return nil, err
 	}
 	return NewWithAdapter(logger, cfg, adapter)
 }
 
-func NewWithAdapter(logger interfaces.Logger, cfg *config.Config, adapter interfaces.TunnelAdapter) (*Server, error) {
+func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.TunnelAdapter) (*Server, error) {
 	logger.Infof("Creating server with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), cfg.MTU)
 	_, network, err := net.ParseCIDR(cfg.TunnelAddress)
 	if err != nil {
@@ -78,7 +78,7 @@ func (s *Server) Start(ctx context.Context, listenFunc func() (transport.Listene
 }
 
 // GetAdapter returns the adapter
-func (s *Server) GetAdapter() interfaces.TunnelAdapter {
+func (s *Server) GetAdapter() common.TunnelAdapter {
 	return s.adapter
 }
 

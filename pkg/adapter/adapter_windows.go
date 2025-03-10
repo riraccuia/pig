@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/riraccuia/pig/pkg/interfaces"
+	"github.com/riraccuia/pig/pkg/common"
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wintun"
 )
@@ -17,7 +17,7 @@ type WinTunAdapter struct {
 	ip      net.IP
 }
 
-func NewAdapter(config AdapterConfig) (interfaces.TunnelAdapter, error) {
+func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
 	//wintun.SetLogger(nil)
 
 	adapter, err := wintun.CreateAdapter(tunName, "pig", &windows.GUID{

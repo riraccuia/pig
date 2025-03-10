@@ -11,7 +11,7 @@ import (
 func (c *connection) initNewReno() {
 	// Initialize congestion control (all values in MSS units)
 	c.cwnd.Store(3 * c.emss) // Start with 3 EMSS
-	c.ssthresh = defaultBufferSize
+	c.ssthresh = maxUint32Seq
 	c.flightSize = NewFlightCounter(&c.cwnd) // No data in flight initially
 	c.rto = time.NewTimer(minRTO)
 	c.rto.Stop()
