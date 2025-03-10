@@ -171,7 +171,7 @@ func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
 	// Set the interface index
 	row.InterfaceIndex = uint32(ifIndex)
 
-	addr := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address))
+	addr := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address[0]))
 	// Set the IP address family and value
 	addr.Family = windows.AF_INET
 	// Convert IP to network byte order (big-endian)
@@ -256,7 +256,7 @@ func waitForIPAddressReady(ifIndex int, ip net.IP, timeout time.Duration) error 
 			return 0
 		}
 		// Get the IP address from the notification
-		addrBytes := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address)).Addr[:]
+		addrBytes := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address[0])).Addr[:]
 		// Compare with our target IP
 		if net.IP(addrBytes).Equal(ip) {
 			// Signal that the address is ready
