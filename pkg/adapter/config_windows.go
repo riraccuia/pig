@@ -190,10 +190,7 @@ func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
 	// Create and initialize the IP address row
 	row := &MibUnicastipaddressRow{}
 
-	ret, _, err := procInitializeUnicastIpAddressEntry.Call(uintptr(unsafe.Pointer(row)))
-	if ret != 0 {
-		return fmt.Errorf("setIPAddressUnicast: InitializeUnicastIpAddressEntry failed: %v", err)
-	}
+	procInitializeUnicastIpAddressEntry.Call(uintptr(unsafe.Pointer(row)))
 
 	// Set the interface index
 	row.InterfaceIndex = NET_IFINDEX(ifIndex)
@@ -207,9 +204,9 @@ func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
 	row.OnLinkPrefixLength = prefixLength
 
 	// Create the unicast IP address entry
-	ret, _, err = procCreateUnicastIpAddressEntry.Call(uintptr(unsafe.Pointer(row)))
-	if ret != 0 {
-		return fmt.Errorf("setIPAddressUnicast: CreateUnicastIpAddressEntry failed: %v", err)
+	ret, _, err := procCreateUnicastIpAddressEntry.Call(uintptr(unsafe.Pointer(row)))
+	if ret != windows.NO_ERROR {
+		return fmt.Errorf("setIPAddressUnicast: CreateUnicastIpAddressEntry failed (ret: %d): %v", ret, err)
 	}
 
 	// Wait for the IP address to be ready (with a 5-second timeout)
@@ -232,18 +229,15 @@ func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
 func setMTU(ifIndex int, mtu int) error {
 	row := &MibIpinterfaceRow{}
 
-	ret, _, err := procInitializeIpInterfaceEntry.Call(uintptr(unsafe.Pointer(row)))
-	if ret != 0 {
-		return fmt.Errorf("setMTU: InitializeIpInterfaceEntry failed: %v", err)
-	}
+	procInitializeIpInterfaceEntry.Call(uintptr(unsafe.Pointer(row)))
 
 	row.Family = windows.AF_INET
 	row.InterfaceIndex = NET_IFINDEX(ifIndex)
 	row.NlMtu = uint32(mtu)
 
-	ret, _, err = procSetIpInterfaceEntry.Call(uintptr(unsafe.Pointer(row)))
-	if ret != 0 {
-		return fmt.Errorf("setMTU: SetIpInterfaceEntry failed: %v", err)
+	ret, _, err := procSetIpInterfaceEntry.Call(uintptr(unsafe.Pointer(row)))
+	if ret != windows.NO_ERROR {
+		return fmt.Errorf("setMTU: SetIpInterfaceEntry failed (ret: %d): %v", ret, err)
 	}
 
 	return nil
@@ -293,8 +287,8 @@ func waitForIPAddressReady(ifIndex int, ip net.IP, timeout time.Duration) error 
 		uintptr(unsafe.Pointer(&notificationHandle)), // NotificationHandle
 	)
 
-	if ret != 0 {
-		return fmt.Errorf("waitForIPAddressReady: NotifyUnicastIpAddressChange failed: %v", err)
+	if ret != windows.NO_ERROR {
+		return fmt.Errorf("waitForIPAddressReady: NotifyUnicastIpAddressChange failed (ret: %d): %v", ret, err)
 	}
 
 	// Make sure we clean up the notification when done
