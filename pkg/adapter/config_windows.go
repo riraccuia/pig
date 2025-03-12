@@ -165,6 +165,12 @@ func configureWinTun(ifaceName string, config AdapterConfig) error {
 // Returns:
 //   - error: nil if successful, otherwise an error describing what went wrong
 func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
+	// The callback function specified in the Callback parameter must be implemented in the
+	// same process as the application calling the NotifyUnicastIpAddressChange function
+	// see: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-notifyunicastipaddresschange
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	// Create and initialize the IP address row
 	row := &MibUnicastipaddressRow{}
 
@@ -176,11 +182,17 @@ func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
 	addr := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address[0]))
 	// Set the IP address family and value
 	addr.Family = windows.AF_INET
-	// Convert IP to network byte order (big-endian)
+	// Copy the IP address to the address buffer
 	copy(addr.Addr[:], ip)
 
 	// Set the subnet prefix length
 	row.OnLinkPrefixLength = prefixLength
+
+	readyChan, notificationHandle, err := getIPAddressReadyChan(ifIndex, ip, 5*time.Second)
+	defer clearNotificationHandle(notificationHandle)
+	if err != nil {
+		return fmt.Errorf("setIPAddressUnicast: %v", err)
+	}
 
 	// Create the unicast IP address entry
 	ret, _, err := procCreateUnicastIpAddressEntry.Call(uintptr(unsafe.Pointer(row)))
@@ -188,11 +200,11 @@ func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
 		return fmt.Errorf("setIPAddressUnicast: CreateUnicastIpAddressEntry failed (ret: %d): %v", ret, err)
 	}
 
-	time.Sleep(time.Second)
-	// Wait for the IP address to be ready (with a 5-second timeout)
-	// if err := waitForIPAddressReady(ifIndex, ip, 5*time.Second); err != nil {
-	// 	return fmt.Errorf("setIPAddressUnicast: %v", err)
-	// }
+	// Wait for the IP address to be ready
+	err = <-readyChan
+	if err != nil {
+		return fmt.Errorf("setIPAddressUnicast: %v", err)
+	}
 
 	return nil
 }
@@ -223,7 +235,7 @@ func setMTU(ifIndex int, mtu int) error {
 	return nil
 }
 
-// waitForIPAddressReady waits for the IP address to be ready on the specified interface.
+// getIPAddressReadyChan returns a channel that will be signaled when the IP address is ready on the specified interface.
 // It uses NotifyUnicastIpAddressChange to receive notifications about IP address changes.
 //
 // Parameters:
@@ -232,17 +244,18 @@ func setMTU(ifIndex int, mtu int) error {
 //   - timeout: Maximum time to wait (use 0 for no timeout)
 //
 // Returns:
+//   - doneChan: A channel that will be signaled when the IP address is ready
+//   - notificationHandle: A handle to the notification
 //   - error: nil if successful, otherwise an error describing what went wrong
-func waitForIPAddressReady(ifIndex int, ip net.IP, timeout time.Duration) error {
-	// The callback function specified in the Callback parameter must be implemented in the
-	// same process as the application calling the NotifyUnicastIpAddressChange function
-	// see: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-notifyunicastipaddresschange
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
+func getIPAddressReadyChan(ifIndex int, ip net.IP, timeout time.Duration) (<-chan error, windows.Handle, error) {
 	// Create a channel to signal when the address is ready
-	readyChan := make(chan bool, 1)
-	errorChan := make(chan error, 1)
+	doneChan := make(chan error, 1)
+	var af *time.Timer
+	if timeout > 0 {
+		af = time.AfterFunc(timeout, func() {
+			doneChan <- fmt.Errorf("waitForIPAddressReady: timeout waiting for IP address to be ready")
+		})
+	}
 
 	// Create a callback function that will be called when IP address changes occur
 	var notificationHandle windows.Handle
@@ -270,7 +283,10 @@ func waitForIPAddressReady(ifIndex int, ip net.IP, timeout time.Duration) error 
 		// Compare with our target IP
 		// if net.IP(addrBytes).Equal(ip) {
 		// Signal that the address is ready
-		readyChan <- true
+		doneChan <- nil
+		if af != nil {
+			af.Stop()
+		}
 		// }
 		return 0
 	})
@@ -285,29 +301,20 @@ func waitForIPAddressReady(ifIndex int, ip net.IP, timeout time.Duration) error 
 	)
 
 	if ret != windows.NO_ERROR {
-		return fmt.Errorf("waitForIPAddressReady: NotifyUnicastIpAddressChange failed (ret: %d): %v", ret, err)
+		return nil, 0, fmt.Errorf("waitForIPAddressReady: NotifyUnicastIpAddressChange failed (ret: %d): %v", ret, err)
 	}
 
-	// Make sure we clean up the notification when done
-	defer func() {
-		if notificationHandle != 0 {
-			procCancelMibChangeNotify2.Call(uintptr(notificationHandle))
-		}
-	}()
+	return doneChan, notificationHandle, nil
+}
 
-	// Set up a timeout if requested
-	var timeoutChan <-chan time.Time
-	if timeout > 0 {
-		timeoutChan = time.After(timeout)
+// clearNotificationHandle cancels a notification for a specific IP address.
+// It uses the CancelMibChangeNotify2 API to cancel the notification.
+//
+// Parameters:
+//   - notificationHandle: The handle to the notification to cancel
+func clearNotificationHandle(notificationHandle windows.Handle) {
+	if notificationHandle == 0 {
+		return
 	}
-
-	// Wait for the address to be ready or timeout
-	select {
-	case <-readyChan:
-		return nil
-	case err := <-errorChan:
-		return err
-	case <-timeoutChan:
-		return fmt.Errorf("waitForIPAddressReady: timeout waiting for IP address to be ready")
-	}
+	procCancelMibChangeNotify2.Call(uintptr(notificationHandle))
 }
