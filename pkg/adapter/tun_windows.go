@@ -39,18 +39,11 @@ type NativeTun struct {
 	rate      rateJuggler
 	session   wintun.Session
 	readWait  windows.Handle
-	events    chan Event
 	running   sync.WaitGroup
 	closeOnce sync.Once
 	close     atomic.Bool
 	outSizes  []int
 }
-
-type Event int
-
-const (
-	EventMTUUpdate Event = iota
-)
 
 var (
 	WintunTunnelType          = "pig"
@@ -75,13 +68,11 @@ func CreateTUNWithRequestedGUID(ifname string, requestedGUID *windows.GUID) (*Na
 		wt:     wt,
 		name:   ifname,
 		handle: windows.InvalidHandle,
-		events: make(chan Event, 10),
 	}
 
 	tun.session, err = wt.StartSession(0x800000) // Ring capacity, 8 MiB
 	if err != nil {
 		tun.wt.Close()
-		close(tun.events)
 		return nil, fmt.Errorf("Error starting session: %w", err)
 	}
 	tun.readWait = tun.session.ReadWaitEvent()
@@ -90,14 +81,6 @@ func CreateTUNWithRequestedGUID(ifname string, requestedGUID *windows.GUID) (*Na
 
 func (tun *NativeTun) Name() string {
 	return tun.name
-}
-
-func (tun *NativeTun) File() *os.File {
-	return nil
-}
-
-func (tun *NativeTun) Events() <-chan Event {
-	return tun.events
 }
 
 func (tun *NativeTun) IP() net.IP {
@@ -114,7 +97,6 @@ func (tun *NativeTun) Close() error {
 		if tun.wt != nil {
 			tun.wt.Close()
 		}
-		close(tun.events)
 	})
 	return err
 }
