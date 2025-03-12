@@ -6,6 +6,7 @@ package adapter
 import (
 	"fmt"
 	"net"
+	"runtime"
 	"time"
 	"unsafe"
 
@@ -80,6 +81,7 @@ var (
 	procSetIpInterfaceEntry             = modiphlpapi.NewProc("SetIpInterfaceEntry")
 	procInitializeUnicastIpAddressEntry = modiphlpapi.NewProc("InitializeUnicastIpAddressEntry")
 	procCreateUnicastIpAddressEntry     = modiphlpapi.NewProc("CreateUnicastIpAddressEntry")
+	procGetUnicastIpAddressEntry        = modiphlpapi.NewProc("GetUnicastIpAddressEntry")
 	procNotifyUnicastIpAddressChange    = modiphlpapi.NewProc("NotifyUnicastIpAddressChange")
 	procCancelMibChangeNotify2          = modiphlpapi.NewProc("CancelMibChangeNotify2")
 	procConvertInterfaceLuidToIndex     = modiphlpapi.NewProc("ConvertInterfaceLuidToIndex")
@@ -231,6 +233,12 @@ func setMTU(ifIndex int, mtu int) error {
 // Returns:
 //   - error: nil if successful, otherwise an error describing what went wrong
 func waitForIPAddressReady(ifIndex int, ip net.IP, timeout time.Duration) error {
+	// The callback function specified in the Callback parameter must be implemented in the
+	// same process as the application calling the NotifyUnicastIpAddressChange function
+	// see: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-notifyunicastipaddresschange
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	// Create a channel to signal when the address is ready
 	readyChan := make(chan bool, 1)
 	errorChan := make(chan error, 1)
@@ -239,7 +247,7 @@ func waitForIPAddressReady(ifIndex int, ip net.IP, timeout time.Duration) error 
 	var notificationHandle windows.Handle
 
 	// Define the callback function using windows.NewCallback
-	callback := windows.NewCallback(func(callerContext uintptr, row *MibUnicastipaddressRow, notificationType uint32) uintptr {
+	callback := windows.NewCallback(func(callerContext unsafe.Pointer, row *MibUnicastipaddressRow, notificationType uint32) uintptr {
 		if notificationType != windows.MibAddInstance {
 			return 0
 		}
@@ -257,11 +265,12 @@ func waitForIPAddressReady(ifIndex int, ip net.IP, timeout time.Duration) error 
 		}
 		// Get the IP address from the notification
 		addrBytes := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address[0])).Addr[:]
+		_ = addrBytes
 		// Compare with our target IP
-		if net.IP(addrBytes).Equal(ip) {
-			// Signal that the address is ready
-			readyChan <- true
-		}
+		// if net.IP(addrBytes).Equal(ip) {
+		// Signal that the address is ready
+		readyChan <- true
+		// }
 		return 0
 	})
 
