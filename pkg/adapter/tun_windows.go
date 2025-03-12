@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	_ "unsafe"
+
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wintun"
 )
