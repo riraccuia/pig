@@ -188,10 +188,11 @@ func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
 		return fmt.Errorf("setIPAddressUnicast: CreateUnicastIpAddressEntry failed (ret: %d): %v", ret, err)
 	}
 
+	time.Sleep(time.Second)
 	// Wait for the IP address to be ready (with a 5-second timeout)
-	if err := waitForIPAddressReady(ifIndex, ip, 5*time.Second); err != nil {
-		return fmt.Errorf("setIPAddressUnicast: %v", err)
-	}
+	// if err := waitForIPAddressReady(ifIndex, ip, 5*time.Second); err != nil {
+	// 	return fmt.Errorf("setIPAddressUnicast: %v", err)
+	// }
 
 	return nil
 }
