@@ -39,3 +39,11 @@ func (t *TUNAdapter) IP() net.IP {
 func (t *TUNAdapter) Name() string {
 	return t.ifName
 }
+
+func (t *TUNAdapter) Index() int {
+	iface, err := net.InterfaceByName(t.ifName)
+	if err != nil {
+		return -1
+	}
+	return iface.Index
+}

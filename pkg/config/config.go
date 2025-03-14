@@ -61,6 +61,8 @@ type Config struct {
 	Wred              WredConfig    `toml:"wred"`
 	LogLevel          string        `toml:"log_level"`
 	ICMPMode          ICMPMode      `toml:"icmp_mode"`
+	StartScript       string        `toml:"start_script"` // Script to execute when a tunnel connection is established
+	StopScript        string        `toml:"stop_script"`  // Script to execute when a tunnel connection is disconnected
 }
 
 type Target struct {

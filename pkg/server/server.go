@@ -10,20 +10,22 @@ import (
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/script"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
 type Server struct {
-	logger     common.Logger
-	config     *config.Config
-	adapter    common.TunnelAdapter
-	listener   transport.Listener
-	clients    *sync.Map //*ash.Map
-	ipPool     *IPPool
-	bufferPool *sync.Pool
-	inbound    common.PacketQueue
-	outbound   common.PacketQueue
-	done       chan struct{}
+	logger         common.Logger
+	config         *config.Config
+	adapter        common.TunnelAdapter
+	listener       transport.Listener
+	clients        *sync.Map //*ash.Map
+	ipPool         *IPPool
+	bufferPool     *sync.Pool
+	inbound        common.PacketQueue
+	outbound       common.PacketQueue
+	done           chan struct{}
+	scriptExecutor *script.Executor
 }
 
 func New(logger common.Logger, cfg *config.Config) (*Server, error) {
@@ -54,6 +56,7 @@ func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.Tun
 				return make(packet.IPv4Packet, cfg.MTU, cfg.MTU)
 			},
 		},
+		scriptExecutor: script.New(logger, cfg),
 	}, nil
 }
 

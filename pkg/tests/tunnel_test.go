@@ -81,6 +81,10 @@ func (m *MockTunnelAdapter) Name() string {
 	return "mock"
 }
 
+func (m *MockTunnelAdapter) Index() int {
+	return 0
+}
+
 // generateTestCertificate creates a self-signed certificate for testing
 func generateTestCertificate(t *testing.T) (certPath string, keyPath string) {
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)

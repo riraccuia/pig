@@ -13,6 +13,7 @@ import (
 	"github.com/riraccuia/pig/pkg/packet"
 	"github.com/riraccuia/pig/pkg/queue"
 	"github.com/riraccuia/pig/pkg/queue/wred"
+	"github.com/riraccuia/pig/pkg/script"
 	"github.com/riraccuia/pig/pkg/streams"
 	"github.com/riraccuia/pig/pkg/transport"
 )
@@ -33,6 +34,7 @@ type Client struct {
 	closed            bool
 	reconnectInterval time.Duration
 	connError         chan error
+	scriptExecutor    *script.Executor
 }
 
 // New creates a new Client instance with the default network adapter.
@@ -74,6 +76,7 @@ func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.Tun
 		closed:            false,
 		reconnectInterval: time.Duration(cfg.ReconnectInterval) * time.Second,
 		connError:         make(chan error, 1),
+		scriptExecutor:    script.New(logger, cfg),
 	}, nil
 }
 
@@ -115,6 +118,15 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 
 		c.logger.Infof("Connected to server %s", conn.RemoteAddr())
 
+		// Execute start script
+		c.scriptExecutor.ExecuteStartScript(script.ScriptContext{
+			TunnelName:  c.adapter.Name(),
+			TunnelIndex: c.adapter.Index(),
+			RemoteAddr:  conn.RemoteAddr().String(),
+			NatAddr:     "", // No NAT address in client mode
+			TunnelProto: string(c.config.Transport),
+		})
+
 		select {
 		case <-ctx.Done():
 			c.logger.Infof("Context done, exiting")
@@ -122,6 +134,16 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 			return
 		case err := <-c.connError:
 			c.logger.Errorf("Connection lost: %v", err)
+
+			// Execute stop script
+			c.scriptExecutor.ExecuteStopScript(script.ScriptContext{
+				TunnelName:  c.adapter.Name(),
+				TunnelIndex: c.adapter.Index(),
+				RemoteAddr:  conn.RemoteAddr().String(),
+				NatAddr:     "", // No NAT address in client mode
+				TunnelProto: string(c.config.Transport),
+			})
+
 			c.Close()
 			<-time.After(c.reconnectInterval)
 			continue

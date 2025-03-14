@@ -39,6 +39,8 @@ type flagSet struct {
 	wredThreshold       float64
 	verbose             int
 	icmpMode            string
+	startScript         string
+	stopScript          string
 }
 
 func defineFlags() *flagSet {
@@ -60,6 +62,8 @@ func defineFlags() *flagSet {
 	flag.Float64Var(&flags.wredWeightFactor, "factor", 5, "Weight factor for WRED, lower values mean more weight to recent packets")
 	flag.Float64Var(&flags.wredDropProbability, "drop", 0.25, "Drop probability for WRED, valid values are between 0 and 1")
 	flag.Float64Var(&flags.wredThreshold, "thresh", 0.1, "Threshold for WRED as a fraction of the queue length, valid values are between 0 and 1")
+	flag.StringVar(&flags.startScript, "start-script", "", "Path to script to execute when a tunnel connection is established")
+	flag.StringVar(&flags.stopScript, "stop-script", "", "Path to script to execute when a tunnel connection is disconnected")
 	// TODO: implement this properly
 	// flag.StringVar(&flags.icmpMode, "icmp-mode", "aggressive", "ICMP mode, valid values are: normal, aggressive")
 	return flags
@@ -113,6 +117,14 @@ func applyCommandLineFlags(cfg *config.Config, flags *flagSet, logger *log.Logge
 
 	if flags.icmpMode != "" {
 		cfg.ICMPMode = config.ICMPMode(flags.icmpMode)
+	}
+
+	if flags.startScript != "" {
+		cfg.StartScript = flags.startScript
+	}
+
+	if flags.stopScript != "" {
+		cfg.StopScript = flags.stopScript
 	}
 }
 

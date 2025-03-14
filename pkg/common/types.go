@@ -18,6 +18,7 @@ type TunnelAdapter interface {
 	Close() error
 	IP() net.IP
 	Name() string
+	Index() int
 }
 
 type Logger interface {

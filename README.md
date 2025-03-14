@@ -152,9 +152,99 @@ pig -config config.toml
 * `-key`: Path to private key file
 * `-k`: Disable certificate verification (insecure mode)
 
+### Script Execution
+* `-start-script`: Path to script to execute when a tunnel connection is established
+* `-stop-script`: Path to script to execute when a tunnel connection is disconnected
+
 #### Certificate Handling
 * If certificate files are not provided, pig automatically generates self-signed certificates
 * Use the `-k` flag to skip certificate verification
+
+## Start/Stop Scripts
+
+pig supports executing custom scripts when tunnel connections are established or disconnected. This feature is useful for performing additional setup or cleanup operations, such as configuring routing tables, firewall rules, etc...
+
+### Configuration
+
+Scripts can be specified using command-line flags or in the configuration file:
+
+```bash
+# Command-line example
+pig -proto ws -c example.com:8080 -start-script /path/to/start.sh -stop-script /path/to/stop.sh
+
+# Or in config.toml
+start_script = "/path/to/start.sh"
+stop_script = "/path/to/stop.sh"
+```
+
+### Environment Variables
+
+The following environment variables are available to scripts:
+
+| Variable | Description |
+|----------|-------------|
+| `PIG_TUN_NAME` | Tunnel adapter name (e.g., `utun1`, `tun0`) |
+| `PIG_TUN_INDEX` | Numeric index of the tunnel adapter |
+| `PIG_REMOTE_ADDR` | IP address of the remote endpoint |
+| `PIG_NAT_ADDR` | Client's allocated IP for outgoing packets (server mode only) |
+| `PIG_TUNNEL_PROTO` | Protocol used for the tunnel (e.g., `quic`, `ws`, `icmp`) |
+
+### Execution Context
+
+- Standard output from scripts is logged at debug level
+- Error output and exit codes are logged at error level
+
+### Example Scripts
+
+#### Route All Traffic Through Tunnel (Linux)
+
+This example start script configures the system to route all traffic through the tunnel:
+
+```bash
+#!/bin/bash
+# start.sh - Route all traffic through the tunnel
+
+# Log script execution
+echo "Configuring routes for tunnel $PIG_TUN_NAME (index: $PIG_TUN_INDEX)"
+echo "Remote address: $PIG_REMOTE_ADDR, Protocol: $PIG_TUNNEL_PROTO"
+
+# Add routes for 0.0.0.0/1 and 128.0.0.0/1 (covering all IPs) via the tunnel
+ip route add 0.0.0.0/1 dev $PIG_TUN_NAME
+ip route add 128.0.0.0/1 dev $PIG_TUN_NAME
+```
+
+Corresponding stop script to clean up the routes:
+
+```bash
+#!/bin/bash
+# stop.sh - Remove routes when tunnel disconnects
+
+echo "Removing routes for tunnel $PIG_TUN_NAME"
+
+# Remove the routes
+ip route del 0.0.0.0/1 dev $PIG_TUN_NAME
+ip route del 128.0.0.0/1 dev $PIG_TUN_NAME
+```
+
+#### Windows Example (PowerShell)
+
+```powershell
+# start.ps1 - Configure routing on Windows
+$tunIndex = $env:PIG_TUN_INDEX
+$tunName = $env:PIG_TUN_NAME
+$remoteAddr = $env:PIG_REMOTE_ADDR
+
+Write-Output "Configuring routes for tunnel $tunName with index $tunIndex"
+
+# Add routes
+route add 0.0.0.0 mask 128.0.0.0 if $tunIndex
+route add 128.0.0.0 mask 128.0.0.0 $tunIndex
+
+# Preserve route to remote server
+$defaultGateway = (Get-NetRoute -DestinationPrefix "0.0.0.0/0").NextHop
+$remoteIP = $remoteAddr.Split(":")[0]
+route add $remoteIP mask 255.255.255.255 if $defaultGateway
+```
 
 ## Platform Support
 
