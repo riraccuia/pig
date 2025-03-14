@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	_ "unsafe"
 
@@ -85,6 +86,22 @@ func (tun *NativeTun) Name() string {
 
 func (tun *NativeTun) IP() net.IP {
 	return tun.ip
+}
+
+func (tun *NativeTun) Index() int {
+	var (
+		index uint32
+		luid  uint64 = tun.wt.LUID()
+		ret   uintptr
+	)
+	ret, _, _ = procConvertInterfaceLuidToIndex.Call(
+		uintptr(unsafe.Pointer(&luid)),
+		uintptr(unsafe.Pointer(&index)),
+	)
+	if ret != windows.NO_ERROR {
+		return -1
+	}
+	return int(index)
 }
 
 func (tun *NativeTun) Close() error {
