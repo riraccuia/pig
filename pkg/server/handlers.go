@@ -19,6 +19,10 @@ func (s *Server) acceptClients(ctx context.Context) {
 			if err != nil {
 				return
 			}
+			if err := s.performAuthentication(ctx, conn); err != nil {
+				conn.Close()
+				continue
+			}
 			go s.handleNewClient(ctx, conn)
 		}
 	}

@@ -125,6 +125,7 @@ func (c *connection) processICMPPacket(dataBuf *rawSockBuffer) error {
 
 	// read icmp type
 	icmpType := ipv4.ICMPType(payload[0])
+	icmpCode := payload[1]
 	echoID := int(binary.BigEndian.Uint16(payload[4:6]))
 	seq := uint32(binary.BigEndian.Uint16(payload[6:8]))
 	// strip the icmp header
@@ -133,6 +134,10 @@ func (c *connection) processICMPPacket(dataBuf *rawSockBuffer) error {
 	if icmpType != c.wantType {
 		transport.Logger.Errorf("received unexpected icmp packet, icmp type: %d, icmp id: %d, icmp seq: %d", icmpType, binary.BigEndian.Uint16(payload[4:6]), binary.BigEndian.Uint16(payload[6:8]))
 		return nil
+	}
+
+	if icmpCode == 255 {
+		return fmt.Errorf("received close packet")
 	}
 
 	if echoID != c.icmpID {
@@ -365,6 +370,30 @@ func (c *connection) sendEchoMessage(data []byte) error {
 	}
 
 	// transport.Logger.Infof("Sending echo, seq: %d, cwnd: %d", seq, c.cwnd.Load())
+
+	return c.listener.writePacket(c.remoteAddr.IP.To4(), msg)
+}
+
+func (c *connection) sendCloseMessage() error {
+	transport.Logger.Infof("Sending close message to %s", c.remoteAddr.IP.To4())
+
+	seq := c.nextIcmpSeq.Load()
+	c.nextIcmpSeq.Add(1)
+
+	icmpType := ipv4.ICMPTypeEcho
+	if c.listener.isServer {
+		icmpType = ipv4.ICMPTypeEchoReply
+	}
+
+	msg := &icmp.Message{
+		Type: icmpType,
+		Code: 255,
+		Body: &icmp.Echo{
+			ID:   c.icmpID,
+			Seq:  int(seq),
+			Data: []byte{},
+		},
+	}
 
 	return c.listener.writePacket(c.remoteAddr.IP.To4(), msg)
 }

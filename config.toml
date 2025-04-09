@@ -1,15 +1,28 @@
 # Server mode configuration
 mode = "server"
 transport = "quic"
-tunnel_ip = "10.0.0.1/24"
-mtu = 1300
+tunnel_address = "10.0.0.1/24"
+mtu = 1500  # Adjust based on your network
 cert_file = "/path/to/cert.pem"
 key_file = "/path/to/key.pem"
 stream_count = 5
+log_level = "info"
+insecure = true  # Set to true to skip certificate verification
 
 [target]
 address = "0.0.0.0"
 port = 8080
+
+[wred]
+weight_factor = 5.0
+drop_probability = 0.25
+threshold = 0.1
+
+[auth.jwt]
+# Path to the public key file for JWT verification (server only)
+public_key_path = "/path/to/public.pem"
+# JWT token to use for authentication (client only)
+token = "your.jwt.token"
 
 # Client mode configuration
 #mode = "client"

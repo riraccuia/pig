@@ -10,6 +10,7 @@ pig is my playground for network protocol experimentation and a Swiss Army knife
 * Congestion control with WRED (Weighted Random Early Detection)
 * Stream multiplexing (for streamed protocols)
 * Configurable via command line flags or TOML configuration file
+* MTLS and JWT-based authentication for secure client-server connections
 
 _*Windows support is implemented but not at all tested at this time_
 
@@ -100,61 +101,102 @@ WRED helps maintain low latency by:
 * Basic UDP implementation
 * Lowest overhead
 
+## Configuration Options
+
+### Command line flags
+
+| Category | Flag | Description | Default |
+|----------|------|-------------|---------|
+| **Network Settings** | `-mtu` | MTU size (adjust based on your network) | 1300 |
+| | `-streams` | Number of multiplexed streams for supported protocols | 5 |
+| | `-retry` | Reconnection interval in seconds | 5 |
+| | `-I` | Network interface to use (e.g., wlan0, en0) | |
+| **WRED Configuration** | `-factor` | Weight factor for WRED | 5 |
+| | `-drop` | Drop probability | 0.25 |
+| | `-thresh` | Queue length threshold | 0.1 |
+| **Logging** | `-v` | Verbosity level for logging (0-2, where 2 is most verbose) | |
+| **Script Execution** | `-start-script` | Path to script to execute when a tunnel connection is established | |
+| | `-stop-script` | Path to script to execute when a tunnel connection is disconnected | |
+| **Authentication** | `-cert` | Path to certificate file for MTLS | |
+| | `-key` | Path to private key file for MTLS | |
+| | `-mtls-ca` | Path to a pem formatted certificate bundle containing trusted CAs for MTLS | |
+| | `-k` | Disable certificate verification (insecure mode) | |
+| | `-auth` | Specify non-tls authentication type to use, currently `jwt` only | |
+| | `-tok` | The token to send to the server for applicable auth types | |
+| | `-jwk` | Path to public key file used to verify JWT tokens. This can be a local file or a URL. The file can be in PEM or JWKS formats. | |
+
 ### Configuration File
 
-Example `config.toml`:
+The configuration file uses TOML format. 
+
+| Setting | Type | Description | Default |
+|---------|------|-------------|---------|
+| `mode` | string | Operating mode: "client" or "server" | Required |
+| `tunnel_address` | string | CIDR format for the tunnel interface (e.g., "10.0.0.1/24") | Required |
+| `mtu` | int | Maximum Transmission Unit for the tunnel | 1300 |
+| `cert_file` | string | Path to TLS certificate file | Auto-generated if empty |
+| `key_file` | string | Path to TLS private key file | Auto-generated if empty |
+| `stream_count` | int | Number of multiplexed streams for protocols that support it | 5 |
+| `insecure` | bool | Skip TLS certificate verification if true | false |
+| `transport` | string | Transport protocol: "quic", "udp", "tls", "ws", "icmp", or "tls-in-icmp" | Required |
+| `reconnect_interval` | int | Time in seconds to wait before reconnecting | 5 |
+| `bind_adapter` | string | Network interface to bind to (e.g., "eth0", "wlan0") | Default interface |
+| `log_level` | string | Logging level: "debug", "info", "warn", "error" | "info" |
+| `start_script` | string | Script to execute when a tunnel connection is established | "" |
+| `stop_script` | string | Script to execute when a tunnel connection is terminated | "" |
+| `target.address` | string | Target address to bind to (server) or connect to (client) | Required |
+| `target.port` | int | Port to use for the connection | Required |
+| `wred.weight_factor` | float | Weight factor for WRED algorithm | 5.0 |
+| `wred.drop_probability` | float | Probability of packet drop in WRED | 0.25 |
+| `wred.threshold` | float | Queue threshold for WRED | 0.1 |
+| `auth.type` | string | Authentication type: "jwt" | "" |
+| `auth.jwt.public_key_source` | string | Path to public key file, URL to JWKS, or JSON file with JWKS | "" |
+| `auth.jwt.token` | string | JWT token for client authentication | "" |
+| `auth.mtls.trust_pem` | string | Path to trust bundle for mTLS | System CA |
+
+Here's an example `config.toml` with explanations for all available settings:
 
 ```toml
 # Server configuration
-mode = "server"
-transport = "quic"
-tunnel_address = "10.0.0.1/24"
-mtu = 1500  # Adjust based on your network
+mode = "server"                # "server" or "client"
+transport = "quic"             # "quic", "udp", "tls", "ws", "icmp", or "tls-in-icmp"
+tunnel_address = "10.0.0.1/24" # CIDR format for tunnel interface
+mtu = 1500                     # Maximum Transmission Unit
 cert_file = "/path/to/cert.pem"
 key_file = "/path/to/key.pem"
-stream_count = 5
-log_level = "info"
-insecure = true  # Set to true to skip certificate verification
+stream_count = 5               # Number of multiplexed streams for supported protocols
+log_level = "info"             # Logging level
+insecure = true                # Skip certificate verification if true
+reconnect_interval = 5         # Reconnection interval in seconds
+bind_adapter = "eth0"          # Network interface to bind to
+start_script = "/path/to/start.sh" # Script to run when a connection is established
+stop_script = "/path/to/stop.sh"   # Script to run when a connection is terminated
+icmp_mode = "normal"           # "normal" or "aggressive" (for ICMP-based transports)
 
 [target]
-address = "0.0.0.0"
-port = 8080
+address = "0.0.0.0"            # Target address to bind to (server) or connect to (client)
+port = 8080                    # Port to use
 
 [wred]
-weight_factor = 5.0
-drop_probability = 0.25
-threshold = 0.1
+weight_factor = 5.0            # Weight factor for WRED algorithm
+drop_probability = 0.25        # Probability of packet drop
+threshold = 0.1                # Queue threshold for WRED
+
+[auth]
+type = "jwt"                   # Authentication type: "jwt"
+
+  [auth.jwt]
+  public_key_source = "/path/to/keys.pem" # Path to public key file, URL to JWKS, or JSON file with JWKS
+  token = "your.jwt.token"     # JWT token (client only)
+
+  [auth.mtls]
+  trust_pem = "/path/to/ca.pem" # Path to trust bundle for mTLS
 ```
 
 Run with config file:
 ```bash
 pig -config config.toml
 ```
-
-## Configuration Options
-
-### Network Settings
-* `-mtu`: MTU size (default: 1300, adjust based on your network)
-* `-streams`: Number of multiplexed streams for supported protocols (default: 5)
-* `-retry`: Reconnection interval in seconds (default: 5)
-* `-I`: Network interface to use (e.g., wlan0, en0)
-
-### WRED Configuration
-* `-factor`: Weight factor for WRED (default: 5)
-* `-drop`: Drop probability (default: 0.25)
-* `-thresh`: Queue length threshold (default: 0.1)
-
-### Logging
-* `-v`: Verbosity level for logging (0-2, where 2 is most verbose)
-
-### Security
-* `-cert`: Path to certificate file (recommended for production)
-* `-key`: Path to private key file
-* `-k`: Disable certificate verification (insecure mode)
-
-### Script Execution
-* `-start-script`: Path to script to execute when a tunnel connection is established
-* `-stop-script`: Path to script to execute when a tunnel connection is disconnected
 
 #### Certificate Handling
 * If certificate files are not provided, pig automatically generates self-signed certificates
@@ -244,6 +286,56 @@ route add 128.0.0.0 mask 128.0.0.0 $tunIndex
 $defaultGateway = (Get-NetRoute -DestinationPrefix "0.0.0.0/0").NextHop
 $remoteIP = $remoteAddr.Split(":")[0]
 route add $remoteIP mask 255.255.255.255 if $defaultGateway
+```
+
+## Authentication
+
+pig supports multiple authentication mechanisms that can be used independently or combined for enhanced security:
+
+* **JWT Token Authentication**: Client authentication using JWT tokens
+* **TLS Mutual Authentication**: Certificate-based mutual authentication for TLS-based protocols (QUIC, TLS, WebSocket)
+
+An interactive signtool is available as part of this project that simplifies JWT token generation and key management, see [JWT Signing Tool Documentation](tools/signtool/README.md).
+
+### JWT Authentication Example
+
+```bash
+# Generate a token by running the interactive signtool
+./signtool
+
+# Use the token from file via terminal flag
+sudo pig -proto ws -c server:8080 -auth jwt -tok "$(cat token.txt)"
+
+# Or use it from an environment variable
+export PIG_TOKEN="xxx"
+sudo pig -proto ws -c server:8080 -auth jwt -tok "$PIG_TOKEN"
+```
+
+### TLS Mutual Authentication
+
+For TLS-based protocols, you can enable mutual authentication by providing client certificates:
+
+```bash
+# Server with mutual TLS authentication
+sudo pig -proto tls -l :8080 -tunnel 10.0.0.1/24 -cert server.crt -key server.key -mtls-ca ca.crt
+
+# Client with certificate
+sudo pig -proto tls -c server:8080 -cert client.crt -key client.key
+```
+
+### Combined Authentication
+
+You can combine JWT and TLS mutual authentication for TLS-based protocols:
+
+```bash
+# Server with both authentication methods
+sudo pig -proto tls -l :8080 -tunnel 10.0.0.1/24 \
+-cert server.crt -key server.key -mtls-ca ca.crt \
+-auth jwt -jwk bundle.pem
+
+# Client with both token and certificate
+export PIG_TOKEN="xxx"
+sudo pig -proto tls -c server:8080 -cert client.crt -key client.key -auth jwt -tok "$PIG_TOKEN"
 ```
 
 ## Platform Support

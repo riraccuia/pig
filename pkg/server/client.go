@@ -14,6 +14,7 @@ import (
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
+// ClientTunnel represents a client connection
 type ClientTunnel struct {
 	conn       transport.Conn
 	streams    *streams.StreamManager
@@ -25,9 +26,25 @@ type ClientTunnel struct {
 	cancel     context.CancelFunc
 }
 
+func (s *Server) performAuthentication(ctx context.Context, conn transport.Conn) (err error) {
+	// Perform authentication if enabled
+	if s.authenticator == nil {
+		return
+	}
+	if err = s.authenticator.Authenticate(ctx, conn); err != nil {
+		s.logger.Errorf("Client authentication failed: %v", err)
+		return err
+	}
+	s.logger.Infof("Client authenticated successfully: %s", conn.RemoteAddr())
+	return nil
+}
+
+// handleNewClient handles a new client connection
 func (s *Server) handleNewClient(ctx context.Context, conn transport.Conn) {
+	// Allocate IP for the client
 	sourceIP, err := s.ipPool.Allocate()
 	if err != nil {
+		s.logger.Errorf("Failed to allocate IP for client %s: %v", conn.RemoteAddr(), err)
 		conn.Close()
 		return
 	}
@@ -64,6 +81,7 @@ func (s *Server) handleNewClient(ctx context.Context, conn transport.Conn) {
 
 	client.dropLogger.Start(clientCtx)
 
+	// Store client in sync.Map using sourceIP as key
 	s.clients.Store(client.sourceIP.String(), client)
 
 	s.logger.Infof("New client connected from %s, allocated IP: %s", client.conn.RemoteAddr(), client.sourceIP.String())

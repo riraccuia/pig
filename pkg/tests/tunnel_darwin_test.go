@@ -51,13 +51,13 @@ func TestEndToEndTunnelWithQUIC(t *testing.T) {
 	logger.SetLevel("debug")
 
 	// Create and start client with mock adapter
-	cli, err := client.New(logger, clientConfig)
+	cli, err := client.New(logger, clientConfig, nil)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
 	// Create and start server with mock adapter
-	srv, err := server.New(logger, serverConfig)
+	srv, err := server.New(logger, serverConfig, nil)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}

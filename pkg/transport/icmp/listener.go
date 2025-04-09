@@ -193,6 +193,7 @@ func (l *sharedListener) dispatchPackets() {
 
 			// read icmp type from the first byte of the icmp payload
 			icmpType := ipv4.ICMPType(payload[0])
+			icmpCode := payload[1]
 			// read icmp id from icmp payload
 			icmpID := binary.BigEndian.Uint16(payload[4:6])
 
@@ -213,7 +214,7 @@ func (l *sharedListener) dispatchPackets() {
 			}
 
 			var conn *connection
-			conn = l.getClientConn(packet.dst, key)
+			conn = l.getClientConn(packet.dst, key, icmpCode)
 
 			if conn == nil {
 				transport.Logger.Errorf("failed to find packet connection, ip: %s, icmp id: %d", packet.dst.String(), icmpID)
@@ -233,10 +234,14 @@ func (l *sharedListener) dispatchPackets() {
 	}
 }
 
-func (l *sharedListener) getClientConn(ip net.IP, key clientKey) *connection {
+func (l *sharedListener) getClientConn(ip net.IP, key clientKey, echoCode uint8) *connection {
 	_conn, exists := l.clients.Load(key)
 	if exists {
 		return _conn.(*connection)
+	}
+
+	if echoCode == 255 {
+		return nil
 	}
 
 	transport.Logger.Infof("New client connection, ip: %s, icmp id: %d", key.ip, key.icmpID)

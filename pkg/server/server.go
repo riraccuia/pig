@@ -14,6 +14,7 @@ import (
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
+// Server represents a tunnel server that handles multiple client connections
 type Server struct {
 	logger         common.Logger
 	config         *config.Config
@@ -26,17 +27,20 @@ type Server struct {
 	outbound       common.PacketQueue
 	done           chan struct{}
 	scriptExecutor *script.Executor
+	authenticator  common.Authenticator
 }
 
-func New(logger common.Logger, cfg *config.Config) (*Server, error) {
+// New creates a new Server instance
+func New(logger common.Logger, cfg *config.Config, authenticator common.Authenticator) (*Server, error) {
 	adapter, err := adapter.NewAdapter(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return NewWithAdapter(logger, cfg, adapter)
+	return NewWithAdapter(logger, cfg, adapter, authenticator)
 }
 
-func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.TunnelAdapter) (*Server, error) {
+// NewWithAdapter creates a new Server instance with a custom network adapter
+func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Server, error) {
 	logger.Infof("Creating server with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), cfg.MTU)
 	_, network, err := net.ParseCIDR(cfg.TunnelAddress)
 	if err != nil {
@@ -56,7 +60,9 @@ func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.Tun
 				return make(packet.IPv4Packet, cfg.MTU, cfg.MTU)
 			},
 		},
+		done:           make(chan struct{}),
 		scriptExecutor: script.New(logger, cfg),
+		authenticator:  authenticator,
 	}, nil
 }
 

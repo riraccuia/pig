@@ -109,6 +109,8 @@ func (c *connection) RemoteAddr() net.Addr {
 }
 
 func (c *connection) Close() error {
+	c.sendCloseMessage()
+
 	c.cancel()
 	c.readBuf = nil
 	c.writeBuf = nil
@@ -178,6 +180,8 @@ func (c *connection) readLoop() {
 		case data := <-c.incoming:
 			if err := c.processICMPPacket(data); err != nil {
 				transport.Logger.Errorf("Error processing ICMP packet: %v", err)
+				c.Close()
+				return
 			}
 			// c.listener.bufPool.Put(data)
 		}

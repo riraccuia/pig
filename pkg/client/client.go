@@ -18,8 +18,8 @@ import (
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-// Client represents a QUIC tunnel client that handles traffic between
-// a local network adapter and a remote QUIC server.
+// Client represents a tunnel client that handles traffic between
+// a local network adapter and a remote server.
 type Client struct {
 	logger            common.Logger
 	dropLogger        *common.DelayedCounterProcessor
@@ -35,19 +35,20 @@ type Client struct {
 	reconnectInterval time.Duration
 	connError         chan error
 	scriptExecutor    *script.Executor
+	authenticator     common.Authenticator
 }
 
 // New creates a new Client instance with the default network adapter.
-func New(logger common.Logger, cfg *config.Config) (*Client, error) {
+func New(logger common.Logger, cfg *config.Config, authenticator common.Authenticator) (*Client, error) {
 	adapter, err := adapter.NewAdapter(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adapter: %w", err)
 	}
-	return NewWithAdapter(logger, cfg, adapter)
+	return NewWithAdapter(logger, cfg, adapter, authenticator)
 }
 
 // NewWithAdapter creates a new Client instance with a custom network adapter.
-func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.TunnelAdapter) (*Client, error) {
+func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Client, error) {
 	logger.Infof("Creating client with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), cfg.MTU)
 
 	outbound := queue.NewChanQueue(common.QueueSize)
@@ -77,6 +78,7 @@ func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.Tun
 		reconnectInterval: time.Duration(cfg.ReconnectInterval) * time.Second,
 		connError:         make(chan error, 1),
 		scriptExecutor:    script.New(logger, cfg),
+		authenticator:     authenticator,
 	}, nil
 }
 
@@ -105,6 +107,15 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 				return
 			case <-time.After(c.reconnectInterval):
 				c.logger.Errorf("Connection failed, retrying: %v", err)
+				continue
+			}
+		}
+
+		// Perform authentication if configured
+		if c.authenticator != nil {
+			if err := c.authenticator.Authenticate(ctx, conn); err != nil {
+				c.logger.Errorf("Failed to authenticate: %v", err)
+				conn.Close()
 				continue
 			}
 		}

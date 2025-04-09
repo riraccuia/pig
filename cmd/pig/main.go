@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/riraccuia/pig/pkg/client"
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/server"
@@ -61,34 +62,42 @@ func main() {
 	switch cfg.Mode {
 	case "client":
 		var (
-			tunnel *client.Client
-			dialer func() (transport.Conn, error)
-			//toCtx    context.Context
-			//toCancel context.CancelFunc
+			tunnel        *client.Client
+			dialer        func() (transport.Conn, error)
+			authenticator common.Authenticator
 		)
-		//toCtx, toCancel = context.WithTimeout(ctx, time.Duration(cfg.Wait)*time.Second)
+		// Create authenticator if configured
+		authenticator, err = createClientAuthenticator(logger, cfg)
+		if err != nil {
+			logger.Fatalf("Failed to create authenticator: %v", err)
+		}
 		dialer, err = getClientDialFunc(ctx, cfg, logger)
 		if err != nil {
 			logger.Fatalf("Failed to get client dialer: %v", err)
 		}
-		tunnel, err = client.New(logger, cfg)
+		tunnel, err = client.New(logger, cfg, authenticator)
 		if err != nil {
 			break
 		}
 		if err := tunnel.Start(ctx, dialer); err != nil {
 			logger.Fatalf("Failed to start tunnel: %v", err)
 		}
-		//toCancel()
 	case "server":
 		var (
-			tunnel   *server.Server
-			listener func() (transport.Listener, error)
+			tunnel        *server.Server
+			listener      func() (transport.Listener, error)
+			authenticator common.Authenticator
 		)
+		// Create authenticator if configured
+		authenticator, err = createServerAuthenticator(logger, cfg)
+		if err != nil {
+			logger.Fatalf("Failed to create authenticator: %v", err)
+		}
 		listener, err = getServerListenFunc(ctx, cfg, logger)
 		if err != nil {
 			logger.Fatalf("Failed to get server listener: %v", err)
 		}
-		tunnel, err = server.New(logger, cfg)
+		tunnel, err = server.New(logger, cfg, authenticator)
 		if err != nil {
 			break
 		}

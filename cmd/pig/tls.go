@@ -23,6 +23,12 @@ func createTLSConfig(logger *log.Logger, cfg *config.Config) (*tls.Config, error
 		},
 	}
 
+	configureMTLS(logger, cfg, tlsCfg)
+
+	if cfg.Mode == "client" {
+		return tlsCfg, nil
+	}
+
 	if cfg.CertFile != "" {
 		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
 		if err != nil {

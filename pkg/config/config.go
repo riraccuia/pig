@@ -24,6 +24,20 @@ var supportedTransports = map[TransportType]bool{
 	TransportTLSICMP: true,
 }
 
+type AuthType string
+
+const (
+	AuthTypeJWT AuthType = "jwt"
+)
+
+var supportedAuthTypes = map[AuthType]bool{
+	AuthTypeJWT: true,
+}
+
+func (t AuthType) IsValid() bool {
+	return supportedAuthTypes[t]
+}
+
 type ICMPMode string
 
 const (
@@ -63,6 +77,7 @@ type Config struct {
 	ICMPMode          ICMPMode      `toml:"icmp_mode"`
 	StartScript       string        `toml:"start_script"` // Script to execute when a tunnel connection is established
 	StopScript        string        `toml:"stop_script"`  // Script to execute when a tunnel connection is disconnected
+	Auth              *AuthConfig   `toml:"auth"`
 }
 
 type Target struct {
@@ -74,6 +89,26 @@ type WredConfig struct {
 	WeightFactor    float64 `toml:"weight_factor"`
 	DropProbability float64 `toml:"drop_probability"`
 	Threshold       float64 `toml:"threshold"`
+}
+
+type AuthConfig struct {
+	Type AuthType    `toml:"type"`
+	JWT  *JWTAuth    `toml:"jwt"`
+	MTLS *MTLSConfig `toml:"mtls"`
+}
+
+type MTLSConfig struct {
+	// TrustPEM is the path to the trust bundle for MTLS, if not provided, the system CA will be used
+	// in client mode, this is used to validate the server certificate
+	// in server mode, this is used to validate client certificates
+	TrustPEM string `toml:"trust_pem"`
+}
+
+type JWTAuth struct {
+	// PublicKeySource is the path to the public key file for JWT verification
+	PublicKeySource string `toml:"public_key_source"`
+	// Token is the JWT token to use for authentication (client only)
+	Token string `toml:"token"`
 }
 
 func LoadConfig(path string) (*Config, error) {

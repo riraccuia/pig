@@ -15,6 +15,7 @@ func parseCmdFlags(logger *log.Logger) *config.Config {
 
 	cfg := loadConfigFile(flags.configPath, logger)
 	applyCommandLineFlags(cfg, flags, logger)
+	applyAuthSettings(cfg, flags, logger)
 	validateConfig(cfg, logger)
 	applyOptionalSettings(cfg, flags)
 
@@ -41,6 +42,10 @@ type flagSet struct {
 	icmpMode            string
 	startScript         string
 	stopScript          string
+	authType            string
+	token               string
+	jwkSource           string
+	mtlsCA              string
 }
 
 func defineFlags() *flagSet {
@@ -49,9 +54,9 @@ func defineFlags() *flagSet {
 	flag.StringVar(&flags.configPath, "config", "", "Path to configuration file")
 	flag.IntVar(&flags.verbose, "v", 0, "Print more verbose output")
 	flag.StringVar(&flags.transport, "proto", "quic", "Transport protocol for the tunnel, valid values are: quic, udp, tls, ws, icmp, tls-in-icmp")
+	flag.StringVar(&flags.remoteAddr, "c", "", "Connect address (host:port)")
 	flag.StringVar(&flags.serverAddr, "l", "", "Listen address (host:port)")
 	flag.StringVar(&flags.tunnelAddress, "tunnel", "10.0.0.1/32", "Tunnel address")
-	flag.StringVar(&flags.remoteAddr, "c", "", "Connect address (host:port)")
 	flag.StringVar(&flags.certFile, "cert", "", "Path to certificate file")
 	flag.StringVar(&flags.keyFile, "key", "", "Path to private key file")
 	flag.BoolVar(&flags.insecure, "k", false, "Insecure: disable certificate verification")
@@ -64,6 +69,10 @@ func defineFlags() *flagSet {
 	flag.Float64Var(&flags.wredThreshold, "thresh", 0.1, "Threshold for WRED as a fraction of the queue length, valid values are between 0 and 1")
 	flag.StringVar(&flags.startScript, "start-script", "", "Path to script to execute when a tunnel connection is established")
 	flag.StringVar(&flags.stopScript, "stop-script", "", "Path to script to execute when a tunnel connection is disconnected")
+	flag.StringVar(&flags.authType, "auth", "", "Authentication type, valid values are: jwt. Leave empty for no authentication.")
+	flag.StringVar(&flags.token, "tok", "", "Token for client authentication")
+	flag.StringVar(&flags.jwkSource, "jwk", "", "Path to public key file used to verify JWT tokens. This can be a local file or a URL. The file can be in PEM format or JWKS format.")
+	flag.StringVar(&flags.mtlsCA, "mtls-ca", "", "Path to CA certificate file for MTLS")
 	// TODO: implement this properly
 	// flag.StringVar(&flags.icmpMode, "icmp-mode", "aggressive", "ICMP mode, valid values are: normal, aggressive")
 	return flags
@@ -125,6 +134,37 @@ func applyCommandLineFlags(cfg *config.Config, flags *flagSet, logger *log.Logge
 
 	if flags.stopScript != "" {
 		cfg.StopScript = flags.stopScript
+	}
+}
+
+func applyAuthSettings(cfg *config.Config, flags *flagSet, logger *log.Logger) {
+	cfg.Auth = &config.AuthConfig{}
+
+	if cfg.Mode == "client" && flags.certFile != "" {
+		cfg.Auth.MTLS = &config.MTLSConfig{}
+	}
+
+	if flags.mtlsCA != "" && !flags.insecure {
+		cfg.Auth.MTLS = &config.MTLSConfig{
+			TrustPEM: flags.mtlsCA,
+		}
+	}
+
+	if flags.authType == "" {
+		return
+	}
+
+	if !config.AuthType(flags.authType).IsValid() {
+		logger.Fatalf("Invalid authentication type: %s", flags.authType)
+	}
+
+	cfg.Auth.Type = config.AuthType(flags.authType)
+
+	if cfg.Auth.Type == config.AuthTypeJWT {
+		cfg.Auth.JWT = &config.JWTAuth{
+			Token:           flags.token,
+			PublicKeySource: flags.jwkSource,
+		}
 	}
 }
 
