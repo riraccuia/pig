@@ -51,7 +51,7 @@ func (s *Server) handleNewClient(ctx context.Context, conn transport.Conn) {
 
 	clientCtx, cancel := context.WithCancel(ctx)
 
-	outbound := queue.NewChanQueue(common.QueueSize)
+	outbound := queue.NewChanQueue(s.config.QueueSize)
 	if s.config.Wred.DropProbability > 0 {
 		wred, err := wred.NewWRED(s.config.Wred.WeightFactor)
 		if err != nil {
@@ -70,7 +70,7 @@ func (s *Server) handleNewClient(ctx context.Context, conn transport.Conn) {
 		conn:     conn,
 		streams:  streams.New(),
 		sourceIP: sourceIP,
-		inbound:  make(common.PacketQueue, common.QueueSize),
+		inbound:  make(common.PacketQueue, s.config.QueueSize),
 		outbound: outbound,
 		dropLogger: common.NewDelayedCounterProcessor(func(c1, c2 *atomic.Uint64) {
 			s.logger.Infof("Client %s dropped %d packets (%d bytes)", conn.RemoteAddr(), c1.Load(), c2.Load())
@@ -92,7 +92,7 @@ func (s *Server) handleNewClient(ctx context.Context, conn transport.Conn) {
 		TunnelIndex: s.adapter.Index(),
 		RemoteAddr:  conn.RemoteAddr().String(),
 		NatAddr:     sourceIP.String(),
-		TunnelProto: string(s.config.Transport),
+		TunnelProto: string(s.config.Proto),
 	})
 
 	go s.manageClient(clientCtx, client)
@@ -124,7 +124,7 @@ func (s *Server) closeClient(client *ClientTunnel) {
 		TunnelIndex: s.adapter.Index(),
 		RemoteAddr:  client.conn.RemoteAddr().String(),
 		NatAddr:     client.sourceIP.String(),
-		TunnelProto: string(s.config.Transport),
+		TunnelProto: string(s.config.Proto),
 	})
 
 	client.cancel()

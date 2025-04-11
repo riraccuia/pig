@@ -47,14 +47,18 @@ func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.Tun
 		return nil, err
 	}
 
+	if cfg.QueueSize <= 0 {
+		cfg.QueueSize = common.DefaultQueueSize
+	}
+
 	return &Server{
 		logger:   logger,
 		config:   cfg,
 		adapter:  adapter,
 		clients:  &sync.Map{}, //new(ash.Map).From(ash.NewSkipList(32)),
 		ipPool:   newIPPool(network),
-		inbound:  make(common.PacketQueue, common.QueueSize),
-		outbound: make(common.PacketQueue, common.QueueSize),
+		inbound:  make(common.PacketQueue, cfg.QueueSize),
+		outbound: make(common.PacketQueue, cfg.QueueSize),
 		bufferPool: &sync.Pool{
 			New: func() interface{} {
 				return make(packet.IPv4Packet, cfg.MTU, cfg.MTU)

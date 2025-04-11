@@ -109,6 +109,18 @@ func readMultiLine(prompt string) []string {
 }
 
 func parseExpiration(exp string) (time.Duration, error) {
+	// Check for day format (e.g., "10d")
+	if len(exp) > 0 && exp[len(exp)-1] == 'd' {
+		// Extract the number part
+		numStr := exp[:len(exp)-1]
+		days, err := strconv.Atoi(numStr)
+		if err != nil {
+			return 0, fmt.Errorf("invalid day format: %w", err)
+		}
+		// Convert days to hours (24 hours per day)
+		exp = fmt.Sprintf("%dh", days*24)
+	}
+
 	duration, err := time.ParseDuration(exp)
 	if err != nil {
 		return 0, fmt.Errorf("invalid expiration format: %w", err)
@@ -121,7 +133,7 @@ func parseExpiration(exp string) (time.Duration, error) {
 
 func promptForExpiration() time.Duration {
 	for {
-		exp := readLine("Enter token expiration (e.g., 15m, 2h, 24h): ")
+		exp := readLine("Enter token expiration (e.g., 15m, 2h, 24h, 2d): ")
 		duration, err := parseExpiration(exp)
 		if err == nil {
 			return duration

@@ -68,7 +68,7 @@ type Config struct {
 	KeyFile           string        `toml:"key_file"`
 	StreamCount       int           `toml:"stream_count"`
 	Insecure          bool          `toml:"insecure"` // Skip TLS certificate verification if true
-	Transport         TransportType `toml:"transport"`
+	Proto             TransportType `toml:"proto"`
 	Target            Target        `toml:"target"`
 	ReconnectInterval int           `toml:"reconnect_interval"` // in seconds
 	BindAdapter       string        `toml:"bind_adapter"`       // The adapter to bind to
@@ -78,6 +78,7 @@ type Config struct {
 	StartScript       string        `toml:"start_script"` // Script to execute when a tunnel connection is established
 	StopScript        string        `toml:"stop_script"`  // Script to execute when a tunnel connection is disconnected
 	Auth              *AuthConfig   `toml:"auth"`
+	QueueSize         int           `toml:"queue_size"` // Size of packet queues (default: 256)
 }
 
 type Target struct {

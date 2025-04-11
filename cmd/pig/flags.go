@@ -46,6 +46,7 @@ type flagSet struct {
 	token               string
 	jwkSource           string
 	mtlsCA              string
+	queueSize           int
 }
 
 func defineFlags() *flagSet {
@@ -56,23 +57,24 @@ func defineFlags() *flagSet {
 	flag.StringVar(&flags.transport, "proto", "quic", "Transport protocol for the tunnel, valid values are: quic, udp, tls, ws, icmp, tls-in-icmp")
 	flag.StringVar(&flags.remoteAddr, "c", "", "Connect address (host:port)")
 	flag.StringVar(&flags.serverAddr, "l", "", "Listen address (host:port)")
-	flag.StringVar(&flags.tunnelAddress, "tunnel", "10.0.0.1/32", "Tunnel address")
+	flag.StringVar(&flags.tunnelAddress, "tunnel", "", "Tunnel address, defaults to 172.31.254.1/32 for clients and 172.31.255.1/24 for servers")
 	flag.StringVar(&flags.certFile, "cert", "", "Path to certificate file")
 	flag.StringVar(&flags.keyFile, "key", "", "Path to private key file")
 	flag.BoolVar(&flags.insecure, "k", false, "Insecure: disable certificate verification")
 	flag.IntVar(&flags.mtu, "mtu", 1400, "MTU size")
-	flag.IntVar(&flags.streamCount, "streams", 5, "Number of streams to use, if the transport supports it")
+	flag.IntVar(&flags.streamCount, "streams", 0, "Number of streams to use, if the transport supports it, defaults to the number of CPUs")
 	flag.IntVar(&flags.reconnectInterval, "retry", 5, "Reconnect interval in seconds")
-	flag.StringVar(&flags.bindAdapter, "I", "", "The adapter/interface to bind to")
+	flag.StringVar(&flags.bindAdapter, "I", "", "The adapter/interface to bind to, useful for icmp based protos")
 	flag.Float64Var(&flags.wredWeightFactor, "factor", 5, "Weight factor for WRED, lower values mean more weight to recent packets")
 	flag.Float64Var(&flags.wredDropProbability, "drop", 0.25, "Drop probability for WRED, valid values are between 0 and 1")
-	flag.Float64Var(&flags.wredThreshold, "thresh", 0.1, "Threshold for WRED as a fraction of the queue length, valid values are between 0 and 1")
+	flag.Float64Var(&flags.wredThreshold, "thresh", 0.30, "Threshold for WRED as a fraction of the queue length, valid values are between 0 and 1")
 	flag.StringVar(&flags.startScript, "start-script", "", "Path to script to execute when a tunnel connection is established")
 	flag.StringVar(&flags.stopScript, "stop-script", "", "Path to script to execute when a tunnel connection is disconnected")
 	flag.StringVar(&flags.authType, "auth", "", "Authentication type, valid values are: jwt. Leave empty for no authentication.")
 	flag.StringVar(&flags.token, "tok", "", "Token for client authentication")
 	flag.StringVar(&flags.jwkSource, "jwk", "", "Path to public key file used to verify JWT tokens. This can be a local file or a URL. The file can be in PEM format or JWKS format.")
 	flag.StringVar(&flags.mtlsCA, "mtls-ca", "", "Path to CA certificate file for MTLS")
+	flag.IntVar(&flags.queueSize, "qs", 256, "Size of packet queues")
 	// TODO: implement this properly
 	// flag.StringVar(&flags.icmpMode, "icmp-mode", "aggressive", "ICMP mode, valid values are: normal, aggressive")
 	return flags
@@ -97,7 +99,7 @@ func applyCommandLineFlags(cfg *config.Config, flags *flagSet, logger *log.Logge
 	}
 
 	if flags.transport != "" {
-		cfg.Transport = config.TransportType(flags.transport)
+		cfg.Proto = config.TransportType(flags.transport)
 	}
 
 	if flags.serverAddr != "" {
@@ -108,8 +110,12 @@ func applyCommandLineFlags(cfg *config.Config, flags *flagSet, logger *log.Logge
 		parseAddress(cfg, flags.remoteAddr, "local", logger)
 	}
 
-	if flags.tunnelAddress != "" {
-		cfg.TunnelAddress = flags.tunnelAddress
+	cfg.TunnelAddress = flags.tunnelAddress
+	if cfg.TunnelAddress == "" {
+		cfg.TunnelAddress = "172.31.254.1/32"
+		if cfg.Mode == "server" {
+			cfg.TunnelAddress = "172.31.255.1/24"
+		}
 	}
 
 	if flags.certFile != "" {
@@ -169,7 +175,7 @@ func applyAuthSettings(cfg *config.Config, flags *flagSet, logger *log.Logger) {
 }
 
 func parseAddress(cfg *config.Config, addr string, addrType string, logger *log.Logger) {
-	if cfg.Transport == config.TransportICMP || cfg.Transport == config.TransportTLSICMP {
+	if cfg.Proto == config.TransportICMP || cfg.Proto == config.TransportTLSICMP {
 		// strip the port if present
 		parts := strings.Split(addr, ":")
 		if len(parts) > 1 {
@@ -195,18 +201,18 @@ func parseAddress(cfg *config.Config, addr string, addrType string, logger *log.
 }
 
 func validateConfig(cfg *config.Config, logger *log.Logger) {
-	if cfg.Transport == "" {
+	if cfg.Proto == "" {
 		logger.Info("Transport not specified, defaulting to quic")
-		cfg.Transport = config.TransportQUIC
+		cfg.Proto = config.TransportQUIC
 	}
 
-	if !cfg.Transport.IsValid() {
-		logger.Fatalf("Invalid transport: %s", cfg.Transport)
+	if !cfg.Proto.IsValid() {
+		logger.Fatalf("Invalid transport: %s", cfg.Proto)
 	}
 
-	if cfg.Transport == config.TransportICMP || cfg.Transport == config.TransportTLSICMP {
+	if cfg.Proto == config.TransportICMP || cfg.Proto == config.TransportTLSICMP {
 		if cfg.BindAdapter == "" {
-			logger.Fatalf("Bind adapter not specified, but required for %s. Use -I flag to specify the adapter.", cfg.Transport)
+			logger.Fatalf("Bind adapter not specified, but required for %s. Use -I flag to specify the adapter.", cfg.Proto)
 		}
 		// TODO: implement this properly
 		// if !cfg.ICMPMode.IsValid() {
@@ -216,14 +222,14 @@ func validateConfig(cfg *config.Config, logger *log.Logger) {
 	}
 
 	if cfg.Target.Address == "" {
-		if cfg.Mode == "server" && (cfg.Transport == config.TransportICMP || cfg.Transport == config.TransportTLSICMP) {
+		if cfg.Mode == "server" && (cfg.Proto == config.TransportICMP || cfg.Proto == config.TransportTLSICMP) {
 			return
 		}
 		logger.Fatalf("Target address not specified")
 	}
 
 	if cfg.Target.Port == 0 {
-		if cfg.Transport == config.TransportICMP || cfg.Transport == config.TransportTLSICMP {
+		if cfg.Proto == config.TransportICMP || cfg.Proto == config.TransportTLSICMP {
 			return
 		}
 		logger.Fatalf("Target port not specified")
@@ -239,6 +245,7 @@ func applyOptionalSettings(cfg *config.Config, flags *flagSet) {
 	cfg.Wred.DropProbability = flags.wredDropProbability
 	cfg.Wred.Threshold = flags.wredThreshold
 	cfg.Wred.WeightFactor = flags.wredWeightFactor
+	cfg.QueueSize = flags.queueSize
 
 	switch flags.verbose {
 	case 0:

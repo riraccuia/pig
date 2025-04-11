@@ -53,13 +53,11 @@ For quick testing with automatically generated certificates:
 
 ```bash
 # Terminal 1 - Server
-sudo pig -proto ws -l :8080 -tunnel 10.0.0.1/24 -k
+sudo pig -proto ws -l :8080 -k
+# output: INF Creating client with adapter utun0, IP: 172.31.255.1, MTU 1400
 
 # Terminal 2 - Client
 sudo pig -proto ws -c localhost:8080 -k
-
-# Terminal 3 - Test connectivity
-ping 10.0.0.1
 ```
 
 ## Congestion Control
@@ -107,14 +105,18 @@ WRED helps maintain low latency by:
 
 | Category | Flag | Description | Default |
 |----------|------|-------------|---------|
-| **Network Settings** | `-mtu` | MTU size (adjust based on your network) | 1300 |
-| | `-streams` | Number of multiplexed streams for supported protocols | 5 |
+| **Config File** | `-config` | Path to configuration file in toml format | |
+| **Network Settings** | `-proto` | Transport protocol: "quic", "udp", "tls", "ws", "icmp", or "tls-in-icmp" | quic |
+| | `-mtu` | MTU size | 1400 |
+| | `-streams` | Number of multiplexed streams for supported protocols | CPU cores available |
 | | `-retry` | Reconnection interval in seconds | 5 |
 | | `-I` | Network interface to use (e.g., wlan0, en0) | |
+| | `-tunnel` | Tunnel address in CIDR format | 172.31.254.1/32 (client), 172.31.255.1/24 (server) |
+| | `-qs` | Size of packet queues | 256 |
 | **WRED Configuration** | `-factor` | Weight factor for WRED | 5 |
 | | `-drop` | Drop probability | 0.25 |
 | | `-thresh` | Queue length threshold | 0.1 |
-| **Logging** | `-v` | Verbosity level for logging (0-2, where 2 is most verbose) | |
+| **Logging** | `-v` | Verbosity level for logging (0-2, where 2 is most verbose) | 0 |
 | **Script Execution** | `-start-script` | Path to script to execute when a tunnel connection is established | |
 | | `-stop-script` | Path to script to execute when a tunnel connection is disconnected | |
 | **Authentication** | `-cert` | Path to certificate file for MTLS | |
@@ -132,26 +134,27 @@ The configuration file uses TOML format.
 | Setting | Type | Description | Default |
 |---------|------|-------------|---------|
 | `mode` | string | Operating mode: "client" or "server" | Required |
-| `tunnel_address` | string | CIDR format for the tunnel interface (e.g., "10.0.0.1/24") | Required |
-| `mtu` | int | Maximum Transmission Unit for the tunnel | 1300 |
+| `proto` | string | Transport protocol: "quic", "udp", "tls", "ws", "icmp", or "tls-in-icmp" | quic |
+| `tunnel_address` | string | CIDR format for the tunnel interface (e.g., "10.0.0.1/24") | 172.31.254.1/32 (client), 172.31.255.1/24 (server) |
+| `queue_size` | int | Size of packet queues | 256 |
+| `mtu` | int | Maximum Transmission Unit for the tunnel | 1400 |
 | `cert_file` | string | Path to TLS certificate file | Auto-generated if empty |
 | `key_file` | string | Path to TLS private key file | Auto-generated if empty |
-| `stream_count` | int | Number of multiplexed streams for protocols that support it | 5 |
+| `stream_count` | int | Number of multiplexed streams for protocols that support it | CPU cores available |
 | `insecure` | bool | Skip TLS certificate verification if true | false |
-| `transport` | string | Transport protocol: "quic", "udp", "tls", "ws", "icmp", or "tls-in-icmp" | Required |
 | `reconnect_interval` | int | Time in seconds to wait before reconnecting | 5 |
-| `bind_adapter` | string | Network interface to bind to (e.g., "eth0", "wlan0") | Default interface |
-| `log_level` | string | Logging level: "debug", "info", "warn", "error" | "info" |
-| `start_script` | string | Script to execute when a tunnel connection is established | "" |
-| `stop_script` | string | Script to execute when a tunnel connection is terminated | "" |
+| `bind_adapter` | string | Network interface to bind to (e.g., "eth0", "wlan0"), useful for icmp based protos | Default interface |
+| `log_level` | string | Logging level: "debug", "info", "warn", "error" | info |
+| `start_script` | string | Script to execute when a tunnel connection is established |  |
+| `stop_script` | string | Script to execute when a tunnel connection is terminated |  |
 | `target.address` | string | Target address to bind to (server) or connect to (client) | Required |
 | `target.port` | int | Port to use for the connection | Required |
 | `wred.weight_factor` | float | Weight factor for WRED algorithm | 5.0 |
 | `wred.drop_probability` | float | Probability of packet drop in WRED | 0.25 |
 | `wred.threshold` | float | Queue threshold for WRED | 0.1 |
-| `auth.type` | string | Authentication type: "jwt" | "" |
-| `auth.jwt.public_key_source` | string | Path to public key file, URL to JWKS, or JSON file with JWKS | "" |
-| `auth.jwt.token` | string | JWT token for client authentication | "" |
+| `auth.type` | string | Authentication type: "jwt" | None |
+| `auth.jwt.public_key_source` | string | Path to public key file, URL to JWKS, or JSON file with JWKS |  |
+| `auth.jwt.token` | string | JWT token for client authentication |  |
 | `auth.mtls.trust_pem` | string | Path to trust bundle for mTLS | System CA |
 
 Here's an example `config.toml` with explanations for all available settings:
@@ -159,8 +162,9 @@ Here's an example `config.toml` with explanations for all available settings:
 ```toml
 # Server configuration
 mode = "server"                # "server" or "client"
-transport = "quic"             # "quic", "udp", "tls", "ws", "icmp", or "tls-in-icmp"
+proto = "quic"                 # "quic", "udp", "tls", "ws", "icmp", or "tls-in-icmp"
 tunnel_address = "10.0.0.1/24" # CIDR format for tunnel interface
+queue_size = 128               # Size of packet queues for the transport layer
 mtu = 1500                     # Maximum Transmission Unit
 cert_file = "/path/to/cert.pem"
 key_file = "/path/to/key.pem"
@@ -171,7 +175,6 @@ reconnect_interval = 5         # Reconnection interval in seconds
 bind_adapter = "eth0"          # Network interface to bind to
 start_script = "/path/to/start.sh" # Script to run when a connection is established
 stop_script = "/path/to/stop.sh"   # Script to run when a connection is terminated
-icmp_mode = "normal"           # "normal" or "aggressive" (for ICMP-based transports)
 
 [target]
 address = "0.0.0.0"            # Target address to bind to (server) or connect to (client)
@@ -317,7 +320,7 @@ For TLS-based protocols, you can enable mutual authentication by providing clien
 
 ```bash
 # Server with mutual TLS authentication
-sudo pig -proto tls -l :8080 -tunnel 10.0.0.1/24 -cert server.crt -key server.key -mtls-ca ca.crt
+sudo pig -proto tls -l :8080 -cert server.crt -key server.key -mtls-ca ca.crt
 
 # Client with certificate
 sudo pig -proto tls -c server:8080 -cert client.crt -key client.key
@@ -329,7 +332,7 @@ You can combine JWT and TLS mutual authentication for TLS-based protocols:
 
 ```bash
 # Server with both authentication methods
-sudo pig -proto tls -l :8080 -tunnel 10.0.0.1/24 \
+sudo pig -proto tls -l :8080 \
 -cert server.crt -key server.key -mtls-ca ca.crt \
 -auth jwt -jwk bundle.pem
 
@@ -391,25 +394,25 @@ The `-proto` flag is used to specify the transport protocol for the tunnel. Vali
 #### Server mode:
 ```bash
 # Start a server using QUIC
-pig -s -l :8080 -tunnel 10.0.0.1/24 -proto quic
+pig -s -l :8080 -proto quic
 
-# Start a server using UDP
-pig -s -l :8080 -tunnel 10.0.0.1/24 -proto ws
+# Start a server using websocket
+pig -s -l :8080 -proto ws
 
 # Start a server using ICMP with tail drop settings
-pig -proto icmp -I wlan0 -tunnel 10.0.0.1/28 -drop 0.50 -thresh 0.05 -k -v 2
+pig -proto icmp -I wlan0 -drop 0.50 -thresh 0.05 -k -v 2
 ```
 
 #### Client mode:
 ```bash
 # Connect to a server using QUIC
-pig -c example.com:8080 -tunnel 10.1.0.2/24 -proto quic
+pig -c example.com:8080 -proto quic
 
-# Connect to a server using UDP
-pig -c example.com:8080 -tunnel 10.1.0.2/24 -proto ws
+# Connect to a server using websocket
+pig -c example.com:8080 -proto ws
 
 # Connect to a server using ICMP with tail drop settings
-pig -proto icmp -c 192.168.2.100 -I en0 -drop 0.50 -thresh 0.01 -k -v 2
+pig -proto icmp -c 192.168.1.100 -I en0 -drop 0.50 -thresh 0.01 -k -v 2
 ```
 
 ## Contributing

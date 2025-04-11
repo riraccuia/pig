@@ -51,7 +51,11 @@ func New(logger common.Logger, cfg *config.Config, authenticator common.Authenti
 func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Client, error) {
 	logger.Infof("Creating client with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), cfg.MTU)
 
-	outbound := queue.NewChanQueue(common.QueueSize)
+	if cfg.QueueSize <= 0 {
+		cfg.QueueSize = common.DefaultQueueSize
+	}
+
+	outbound := queue.NewChanQueue(cfg.QueueSize)
 	if cfg.Wred.DropProbability > 0 {
 		wred, err := wred.NewWRED(cfg.Wred.WeightFactor)
 		if err != nil {
@@ -66,7 +70,7 @@ func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.Tun
 		config:   cfg,
 		streams:  streams.New(),
 		adapter:  adapter,
-		inbound:  make(common.PacketQueue, common.QueueSize),
+		inbound:  make(common.PacketQueue, cfg.QueueSize),
 		outbound: outbound,
 		bufferPool: &sync.Pool{
 			New: func() interface{} {
@@ -135,7 +139,7 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 			TunnelIndex: c.adapter.Index(),
 			RemoteAddr:  conn.RemoteAddr().String(),
 			NatAddr:     "", // No NAT address in client mode
-			TunnelProto: string(c.config.Transport),
+			TunnelProto: string(c.config.Proto),
 		})
 
 		select {
@@ -152,7 +156,7 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 				TunnelIndex: c.adapter.Index(),
 				RemoteAddr:  conn.RemoteAddr().String(),
 				NatAddr:     "", // No NAT address in client mode
-				TunnelProto: string(c.config.Transport),
+				TunnelProto: string(c.config.Proto),
 			})
 
 			c.Close()

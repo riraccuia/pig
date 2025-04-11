@@ -57,7 +57,7 @@ func main() {
 
 	logger.SetLevel(cfg.LogLevel)
 
-	logger.Infof("Mode: %s, Transport: %s, MTU: %d", cfg.Mode, cfg.Transport, cfg.MTU)
+	logger.Infof("Mode: %s, Transport: %s, MTU: %d", cfg.Mode, cfg.Proto, cfg.MTU)
 
 	switch cfg.Mode {
 	case "client":
@@ -120,7 +120,7 @@ func main() {
 }
 
 func getClientDialFunc(ctx context.Context, cfg *config.Config, logger *log.Logger) (func() (transport.Conn, error), error) {
-	switch cfg.Transport {
+	switch cfg.Proto {
 	case config.TransportQUIC:
 		tlsConfig, err := createTLSConfig(logger, cfg)
 		if err != nil {
@@ -150,12 +150,12 @@ func getClientDialFunc(ctx context.Context, cfg *config.Config, logger *log.Logg
 		}
 		return tlsicmp.GetClientDialFunc(ctx, cfg, tlsConfig), nil
 	default:
-		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Transport)
+		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 	}
 }
 
 func getServerListenFunc(ctx context.Context, cfg *config.Config, logger *log.Logger) (func() (transport.Listener, error), error) {
-	switch cfg.Transport {
+	switch cfg.Proto {
 	case config.TransportQUIC:
 		tlsConfig, err := createTLSConfig(logger, cfg)
 		if err != nil {
@@ -185,6 +185,6 @@ func getServerListenFunc(ctx context.Context, cfg *config.Config, logger *log.Lo
 		}
 		return tlsicmp.GetServerListenFunc(ctx, cfg, tlsConfig), nil
 	default:
-		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Transport)
+		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 	}
 }

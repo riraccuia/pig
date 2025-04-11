@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	QueueSize = 1024
+	DefaultQueueSize = 256
 )
 
 type PacketQueue chan packet.IPv4Packet
