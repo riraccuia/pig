@@ -3,12 +3,17 @@ package quicgo
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
+	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/quic-go/quic-go"
 	"github.com/riraccuia/pig/pkg/config"
+	"github.com/riraccuia/pig/pkg/ice/signaling"
+	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -61,10 +66,10 @@ func (c *QuicConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, err = stream.Read([]byte{0})
+	/*_, err = stream.Read([]byte{0})
 	if err != nil {
 		return nil, err
-	}
+	}*/
 	return &QuicStream{stream: stream}, nil
 }
 
@@ -73,10 +78,10 @@ func (c *QuicConn) NewStream(ctx context.Context) (transport.Stream, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, err = stream.Write([]byte{0})
+	/*_, err = stream.Write([]byte{0})
 	if err != nil {
 		return nil, err
-	}
+	}*/
 	return &QuicStream{stream: stream}, nil
 }
 
@@ -121,10 +126,46 @@ func (t *QuicTransport) Close() error {
 }
 
 func GetClientDialFunc(ctx context.Context, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
+	return dialFuncWithSrcPort(ctx, config.Target.Address, config.Target.SrcPort, config.Target.Port, tlsConfig, config)
+}
+
+func GetServerListenFunc(ctx context.Context, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
+	return func() (transport.Listener, error) {
+		udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: config.Target.Port})
+		if err != nil {
+			return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
+		}
+		if config.ICE.Enabled {
+			logger := log.NewBlockingLogger()
+			logger.SetLevel(config.LogLevel)
+			err := signaling.ReceivePunchRequests(ctx, signaling.GetOptionsWithLogger(logger, &config.ICE), udpConn)
+			if err != nil {
+				return nil, fmt.Errorf("failed to setup punch signaling channel: %w", err)
+			}
+		}
+		maxStreams := int64(config.StreamCount)
+		if maxStreams <= 0 {
+			maxStreams = int64(runtime.NumCPU())
+		}
+		listener, err := quic.Listen(
+			udpConn,
+			tlsConfig.Clone(),
+			&quic.Config{
+				MaxIncomingStreams: maxStreams,
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
+		}
+		return NewQuicTransport(listener), nil
+	}
+}
+
+func dialFuncDefault(ctx context.Context, address string, dstPort int, tlsConfig *tls.Config) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
 		conn, err := quic.DialAddr(
 			ctx,
-			fmt.Sprintf("%s:%d", config.Target.Address, config.Target.Port),
+			fmt.Sprintf("%s:%d", address, dstPort),
 			tlsConfig.Clone(),
 			&quic.Config{},
 		)
@@ -135,16 +176,44 @@ func GetClientDialFunc(ctx context.Context, config *config.Config, tlsConfig *tl
 	}
 }
 
-func GetServerListenFunc(ctx context.Context, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
-	return func() (transport.Listener, error) {
-		listener, err := quic.ListenAddr(
-			fmt.Sprintf(":%d", config.Target.Port),
-			tlsConfig.Clone(),
+func dialFuncWithSrcPort(ctx context.Context, address string, srcPort, dstPort int, tlsConfig *tls.Config, cfg *config.Config) func() (transport.Conn, error) {
+	return func() (transport.Conn, error) {
+		udpConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: srcPort})
+		if err != nil {
+			return nil, err
+		}
+		if cfg.ICE.Enabled {
+			logger := log.NewBlockingLogger()
+			logger.SetLevel(cfg.LogLevel)
+			err := signaling.SignalPunchRequest(ctx,
+				signaling.GetOptionsWithLogger(logger, &cfg.ICE),
+				address+":"+strconv.Itoa(dstPort),
+				udpConn,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to signal punch request: %w", err)
+			}
+			time.Sleep(time.Second)
+		}
+		udpAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", address, dstPort))
+		if err != nil {
+			return nil, err
+		}
+		if tlsConfig == nil {
+			return nil, errors.New("quic: tls.Config not set")
+		}
+		tr := &quic.Transport{
+			Conn: udpConn,
+		}
+		conn, err := tr.Dial(
+			ctx,
+			udpAddr,
+			tlsConfig,
 			&quic.Config{},
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
+			return nil, fmt.Errorf("failed to establish QUIC connection: %w", err)
 		}
-		return NewQuicTransport(listener), nil
+		return NewQuicConn(conn), nil
 	}
 }

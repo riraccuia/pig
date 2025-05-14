@@ -11,6 +11,7 @@ pig is my playground for network protocol experimentation and a Swiss Army knife
 * Stream multiplexing (for streamed protocols)
 * Configurable via command line flags or TOML configuration file
 * MTLS and JWT-based authentication for secure client-server connections
+* ICE candidate gathering with hole punching for NAT traversal (QUIC transport only)
 
 _*Windows support is implemented but not at all tested at this time_
 
@@ -113,6 +114,7 @@ WRED helps maintain low latency by:
 | | `-I` | Network interface to use (e.g., wlan0, en0) | |
 | | `-tunnel` | Tunnel address in CIDR format | 172.31.254.1/32 (client), 172.31.255.1/24 (server) |
 | | `-qs` | Size of packet queues | 256 |
+| | `-p` | Source port to use for the connection (if applicable) | 0 (system assigned) |
 | **WRED Configuration** | `-factor` | Weight factor for WRED | 5 |
 | | `-drop` | Drop probability | 0.25 |
 | | `-thresh` | Queue length threshold | 0.1 |
@@ -126,6 +128,10 @@ WRED helps maintain low latency by:
 | | `-auth` | Specify non-tls authentication type to use, currently `jwt` only | |
 | | `-tok` | The token to send to the server for applicable auth types | |
 | | `-jwk` | Path to public key file used to verify JWT tokens. This can be a local file or a URL. The file can be in PEM or JWKS formats. | |
+| **ICE** | `-ice` | Enable ICE based hole punching, set to true (-ice true) to use the default server or provide a MQTT broker address | ssl://test.mosquitto.org:8883 |
+| | `-ice-key` | Encryption passphrase for ICE signaling messages | |
+| | `-stun-srv` | STUN server address for hole punching | stun.l.google.com:19302 |
+| | `-stun-qry` | Source port to query, 'R' for random port | |
 
 ### Configuration File
 
@@ -149,6 +155,7 @@ The configuration file uses TOML format.
 | `stop_script` | string | Script to execute when a tunnel connection is terminated |  |
 | `target.address` | string | Target address to bind to (server) or connect to (client) | Required |
 | `target.port` | int | Port to use for the connection | Required |
+| `target.src_port` | int | Source port to use for the connection (if applicable) | 0 (system assigned) |
 | `wred.weight_factor` | float | Weight factor for WRED algorithm | 5.0 |
 | `wred.drop_probability` | float | Probability of packet drop in WRED | 0.25 |
 | `wred.threshold` | float | Queue threshold for WRED | 0.1 |
@@ -156,6 +163,13 @@ The configuration file uses TOML format.
 | `auth.jwt.public_key_source` | string | Path to public key file, URL to JWKS, or JSON file with JWKS |  |
 | `auth.jwt.token` | string | JWT token for client authentication |  |
 | `auth.mtls.trust_pem` | string | Path to trust bundle for mTLS | System CA |
+| `ice.enabled` | bool | Enable automatic hole punching | false |
+| `ice.stun_address` | string | STUN server address for hole punching | stun.l.google.com:19302 |
+| `ice.signaling.encryption_key` | string | Encryption key for signaling messages | no encryption |
+| `ice.signaling.mqtt_broker_address` | string | MQTT broker address for signaling | ssl://test.mosquitto.org:8883 |
+| `ice.signaling.mqtt_client_id` | string | Client ID for MQTT connection | |
+| `ice.signaling.mqtt_username` | string | Username for MQTT connection | |
+| `ice.signaling.mqtt_password` | string | Password for MQTT connection | |
 
 Here's an example `config.toml` with explanations for all available settings:
 
@@ -179,6 +193,7 @@ stop_script = "/path/to/stop.sh"   # Script to run when a connection is terminat
 [target]
 address = "0.0.0.0"            # Target address to bind to (server) or connect to (client)
 port = 8080                    # Port to use
+src_port = 0                   # Source port (0 for system assigned)
 
 [wred]
 weight_factor = 5.0            # Weight factor for WRED algorithm
@@ -194,6 +209,17 @@ type = "jwt"                   # Authentication type: "jwt"
 
   [auth.mtls]
   trust_pem = "/path/to/ca.pem" # Path to trust bundle for mTLS
+
+[ice]
+enabled = true                 # Enable automatic hole punching
+stun_address = "stun.l.google.com:19302"  # STUN server address
+
+  [ice.signaling]
+  encryption_key = "my-secure-passphrase"         # Encryption key for signaling messages
+  mqtt_broker_address = "ssl://mqtt-broker:8883"  # Optional MQTT broker address, defaults to ssl://test.mosquitto.org:8883
+  mqtt_client_id = "unique-client-id"             # Optional MQTT client ID
+  mqtt_username = "user"                          # Optional MQTT username
+  mqtt_password = "password"                      # Optional MQTT password
 ```
 
 Run with config file:
@@ -339,6 +365,53 @@ sudo pig -proto tls -l :8080 \
 # Client with both token and certificate
 export PIG_TOKEN="xxx"
 sudo pig -proto tls -c server:8080 -cert client.crt -key client.key -auth jwt -tok "$PIG_TOKEN"
+```
+
+## ICE for direct p2p connectivity across NATs and firewalls
+
+pig includes a simplified ICE implementation that helps establish direct peer-to-peer connections through NATs and firewalls without configuring port forwarding at all.
+This feature is currently only supported with the QUIC transport protocol, using the `-ice` flag.
+
+The mechanism uses:
+- STUN for discovering public endpoints
+- MQTT for secure signaling between peers
+- AES-256-GCM encryption for signaling messages
+- UDP hole punching to establish direct connectivity between peers
+
+For more details about pig's ICE implementation, see the [ICE Documentation](pkg/ice/README.md).
+
+### Enabling ICE
+
+ICE can be enabled using the `-ice true` flag, or `-ice <broker_addr>`. If no broker address is provided, pig connects by default to `ssl://test.mosquitto.org:8883`. 
+You can optionally provide an encryption key as a passphrase, which will be used to encrypt messages exchanged during the signaling phase: this is particularly useful when connecting pig to free public MQTT brokers.
+
+```bash
+# Start a listener with ICE and hole punching enabled using default settings
+sudo pig -proto quic -l :8080 -k -ice
+
+# Connect to the server with ICE and hole punching using default settings
+sudo pig -proto quic -c server:8080 -k -ice
+
+# Start a listener with ICE and hole punching enabled with encryption passphrase
+sudo pig -proto quic -l :8080 -k -ice -ice-key my-secure-passphrase
+
+# Connect to the server with ICE and hole punching with encryption passphrase
+sudo pig -proto quic -c server:8080 -ice -ice-key my-secure-passphrase
+
+# Configure a custom STUN server and MQTT broker
+sudo pig -proto quic -c server:8080 -ice ssl://my.broker.org:8883 -stun-srv stun.example.com:3478
+```
+
+The same settings can be configured in the TOML configuration file:
+
+```toml
+[ice]
+enabled = true
+stun_address = "stun.l.google.com:19302"
+
+[ice.signaling]
+encryption_key = "my-secure-passphrase"
+mqtt_broker_address = "ssl://mqtt-broker:8883"
 ```
 
 ## Platform Support

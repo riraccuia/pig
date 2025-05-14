@@ -54,6 +54,19 @@ func NewLogger(ctx context.Context) *Logger {
 	}
 }
 
+// NewBlockingLogger creates a new Logger instance that writes directly to stdout
+// without buffering. This logger will block until each message is written.
+func NewBlockingLogger() *Logger {
+	output := zerolog.ConsoleWriter{
+		Out:        os.Stdout,
+		TimeFormat: time.RFC3339,
+	}
+	zl := zerolog.New(output).Level(zerolog.InfoLevel).With().Timestamp().Logger()
+	return &Logger{
+		log: zl,
+	}
+}
+
 func (l *Logger) SetLevel(level string) {
 	l.log = l.log.Level(parseLevel(level))
 }

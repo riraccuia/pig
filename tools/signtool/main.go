@@ -38,7 +38,7 @@ Expiration format examples:
   15m  - 15 minutes
   2h   - 2 hours
   24h  - 1 day
-  72h  - 3 days
+  2d   - 2 days
 `
 
 	minRSAKeySize = 2048
@@ -432,16 +432,16 @@ func promptForKeyStorage() bool {
 	}
 }
 
-func encodePublicKeyToPEM(publicKey interface{}) ([]byte, error) {
-	var publicBlock *pem.Block
+func encodeKeyToPEM(key interface{}) ([]byte, error) {
+	var block *pem.Block
 
-	switch k := publicKey.(type) {
+	switch k := key.(type) {
 	case *rsa.PublicKey:
 		publicBytes, err := x509.MarshalPKIXPublicKey(k)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal RSA public key: %w", err)
 		}
-		publicBlock = &pem.Block{
+		block = &pem.Block{
 			Type:  "PUBLIC KEY",
 			Bytes: publicBytes,
 		}
@@ -450,15 +450,35 @@ func encodePublicKeyToPEM(publicKey interface{}) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal ED25519 public key: %w", err)
 		}
-		publicBlock = &pem.Block{
+		block = &pem.Block{
 			Type:  "PUBLIC KEY",
 			Bytes: publicBytes,
 		}
+	case *rsa.PrivateKey:
+		// Try PKCS8 first, fall back to PKCS1 if that fails
+		privateBytes, err := x509.MarshalPKCS8PrivateKey(k)
+		if err != nil {
+			// Fall back to PKCS1 for RSA keys
+			privateBytes = x509.MarshalPKCS1PrivateKey(k)
+		}
+		block = &pem.Block{
+			Type:  "PRIVATE KEY",
+			Bytes: privateBytes,
+		}
+	case ed25519.PrivateKey:
+		privateBytes, err := x509.MarshalPKCS8PrivateKey(k)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal ED25519 private key: %w", err)
+		}
+		block = &pem.Block{
+			Type:  "PRIVATE KEY",
+			Bytes: privateBytes,
+		}
 	default:
-		return nil, fmt.Errorf("unsupported public key type: %T", publicKey)
+		return nil, fmt.Errorf("unsupported key type: %T", key)
 	}
 
-	return pem.EncodeToMemory(publicBlock), nil
+	return pem.EncodeToMemory(block), nil
 }
 
 func getOrGenerateKey(keyPath string) (interface{}, interface{}, error) {
@@ -512,13 +532,22 @@ func getOrGenerateKey(keyPath string) (interface{}, interface{}, error) {
 	}
 
 	// Display public key in PEM format
-	pemBytes, err := encodePublicKeyToPEM(publicKey)
+	pubPemBytes, err := encodeKeyToPEM(publicKey)
 	if err != nil {
 		fmt.Printf("Warning: Failed to encode public key: %v\n", err)
 		return nil, nil, err
 	}
 
-	fmt.Printf("\nGenerated public key (save this for verification):\n%s\n", string(pemBytes))
+	fmt.Printf("\nGenerated public key (save this for verification):\n%s\n", string(pubPemBytes))
+
+	// Display private key in PEM format
+	privPemBytes, err := encodeKeyToPEM(privateKey)
+	if err != nil {
+		fmt.Printf("Warning: Failed to encode private key: %v\n", err)
+		return nil, nil, err
+	}
+
+	fmt.Printf("\nGenerated private key (save this for future use):\n%s\n", string(privPemBytes))
 
 	return privateKey, publicKey, nil
 }

@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net/http"
+	"strconv"
 
 	// _ "net/http/pprof"
 	"os"
@@ -16,6 +18,7 @@ import (
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/server"
+	"github.com/riraccuia/pig/pkg/stun"
 	"github.com/riraccuia/pig/pkg/transport"
 	icmp "github.com/riraccuia/pig/pkg/transport/icmp"
 	qt "github.com/riraccuia/pig/pkg/transport/quic-go"
@@ -44,8 +47,13 @@ func main() {
 		ctx    context.Context
 		cancel context.CancelFunc
 		logger *log.Logger
+		flags  *flagSet
 		cfg    *config.Config
 	)
+
+	flags = parseCmdFlags()
+
+	doStunQuery(flags)
 
 	ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
@@ -53,7 +61,7 @@ func main() {
 	logger = log.NewLogger(ctx)
 	transport.Logger = logger
 
-	cfg = parseCmdFlags(logger)
+	cfg = initPig(flags, logger)
 
 	logger.SetLevel(cfg.LogLevel)
 
@@ -187,4 +195,42 @@ func getServerListenFunc(ctx context.Context, cfg *config.Config, logger *log.Lo
 	default:
 		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 	}
+}
+
+// doStunQuery queries the STUN server to get the public IP and port
+// and prints it to stdout.
+func doStunQuery(flags *flagSet) {
+	var (
+		logger  common.Logger = log.NewBlockingLogger()
+		srcPort int
+		err     error
+	)
+
+	if flags.stunServerAddr == "" {
+		logger.Fatalf("STUN server address not specified")
+	}
+	if flags.stunQry == "" {
+		return
+	}
+
+	if flags.stunQry == "R" {
+		srcPort = rand.Intn(65535-1024) + 1024
+		logger.Infof("STUN: Using random source port: %d", srcPort)
+	}
+
+	if srcPort == 0 {
+		srcPort, err = strconv.Atoi(flags.stunQry)
+		if err != nil {
+			logger.Fatalf("Failed to parse source port: %v", err)
+		}
+	}
+
+	mappedIP, mappedPort, err := stun.QueryServerUDP(logger, flags.stunServerAddr, srcPort)
+	if err != nil {
+		logger.Fatalf("Failed to query STUN server: %v", err)
+	}
+
+	logger.Infof("STUN server returned mapped <ip:port>: %s:%d", mappedIP, mappedPort)
+
+	os.Exit(0)
 }

@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -137,7 +138,7 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 		c.scriptExecutor.ExecuteStartScript(script.ScriptContext{
 			TunnelName:  c.adapter.Name(),
 			TunnelIndex: c.adapter.Index(),
-			RemoteAddr:  conn.RemoteAddr().String(),
+			RemoteAddr:  strings.Split(conn.RemoteAddr().String(), ":")[0],
 			NatAddr:     "", // No NAT address in client mode
 			TunnelProto: string(c.config.Proto),
 		})
@@ -154,7 +155,7 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 			c.scriptExecutor.ExecuteStopScript(script.ScriptContext{
 				TunnelName:  c.adapter.Name(),
 				TunnelIndex: c.adapter.Index(),
-				RemoteAddr:  conn.RemoteAddr().String(),
+				RemoteAddr:  strings.Split(conn.RemoteAddr().String(), ":")[0],
 				NatAddr:     "", // No NAT address in client mode
 				TunnelProto: string(c.config.Proto),
 			})

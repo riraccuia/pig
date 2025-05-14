@@ -20,7 +20,7 @@ var defaultBufferSize = 64 * 1024
 func GetClientDialFunc(ctx context.Context, config *config.Config) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
 		addr := fmt.Sprintf("%s:%d", config.Target.Address, config.Target.Port)
-		conn, err := net.ListenPacket("udp", ":0")
+		conn, err := net.ListenPacket("udp", fmt.Sprintf(":%d", config.Target.SrcPort))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create UDP socket: %w", err)
 		}

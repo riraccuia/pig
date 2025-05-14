@@ -20,13 +20,14 @@ func (s *Server) acceptStreams(ctx context.Context, client *ClientTunnel) {
 		default:
 			stream, err := client.conn.AcceptStream(ctx)
 			if err != nil {
-				s.logger.Errorf("failed to accept client (%s) stream: %v", client.conn.RemoteAddr(), err)
 				select {
 				case client.connError <- err:
 				default:
 				}
 				return
 			}
+
+			s.logger.Debugf("accepted stream from client %s", client.conn.RemoteAddr())
 
 			stream.Flush()
 			client.streams.Add(stream)
@@ -37,10 +38,10 @@ func (s *Server) acceptStreams(ctx context.Context, client *ClientTunnel) {
 }
 
 func (s *Server) handleOutbound(ctx context.Context, client *ClientTunnel) {
-	defer func() {
+	/*defer func() {
 		s.ipPool.Release(client.sourceIP)
 		client.streams.CloseAll()
-	}()
+	}()*/
 	if client.conn.IsStreamed() {
 		s.handleOutboundStream(ctx, client)
 		return

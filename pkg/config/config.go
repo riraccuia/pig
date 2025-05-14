@@ -74,16 +74,31 @@ type Config struct {
 	BindAdapter       string        `toml:"bind_adapter"`       // The adapter to bind to
 	Wred              WredConfig    `toml:"wred"`
 	LogLevel          string        `toml:"log_level"`
-	ICMPMode          ICMPMode      `toml:"icmp_mode"`
 	StartScript       string        `toml:"start_script"` // Script to execute when a tunnel connection is established
 	StopScript        string        `toml:"stop_script"`  // Script to execute when a tunnel connection is disconnected
 	Auth              *AuthConfig   `toml:"auth"`
 	QueueSize         int           `toml:"queue_size"` // Size of packet queues (default: 256)
+	ICE               ICEConfig     `toml:"ice"`
+}
+
+type ICEConfig struct {
+	Enabled     bool              `toml:"enabled"`      // Enable ICE based hole punching
+	STUNAddress string            `toml:"stun_address"` // STUN server address
+	Signaling   *ICESignalingOpts `toml:"signaling"`    // Signaling options
+}
+
+type ICESignalingOpts struct {
+	EncryptionKey     string `toml:"encryption_key"`      // Encryption key for the ICE signaling
+	MQTTBrokerAddress string `toml:"mqtt_broker_address"` // MQTT broker address in the form of mqtt://host:port or ssl://host:port
+	MQTTClientID      string `toml:"mqtt_client_id"`      // MQTT client ID
+	MQTTUsername      string `toml:"mqtt_username"`       // MQTT username
+	MQTTPassword      string `toml:"mqtt_password"`       // MQTT password
 }
 
 type Target struct {
 	Address string `toml:"address"`
 	Port    int    `toml:"port"`
+	SrcPort int    `toml:"src_port"`
 }
 
 type WredConfig struct {

@@ -130,5 +130,6 @@ func (s *Server) closeClient(client *ClientTunnel) {
 	client.cancel()
 	client.conn.Close()
 	client.streams.CloseAll()
+	s.ipPool.Release(client.sourceIP)
 	s.clients.Delete(client.sourceIP.String())
 }
