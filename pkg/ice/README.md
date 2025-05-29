@@ -1,13 +1,29 @@
 # ICE Package
 
-This package leverages key ICE protocol concepts like candidate gathering and UDP hole punching to traverse Network Address Translation (NAT) and firewalls, in order to establish direct peer-to-peer connections.
+## Table of Contents
+- [Introduction](#introduction)
+- [Features](#features)
+- [Implementation Notes](#implementation-notes)
+- [Components](#components)
+- [Configuration](#configuration)
+- [How It Works](#how-it-works)
+- [Security](#security)
+- [Best Practices](#best-practices)
+- [Limitations](#limitations)
+- [Dependencies](#dependencies)
+- [Future Enhancements](#future-enhancements)
+- [Example Implementation](#example-implementation)
+
+## Introduction
+
+This package leverages key ICE protocol concepts like candidate gathering and NAT traversal (hole punching) to establish direct peer-to-peer connections, traversing NAT and firewalls. It supports both UDP and TCP for ICE, and the STUN client supports UDP, TCP, and TLS.
 
 ## Features
 
 Currently supported techniques:
 
-- **UDP Hole Punching**: Creates temporary openings in NAT/firewalls to enable direct UDP communication between peers.
-- **STUN UDP**: Provides Session Traversal Utilities for NAT (STUN) to discover the public IP address and port of a device behind NAT.
+- **UDP and TCP Hole Punching**: Creates temporary openings in NAT/firewalls to enable direct UDP or TCP communication between peers.
+- **STUN (UDP, TCP, TLS)**: Provides Session Traversal Utilities for NAT (STUN) to discover the public IP address and port of a device behind NAT, supporting UDP, TCP, and TLS protocols.
 - **MQTT Signaling**: Uses MQTT for secure signaling between peers to coordinate hole punching.
 - **Simplified ICE Protocol**: Implements a lightweight version of Interactive Connectivity Establishment (ICE) protocol for NAT traversal.
 
@@ -16,24 +32,34 @@ Currently supported techniques:
 This package implements a **simplified version** of the ICE protocol with the following characteristics:
 
 1. **No Connectivity Checks**: Unlike full ICE, this implementation does not perform direct STUN binding requests between peers to verify connectivity.
-2. **Direct Hole Punching**: Instead, it uses the ICE candidate information to perform direct UDP hole punching.
-3. **Unidirectional Signaling**: Currently focused on client-to-server signaling with server-to-client punching.
-4. **No ICE Answers**: While the codebase includes logic for ICE answers, they are currently disabled by default.
+2. **Direct Hole Punching**: Uses ICE candidate information to perform direct UDP or TCP hole punching.
+3. **Unidirectional Signaling**: Focused on client-to-server signaling with server-to-client punching.
+4. **ICE Answers**: The codebase includes logic for ICE answers, which are sent by the server in response to offers.
 5. **Minimal Candidate Types**: Only supports host and server reflexive candidates (no relay candidates).
 
 ## Components
 
-### Core UDP Hole Punching
+### Core UDP/TCP Hole Punching
 
-The base package provides the core UDP hole punching functionality:
+The base package provides core UDP and TCP hole punching functionality:
 
 ```go
 import (
     "context"
-    "github.com/riraccuia/pig/pkg/ice/punch"
+    "github.com/riraccuia/pig/pkg/ice/conn"
 )
 
-result, err := punch.PunchUDP(ctx, logger, udpConn, "target.example.com:54321")
+srcPort := 12345
+
+// UDP example
+result, err := conn.PunchUDP(ctx, logger, srcPort, "target.example.com:54321")
+if err != nil {
+    // Handle error
+}
+
+// TCP example
+// DialTCP has the same signature as net.DialTCP
+conn, err := conn.DialTCP("tcp", localAddr, remoteAddr)
 if err != nil {
     // Handle error
 }
@@ -46,18 +72,18 @@ The signaling package implements MQTT-based ICE signaling for hole punching:
 #### Client
 
 The client is responsible for:
-- Performing STUN queries to discover its public endpoint
+- Performing STUN queries (UDP, TCP, or TLS) to discover its public endpoint
 - Creating ICE candidate information including host and server reflexive candidates
 - Publishing its ICE offer to MQTT
-- Establishing the initial connection
+- Establishing the initial connection (UDP or TCP)
 
 #### Server
 
 The server is responsible for:
 - Listening for client ICE offer messages on MQTT topics
 - Processing ICE candidates to determine the best endpoint to connect to
-- Optionally sending ICE answers with its own candidates
-- Performing UDP hole punching to establish direct connections
+- Sending ICE answers with its own candidates
+- Performing UDP or TCP hole punching to establish direct connections
 - Managing MQTT connections and subscriptions
 
 ## Configuration
@@ -70,13 +96,16 @@ The `Options` struct provides configuration for both client and server:
 type Options struct {
     BrokerURL     string        // MQTT broker address
     ClientID      string        // Unique client identifier
-	Username	  string        // MQTT username
-	Password	  string        // MQTT password
-	EncryptionKey []byte
+    Username      string        // MQTT username
+    Password      string        // MQTT password
+    EncryptionKey []byte        // Encryption key for signaling
     Logger        common.Logger // Logger for debugging
     STUNServer    string        // STUN server address
+    Protocol      string        // Protocol for ICE and STUN: "udp", "tcp", or "tls" (for STUN only)
 }
 ```
+
+- `Protocol` determines which protocol is used for ICE candidate gathering and connection. For STUN, valid values are `"udp"`, `"tcp"`, or `"tls"`. For ICE, valid values are `"udp"` or `"tcp"`.
 
 ### ICE Message Format
 
@@ -85,78 +114,57 @@ Clients and servers exchange ICE protocol messages using the following format:
 ```go
 // ICEMessage represents an ICE protocol message
 type ICEMessage struct {
-    // Type of the message (offer, answer, candidate)
-    Type ICEMessageType `json:"type"`
-    
-    // Timestamp of when the message was created
-    Timestamp int64 `json:"timestamp"`
-    
-    // Candidates for this message
-    Candidates []ICECandidate `json:"candidates"`
-    
-    // Credentials for authentication
-    Credentials ICECredentials `json:"credentials"`
+    SessionID   string           `json:"session_id"`
+    Type        ICEMessageType   `json:"type"`
+    Timestamp   int64            `json:"timestamp"`
+    Candidates  []ICECandidate   `json:"candidates"`
+    Credentials ICECredentials   `json:"credentials"`
 }
 
 // ICECandidate represents an ICE candidate
 type ICECandidate struct {
-    // Foundation is a unique identifier for the candidate
-    Foundation string `json:"foundation"`
-    
-    // Priority of the candidate (higher is better)
-    Priority uint32 `json:"priority"`
-    
-    // Protocol (udp, tcp)
-    Protocol string `json:"protocol"`
-    
-    // Address of the candidate
-    Address string `json:"address"`
-    
-    // Port of the candidate
-    Port int `json:"port"`
-    
-    // Type of the candidate (host, srflx)
-    Type ICECandidateType `json:"type"`
-    
-    // RelatedAddress for derived candidates (like srflx)
-    RelatedAddr string `json:"relatedAddr,omitempty"`
-    
-    // RelatedPort for derived candidates
-    RelatedPort int `json:"relatedPort,omitempty"`
+    Foundation  string           `json:"foundation"`
+    Priority    uint32           `json:"priority"`
+    Protocol    string           `json:"protocol"` // "udp" or "tcp"
+    Address     string           `json:"address"`
+    Port        int              `json:"port"`
+    Type        ICECandidateType `json:"type"` // "host" or "srflx"
+    RelatedAddr string           `json:"relatedAddr,omitempty"`
+    RelatedPort int              `json:"relatedPort,omitempty"`
 }
 ```
 
 ## How It Works
 
-1. **Discovery**: The client performs a STUN query to discover its public endpoint (server reflexive candidate)
-2. **ICE Offer**: The client creates an ICE offer containing:
+1. **Protocol Selection**: The client and server select the protocol for ICE and STUN (UDP, TCP, or TLS for STUN; UDP or TCP for ICE) via the `Options.Protocol` field.
+2. **Discovery**: The client performs a STUN query using the selected protocol to discover its public endpoint (server reflexive candidate).
+3. **ICE Offer**: The client creates an ICE offer containing:
    - Local candidates (host candidates)
    - Public candidates (server reflexive candidates from STUN)
    - ICE credentials for authentication
-3. **Signaling**: The client publishes the encrypted ICE offer to an MQTT topic
-4. **Processing**: The server receives the client's ICE offer and extracts the candidates
-5. **Candidate Selection**: The server selects the best candidate for hole punching (prioritizing server reflexive candidates)
-6. **Direct Hole Punching**: The server performs UDP hole punching to the selected client candidate
-   - *Note: Unlike full ICE, no STUN binding requests are exchanged to verify connectivity*
-7. **Connection**: A direct UDP connection is established between the peers
+4. **Signaling**: The client publishes the encrypted ICE offer to an MQTT topic.
+5. **Processing**: The server receives the client's ICE offer and extracts the candidates.
+6. **Candidate Selection**: The server selects the best candidate for hole punching (prioritizing server reflexive candidates and matching the selected protocol).
+7. **Direct Hole Punching**: The server performs UDP or TCP hole punching to the selected client candidate. The server also sends an ICE answer with its own candidates.
+8. **Connection**: A direct UDP or TCP connection is established between the peers.
 
 ### Simplified vs. Full ICE
 
 Our implementation differs from full ICE in several key ways:
 
-| Feature | Simplified ICE (Current) | Full ICE |
-|---------|--------------------------|----------|
-| Candidate Types | Host, Server Reflexive | Host, Server Reflexive, Relay |
-| Connectivity Checks | No | Yes (STUN binding requests) |
-| ICE Answers | Implemented but disabled | Required |
-| Candidate Pairs | No (server uses best candidate) | Yes (all combinations tested) |
-| ICE Nomination | No | Yes (regular or aggressive) |
-| ICE Restart | No | Yes |
-| TURN Support | No | Yes |
+| Feature              | Simplified ICE (Current) | Full ICE                       |
+|----------------------|--------------------------|--------------------------------|
+| Candidate Types      | Host, Server Reflexive   | Host, Server Reflexive, Relay  |
+| Connectivity Checks  | No                       | Yes (STUN binding requests)    |
+| ICE Answers          | Yes                      | Required                       |
+| Candidate Pairs      | No (server uses best)    | Yes (all combinations tested)  |
+| ICE Nomination       | No                       | Yes (regular or aggressive)    |
+| ICE Restart          | No                       | Yes                            |
+| TURN Support         | No                       | Yes                            |
 
 ### Port Selection
 
-- **Specific Port**: Provide a positive port number (1-65535) to use that exact port for the UDP socket.
+- **Specific Port**: Provide a positive port number (1-65535) to use that exact port for the socket.
 - **Random Port**: Provide `0` as the port number to let the system assign a random ephemeral port.
 
 ## Security
@@ -202,7 +210,7 @@ MQTT topics follow ICE message types:
 
 ## Limitations
 
-- UDP hole punching may not work with symmetric NATs
+- UDP or TCP hole punching may not work with symmetric NATs
 - The punched "hole" is temporary and may close if not used regularly
 - Both peers must coordinate to create a 'hole' for bidirectional communication
 - MQTT broker must be accessible to both peers
@@ -217,9 +225,7 @@ MQTT topics follow ICE message types:
 
 Planned future implementations:
 
-- TCP hole punching
 - Full ICE protocol implementation with connectivity checks
-- ICE answers for bidirectional candidate exchange
 
 ## Example Implementation
 
@@ -241,80 +247,27 @@ import (
 	"github.com/riraccuia/pig/pkg/ice/signaling"
 )
 
-func runClient(targetAddr string) error {
+func runClient(targetAddr string, protocol string) error {
 	logger := log.NewLogger()
-	
-	// Create a context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	
-	// Generate a strong encryption key (32 bytes)
+
 	encryptionKey := make([]byte, 32)
 	if _, err := rand.Read(encryptionKey); err != nil {
 		return err
 	}
-	
-	// Set up MQTT options
+
 	opts := &signaling.Options{
 		BrokerURL:  "ssl://broker.hivemq.com:8883",
 		ClientID:   "pig-client-" + time.Now().Format("20060102150405"),
 		EncryptionKey: encryptionKey,
 		Logger:     logger,
 		STUNServer: "stun.l.google.com:19302",
+		Protocol:   protocol, // "udp", "tcp", or "tls" (for STUN)
 	}
-	
-	// Create the signaling client
-	client, err := signaling.NewClient(opts, targetAddr)
-	if err != nil {
-		return err
-	}
-	
-	// Create a UDP connection
-	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{
-		IP:   net.IPv4zero,
-		Port: 0, // Let the system choose a port
-	})
-	if err != nil {
-		return err
-	}
-	defer udpConn.Close()
-	
-	// Publish ICE offer with our candidates
-	if err := client.PublishICEOffer(ctx, udpConn); err != nil {
-		return err
-	}
-	
-	logger.Info("Published ICE offer, waiting for connection...")
-	
-	// Try to establish a connection
-	// You could implement receiving the ICE answer here if needed
-	
-	// Sample message to send once connection is established
-	message := []byte("Hello from client!")
-	
-	// At this point, the server should have punched a hole to us
-	// We can now try to send data to the server
-	addr, err := net.ResolveUDPAddr("udp", targetAddr)
-	if err != nil {
-		return err
-	}
-	
-	// Send a test message
-	if _, err := udpConn.WriteToUDP(message, addr); err != nil {
-		return err
-	}
-	
-	logger.Info("Message sent to server")
-	
-	// Wait for a reply
-	buffer := make([]byte, 1024)
-	udpConn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	n, remoteAddr, err := udpConn.ReadFromUDP(buffer)
-	if err != nil {
-		return err
-	}
-	
-	logger.Infof("Received reply from %s: %s", remoteAddr.String(), string(buffer[:n]))
+
+	// Create the signaling client and perform ICE
+	// ... (see pkg/ice/connect.go for details)
 	return nil
 }
 ```
@@ -333,77 +286,22 @@ import (
 	"github.com/riraccuia/pig/pkg/ice/signaling"
 )
 
-func runServer(listenPort int, encryptionKey []byte) error {
+func runServer(listenPort int, encryptionKey []byte, protocol string) error {
 	logger := log.NewLogger()
-	
-	// Create a context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	
-	// Set up MQTT options
+
 	opts := &signaling.Options{
 		BrokerURL:  "ssl://broker.hivemq.com:8883",
 		ClientID:   "pig-server-" + time.Now().Format("20060102150405"),
-		EncryptionKey: encyptionKey,
+		EncryptionKey: encryptionKey,
 		Logger:     logger,
 		STUNServer: "stun.l.google.com:19302",
+		Protocol:   protocol, // "udp", "tcp", or "tls" (for STUN)
 	}
-	
-	// Create UDP listener on specified port
-	udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{
-		IP:   net.IPv4zero,
-		Port: listenPort,
-	})
-	if err != nil {
-		return err
-	}
-	defer udpConn.Close()
-	
-	logger.Infof("Server listening on UDP port %d", listenPort)
-	
-	// Create the signaling server
-	server, err := signaling.NewServer(opts, udpConn)
-	if err != nil {
-		return err
-	}
-	
-	// Start server to listen for ICE offers
-	if err := server.Start(ctx); err != nil {
-		return err
-	}
-	defer server.Stop()
-	
-	logger.Info("Signaling server started, waiting for ICE offers...")
-	
-	// Note: ICE answers are currently disabled in the server implementation,
-	// though the code has support for them. The server will directly
-	// perform hole punching based on the received ICE offer.
-	
-	// Start listening for incoming packets (after hole punching)
-	go func() {
-		buffer := make([]byte, 1024)
-		for {
-			n, clientAddr, err := udpConn.ReadFromUDP(buffer)
-			if err != nil {
-				logger.Errorf("Error reading from UDP: %v", err)
-				continue
-			}
-			
-			logger.Infof("Received %d bytes from %s: %s", 
-				n, clientAddr.String(), string(buffer[:n]))
-			
-			// Send a reply back to the client
-			reply := []byte("Hello from server!")
-			if _, err := udpConn.WriteToUDP(reply, clientAddr); err != nil {
-				logger.Errorf("Error sending reply: %v", err)
-			} else {
-				logger.Info("Reply sent to client")
-			}
-		}
-	}()
-	
-	// Keep server running
-	<-ctx.Done()
+
+	// Create the signaling server and perform ICE
+	// ... (see pkg/ice/listen.go for details)
 	return nil
 }
 ```

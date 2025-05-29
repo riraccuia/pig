@@ -35,6 +35,9 @@ signtool: $(BINDIR)
 pig-linux:
 	GOOS=linux GOARCH=amd64 $(MAKE) pig
 
+pig-linux-arm:
+	GOOS=linux GOARCH=arm $(MAKE) pig
+
 pig-linux-arm6:
 	GOOS=linux GOARCH=arm GOARM=6 $(MAKE) pig
 
@@ -70,6 +73,7 @@ help:
 	@echo "  signtool   : Build just signtool"
 	@echo "  pig-linux  : Build pig for Linux"
 	@echo "  pig-linux-arm6 : Build pig for Linux ARM6"
+	@echo "  pig-linux-arm : Build pig for Linux ARM"
 	@echo "  pig-darwin : Build pig for macOS"
 	@echo "  pig-windows: Build pig for Windows"
 	@echo "  signtool-linux  : Build signtool for Linux"

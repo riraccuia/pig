@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
-	"github.com/riraccuia/pig/pkg/config"
 )
 
 // ScriptContext holds all the context information needed for script execution
@@ -24,34 +23,36 @@ type ScriptContext struct {
 
 // Executor handles the execution of scripts when tunnel connections are established or disconnected
 type Executor struct {
-	logger common.Logger
-	config *config.Config
+	Logger      common.Logger
+	StartScript string
+	StopScript  string
 }
 
 // New creates a new script executor
-func New(logger common.Logger, cfg *config.Config) *Executor {
+func New(logger common.Logger, startScript, stopScript string) *Executor {
 	return &Executor{
-		logger: logger,
-		config: cfg,
+		Logger:      logger,
+		StartScript: startScript,
+		StopScript:  stopScript,
 	}
 }
 
 // ExecuteStartScript executes the start script in a fire-and-forget manner
 func (e *Executor) ExecuteStartScript(ctx ScriptContext) {
-	if e.config.StartScript == "" {
+	if e.StartScript == "" {
 		return
 	}
 
-	e.executeScript(e.config.StartScript, ctx)
+	e.executeScript(e.StartScript, ctx)
 }
 
 // ExecuteStopScript executes the stop script in a fire-and-forget manner
 func (e *Executor) ExecuteStopScript(ctx ScriptContext) {
-	if e.config.StopScript == "" {
+	if e.StopScript == "" {
 		return
 	}
 
-	e.executeScript(e.config.StopScript, ctx)
+	e.executeScript(e.StopScript, ctx)
 }
 
 // executeScript executes a script with environment variables containing tunnel information
@@ -59,25 +60,25 @@ func (e *Executor) executeScript(scriptPath string, ctx ScriptContext) {
 	// Check if script exists and is executable
 	scriptAbsPath, err := filepath.Abs(scriptPath)
 	if err != nil {
-		e.logger.Errorf("Failed to get absolute path for script %s: %v", scriptPath, err)
+		e.Logger.Errorf("Failed to get absolute path for script %s: %v", scriptPath, err)
 		return
 	}
 
 	info, err := os.Stat(scriptAbsPath)
 	if err != nil {
-		e.logger.Errorf("Script %s not found: %v", scriptAbsPath, err)
+		e.Logger.Errorf("Script %s not found: %v", scriptAbsPath, err)
 		return
 	}
 
 	if info.IsDir() {
-		e.logger.Errorf("Script path %s is a directory, not a file", scriptAbsPath)
+		e.Logger.Errorf("Script path %s is a directory, not a file", scriptAbsPath)
 		return
 	}
 
 	// Check if the script is executable on Unix systems
 	if isUnix() {
 		if info.Mode()&0111 == 0 {
-			e.logger.Errorf("Script %s is not executable, attempting to execute anyway", scriptAbsPath)
+			e.Logger.Errorf("Script %s is not executable, attempting to execute anyway", scriptAbsPath)
 		}
 	}
 
@@ -97,15 +98,15 @@ func (e *Executor) executeScript(scriptPath string, ctx ScriptContext) {
 		"PIG_TUNNEL_PROTO="+ctx.TunnelProto,
 	)
 
-	e.logger.Infof("Executing script %s", scriptAbsPath)
+	e.Logger.Infof("Executing script %s", scriptAbsPath)
 	var stdout []byte
 	// Start the command without waiting for it to complete (fire-and-forget)
 	if stdout, err = cmd.Output(); err != nil {
-		e.logger.Errorf("Script %s exited with error: %v", scriptAbsPath, err)
+		e.Logger.Errorf("Script %s exited with error: %v", scriptAbsPath, err)
 		return
 	}
 
-	e.logger.Debugf("Script %s stdout: \n%s", scriptAbsPath, stdout)
+	e.Logger.Debugf("Script %s stdout: \n%s", scriptAbsPath, stdout)
 }
 
 // isUnix returns true if the current OS is a Unix-like system

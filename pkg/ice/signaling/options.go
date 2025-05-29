@@ -27,9 +27,12 @@ type Options struct {
 
 	// STUNServer is the address of the STUN server to use for NAT traversal
 	STUNServer string
+
+	// Protocol offers to use
+	Protocol string
 }
 
-func GetOptionsWithLogger(logger common.Logger, cfg *config.ICEConfig) *Options {
+func GetOptions(logger common.Logger, cfg *config.ICEConfig) *Options {
 	return &Options{
 		Logger:        logger,
 		BrokerURL:     cfg.Signaling.MQTTBrokerAddress,

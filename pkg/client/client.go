@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/packet"
@@ -31,8 +30,9 @@ type Client struct {
 	inbound           common.PacketQueue
 	outbound          *queue.ChanQueue //common.PacketQueue
 	bufferPool        *sync.Pool
+	stopFunc          func()
 	done              chan struct{}
-	closed            bool
+	closed            atomic.Bool
 	reconnectInterval time.Duration
 	connError         chan error
 	scriptExecutor    *script.Executor
@@ -41,7 +41,7 @@ type Client struct {
 
 // New creates a new Client instance with the default network adapter.
 func New(logger common.Logger, cfg *config.Config, authenticator common.Authenticator) (*Client, error) {
-	adapter, err := adapter.NewAdapter(cfg)
+	adapter, err := getAdapter(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adapter: %w", err)
 	}
@@ -79,10 +79,9 @@ func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.Tun
 			},
 		},
 		done:              make(chan struct{}),
-		closed:            false,
 		reconnectInterval: time.Duration(cfg.ReconnectInterval) * time.Second,
 		connError:         make(chan error, 1),
-		scriptExecutor:    script.New(logger, cfg),
+		scriptExecutor:    script.New(logger, cfg.StartScript, cfg.StopScript),
 		authenticator:     authenticator,
 	}, nil
 }
@@ -143,15 +142,8 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 			TunnelProto: string(c.config.Proto),
 		})
 
-		select {
-		case <-ctx.Done():
-			c.logger.Infof("Context done, exiting")
-			c.Close()
-			return
-		case err := <-c.connError:
-			c.logger.Errorf("Connection lost: %v", err)
-
-			// Execute stop script
+		c.stopFunc = func() {
+			c.logger.Debug("Executing stop script")
 			c.scriptExecutor.ExecuteStopScript(script.ScriptContext{
 				TunnelName:  c.adapter.Name(),
 				TunnelIndex: c.adapter.Index(),
@@ -159,7 +151,18 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 				NatAddr:     "", // No NAT address in client mode
 				TunnelProto: string(c.config.Proto),
 			})
+		}
 
+		select {
+		case <-c.done:
+			c.logger.Infof("Client stopped")
+			return
+		case <-ctx.Done():
+			c.logger.Infof("Context done, exiting")
+			c.Close()
+			return
+		case err := <-c.connError:
+			c.logger.Errorf("Connection lost: %v", err)
 			c.Close()
 			<-time.After(c.reconnectInterval)
 			continue
@@ -169,12 +172,14 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 
 // Close gracefully shuts down the client and all its goroutines
 func (c *Client) Close() error {
-	if !c.closed {
-		c.closed = true
-		// close(c.done)
+	if c.closed.CompareAndSwap(false, true) {
+		close(c.done)
 		c.streams.CloseAll()
 		if c.conn != nil {
 			c.conn.Close()
+		}
+		if c.stopFunc != nil {
+			c.stopFunc()
 		}
 	}
 	return nil
@@ -207,5 +212,7 @@ func (c *Client) drainQueue(queue common.PacketQueue) {
 }
 
 func (c *Client) resetClosed() {
-	c.closed = false
+	if c.closed.CompareAndSwap(true, false) {
+		c.done = make(chan struct{})
+	}
 }

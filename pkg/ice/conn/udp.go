@@ -1,17 +1,21 @@
-package punch
+package conn
 
 import (
-	"context"
 	"fmt"
 	"net"
 
 	"github.com/riraccuia/pig/pkg/common"
 )
 
+// DialUDP uses a net.Dialer to dial a UDP connection and sets the SO_REUSEADDR option.
+func DialUDP(network string, laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
+	return dialUDP(network, laddr, raddr)
+}
+
 // PunchUDP performs UDP hole punching from the specified source port to the target address.
 // This creates a temporary opening in the NAT/firewall to allow direct UDP communication.
 // A source port is required to be provided, either as an int or a *net.UDPConn. Use 0 for a random port.
-func PunchUDP(ctx context.Context, logger common.Logger, connOrSourcePort any, targetAddr string) (sPort int, err error) {
+func PunchUDP(logger common.Logger, connOrSourcePort any, targetAddr string) (sPort int, err error) {
 	conn, ok := connOrSourcePort.(*net.UDPConn)
 	if !ok {
 		sourcePort, ok := connOrSourcePort.(int)

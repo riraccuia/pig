@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"net"
 	"runtime"
-	"strconv"
 	"time"
 
 	"github.com/quic-go/quic-go"
 	"github.com/riraccuia/pig/pkg/config"
+	"github.com/riraccuia/pig/pkg/ice"
 	"github.com/riraccuia/pig/pkg/ice/signaling"
 	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
@@ -131,16 +131,25 @@ func GetClientDialFunc(ctx context.Context, config *config.Config, tlsConfig *tl
 
 func GetServerListenFunc(ctx context.Context, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
 	return func() (transport.Listener, error) {
-		udpConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: config.Target.Port})
-		if err != nil {
-			return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
-		}
+		var (
+			logger       = log.NewBlockingLogger()
+			udpConn      *net.UDPConn
+			listenerAddr = &net.UDPAddr{IP: net.IPv4zero, Port: config.Target.Port}
+			err          error
+		)
+		logger.SetLevel(config.LogLevel)
 		if config.ICE.Enabled {
-			logger := log.NewBlockingLogger()
-			logger.SetLevel(config.LogLevel)
-			err := signaling.ReceivePunchRequests(ctx, signaling.GetOptionsWithLogger(logger, &config.ICE), udpConn)
+			var listener any
+			listener, err = ice.Listen(ctx, signaling.GetOptions(logger, config.ICE), listenerAddr)
 			if err != nil {
 				return nil, fmt.Errorf("failed to setup punch signaling channel: %w", err)
+			}
+			udpConn = listener.(*net.UDPConn)
+		}
+		if udpConn == nil {
+			udpConn, err = net.ListenUDP("udp4", listenerAddr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
 			}
 		}
 		maxStreams := int64(config.StreamCount)
@@ -178,26 +187,32 @@ func dialFuncDefault(ctx context.Context, address string, dstPort int, tlsConfig
 
 func dialFuncWithSrcPort(ctx context.Context, address string, srcPort, dstPort int, tlsConfig *tls.Config, cfg *config.Config) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
-		udpConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: srcPort})
-		if err != nil {
-			return nil, err
-		}
+		var (
+			udpConn *net.UDPConn
+			udpAddr *net.UDPAddr
+			err     error
+		)
 		if cfg.ICE.Enabled {
 			logger := log.NewBlockingLogger()
 			logger.SetLevel(cfg.LogLevel)
-			err := signaling.SignalPunchRequest(ctx,
-				signaling.GetOptionsWithLogger(logger, &cfg.ICE),
-				address+":"+strconv.Itoa(dstPort),
-				udpConn,
-			)
+			_conn, remoteAddr, err := ice.Connect(ctx, signaling.GetOptions(logger, cfg.ICE), srcPort, dstPort, address, "udp")
 			if err != nil {
-				return nil, fmt.Errorf("failed to signal punch request: %w", err)
+				return nil, fmt.Errorf("failed to get ICE connection: %w", err)
 			}
-			time.Sleep(time.Second)
+			udpConn = _conn.(*net.UDPConn)
+			udpAddr = remoteAddr.(*net.UDPAddr)
 		}
-		udpAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", address, dstPort))
-		if err != nil {
-			return nil, err
+		if udpConn == nil {
+			udpConn, err = net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: srcPort})
+			if err != nil {
+				return nil, err
+			}
+		}
+		if udpAddr == nil {
+			udpAddr, err = net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", address, dstPort))
+			if err != nil {
+				return nil, err
+			}
 		}
 		if tlsConfig == nil {
 			return nil, errors.New("quic: tls.Config not set")

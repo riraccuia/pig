@@ -1,32 +1,64 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"math/rand"
 	"net/http"
-	"strconv"
-
-	// _ "net/http/pprof"
 	"os"
-	"os/signal"
 	"runtime"
-	"syscall"
 
-	"github.com/riraccuia/pig/pkg/client"
-	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/log"
-	"github.com/riraccuia/pig/pkg/server"
-	"github.com/riraccuia/pig/pkg/stun"
-	"github.com/riraccuia/pig/pkg/transport"
-	icmp "github.com/riraccuia/pig/pkg/transport/icmp"
-	qt "github.com/riraccuia/pig/pkg/transport/quic-go"
-	trtls "github.com/riraccuia/pig/pkg/transport/tls"
-	"github.com/riraccuia/pig/pkg/transport/tlsicmp"
-	"github.com/riraccuia/pig/pkg/transport/udp"
-	"github.com/riraccuia/pig/pkg/transport/ws"
 )
+
+func main() {
+	handleSubCommands()
+}
+
+func handleSubCommands() {
+	usage := `Usage: pig [c|l|stun] [options]
+
+	Use -h or --help to get help for a subcommand.
+
+	Client mode - Establish a tunnel to a server:
+		pig [-c|c] host:port [options] 
+
+	Server mode - Listen for incoming connections:
+		pig [-l|l] addr:port [options]
+
+	Client/Server mode - Load config from file:
+		pig -config /path/to/config.toml
+
+	STUN query tool - Query a STUN server:
+		pig [-stun|stun] [options]
+	`
+
+	if len(os.Args) < 2 {
+		fmt.Println(usage)
+		os.Exit(1)
+		return
+	}
+
+	switch os.Args[1] {
+	case "-h", "--help":
+		fmt.Println(usage)
+		os.Exit(0)
+	case "-config", "--config":
+		if len(os.Args) < 3 {
+			fmt.Println(usage)
+			os.Exit(1)
+		}
+		pig("")
+	case "c", "-c":
+		pig(config.ModeClient)
+	case "l", "-l":
+		pig(config.ModeServer)
+	case "stun", "-stun":
+		stunMode()
+	default:
+		fmt.Println(usage)
+		os.Exit(1)
+	}
+}
 
 func setupPprof(logger *log.Logger) {
 	runtime.SetBlockProfileRate(1)
@@ -39,198 +71,4 @@ func setupPprof(logger *log.Logger) {
 			logger.Errorf("Failed to start pprof server: %v", err)
 		}
 	}()
-}
-
-func main() {
-	var (
-		err    error
-		ctx    context.Context
-		cancel context.CancelFunc
-		logger *log.Logger
-		flags  *flagSet
-		cfg    *config.Config
-	)
-
-	flags = parseCmdFlags()
-
-	doStunQuery(flags)
-
-	ctx, cancel = context.WithCancel(context.Background())
-	defer cancel()
-
-	logger = log.NewLogger(ctx)
-	transport.Logger = logger
-
-	cfg = initPig(flags, logger)
-
-	logger.SetLevel(cfg.LogLevel)
-
-	logger.Infof("Mode: %s, Transport: %s, MTU: %d", cfg.Mode, cfg.Proto, cfg.MTU)
-
-	switch cfg.Mode {
-	case "client":
-		var (
-			tunnel        *client.Client
-			dialer        func() (transport.Conn, error)
-			authenticator common.Authenticator
-		)
-		// Create authenticator if configured
-		authenticator, err = createClientAuthenticator(logger, cfg)
-		if err != nil {
-			logger.Fatalf("Failed to create authenticator: %v", err)
-		}
-		dialer, err = getClientDialFunc(ctx, cfg, logger)
-		if err != nil {
-			logger.Fatalf("Failed to get client dialer: %v", err)
-		}
-		tunnel, err = client.New(logger, cfg, authenticator)
-		if err != nil {
-			break
-		}
-		if err := tunnel.Start(ctx, dialer); err != nil {
-			logger.Fatalf("Failed to start tunnel: %v", err)
-		}
-	case "server":
-		var (
-			tunnel        *server.Server
-			listener      func() (transport.Listener, error)
-			authenticator common.Authenticator
-		)
-		// Create authenticator if configured
-		authenticator, err = createServerAuthenticator(logger, cfg)
-		if err != nil {
-			logger.Fatalf("Failed to create authenticator: %v", err)
-		}
-		listener, err = getServerListenFunc(ctx, cfg, logger)
-		if err != nil {
-			logger.Fatalf("Failed to get server listener: %v", err)
-		}
-		tunnel, err = server.New(logger, cfg, authenticator)
-		if err != nil {
-			break
-		}
-		if err := tunnel.Start(ctx, listener); err != nil {
-			logger.Fatalf("Failed to start tunnel: %v", err)
-		}
-	default:
-		logger.Fatalf("Invalid mode: %s", cfg.Mode)
-	}
-
-	if err != nil {
-		logger.Fatalf("Failed to create tunnel: %v", err)
-	}
-
-	// setupPprof(logger)
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
-}
-
-func getClientDialFunc(ctx context.Context, cfg *config.Config, logger *log.Logger) (func() (transport.Conn, error), error) {
-	switch cfg.Proto {
-	case config.TransportQUIC:
-		tlsConfig, err := createTLSConfig(logger, cfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create TLS config: %w", err)
-		}
-		return qt.GetClientDialFunc(ctx, cfg, tlsConfig), nil
-	case config.TransportUDP:
-		return udp.GetClientDialFunc(ctx, cfg), nil
-	case config.TransportTLS:
-		tlsConfig, err := createTLSConfig(logger, cfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create TLS config: %w", err)
-		}
-		return trtls.GetClientDialFunc(ctx, cfg, tlsConfig), nil
-	case config.TransportWS:
-		tlsConfig, err := createTLSConfig(logger, cfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create TLS config: %w", err)
-		}
-		return ws.GetClientDialFunc(ctx, cfg, tlsConfig), nil
-	case config.TransportICMP:
-		return icmp.GetClientDialFunc(ctx, cfg), nil
-	case config.TransportTLSICMP:
-		tlsConfig, err := createTLSConfig(logger, cfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create TLS config: %w", err)
-		}
-		return tlsicmp.GetClientDialFunc(ctx, cfg, tlsConfig), nil
-	default:
-		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
-	}
-}
-
-func getServerListenFunc(ctx context.Context, cfg *config.Config, logger *log.Logger) (func() (transport.Listener, error), error) {
-	switch cfg.Proto {
-	case config.TransportQUIC:
-		tlsConfig, err := createTLSConfig(logger, cfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create TLS config: %w", err)
-		}
-		return qt.GetServerListenFunc(ctx, cfg, tlsConfig), nil
-	case config.TransportUDP:
-		return udp.GetServerListenFunc(ctx, cfg), nil
-	case config.TransportTLS:
-		tlsConfig, err := createTLSConfig(logger, cfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create TLS config: %w", err)
-		}
-		return trtls.GetServerListenFunc(ctx, cfg, tlsConfig), nil
-	case config.TransportWS:
-		tlsConfig, err := createTLSConfig(logger, cfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create TLS config: %w", err)
-		}
-		return ws.GetServerListenFunc(ctx, cfg, tlsConfig), nil
-	case config.TransportICMP:
-		return icmp.GetServerListenFunc(ctx, cfg), nil
-	case config.TransportTLSICMP:
-		tlsConfig, err := createTLSConfig(logger, cfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create TLS config: %w", err)
-		}
-		return tlsicmp.GetServerListenFunc(ctx, cfg, tlsConfig), nil
-	default:
-		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
-	}
-}
-
-// doStunQuery queries the STUN server to get the public IP and port
-// and prints it to stdout.
-func doStunQuery(flags *flagSet) {
-	var (
-		logger  common.Logger = log.NewBlockingLogger()
-		srcPort int
-		err     error
-	)
-
-	if flags.stunServerAddr == "" {
-		logger.Fatalf("STUN server address not specified")
-	}
-	if flags.stunQry == "" {
-		return
-	}
-
-	if flags.stunQry == "R" {
-		srcPort = rand.Intn(65535-1024) + 1024
-		logger.Infof("STUN: Using random source port: %d", srcPort)
-	}
-
-	if srcPort == 0 {
-		srcPort, err = strconv.Atoi(flags.stunQry)
-		if err != nil {
-			logger.Fatalf("Failed to parse source port: %v", err)
-		}
-	}
-
-	mappedIP, mappedPort, err := stun.QueryServerUDP(logger, flags.stunServerAddr, srcPort)
-	if err != nil {
-		logger.Fatalf("Failed to query STUN server: %v", err)
-	}
-
-	logger.Infof("STUN server returned mapped <ip:port>: %s:%d", mappedIP, mappedPort)
-
-	os.Exit(0)
 }

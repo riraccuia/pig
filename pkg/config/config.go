@@ -4,6 +4,22 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+type Mode string
+
+const (
+	ModeClient Mode = "client"
+	ModeServer Mode = "server"
+)
+
+var supportedModes = map[Mode]bool{
+	ModeClient: true,
+	ModeServer: true,
+}
+
+func (m Mode) IsValid() bool {
+	return supportedModes[m]
+}
+
 type TransportType string
 
 const (
@@ -61,7 +77,7 @@ func (m ICMPMode) IsValid() bool {
 }
 
 type Config struct {
-	Mode              string        `toml:"mode"`           // "client" or "server"
+	Mode              Mode          `toml:"mode"`           // "client" or "server"
 	TunnelAddress     string        `toml:"tunnel_address"` // CIDR format
 	MTU               int           `toml:"mtu"`
 	CertFile          string        `toml:"cert_file"`
@@ -78,7 +94,7 @@ type Config struct {
 	StopScript        string        `toml:"stop_script"`  // Script to execute when a tunnel connection is disconnected
 	Auth              *AuthConfig   `toml:"auth"`
 	QueueSize         int           `toml:"queue_size"` // Size of packet queues (default: 256)
-	ICE               ICEConfig     `toml:"ice"`
+	ICE               *ICEConfig    `toml:"ice"`
 }
 
 type ICEConfig struct {

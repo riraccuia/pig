@@ -3,6 +3,7 @@ package stun
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -26,13 +27,15 @@ const (
 type StunClient struct {
 	logger     common.Logger
 	ServerAddr string
+	TLSConfig  *tls.Config
 }
 
 // NewStunClient creates a new STUN client instance
-func NewStunClient(logger common.Logger, serverAddr string) *StunClient {
+func NewStunClient(logger common.Logger, serverAddr string, tlsConfig *tls.Config) *StunClient {
 	return &StunClient{
 		logger:     logger,
 		ServerAddr: serverAddr,
+		TLSConfig:  tlsConfig,
 	}
 }
 

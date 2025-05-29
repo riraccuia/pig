@@ -36,7 +36,7 @@ func (c *Client) processInbound(connOrStream io.ReadWriteCloser) {
 	for {
 		n, err := connOrStream.Read(buffer[len(unprocessed):])
 		if err != nil {
-			c.logger.Errorf("failed to read from connection or stream: %v", err)
+			c.logger.Debugf("failed to read from connection or stream: %v", err)
 			if c.conn.IsStreamed() {
 				c.logger.Infof("stream closed, reconnecting")
 				// streams are reconnected automatically
@@ -153,7 +153,7 @@ func (c *Client) processOutboundConn() {
 		select {
 		case <-flushTicker.C:
 			if err := writeBatch(); err != nil {
-				c.logger.Errorf("failed to write batch to connection: %v", err)
+				c.logger.Debugf("failed to write batch to connection: %v", err)
 				return
 			}
 		case pkt, ok := <-c.outbound.C:
@@ -175,7 +175,7 @@ func (c *Client) processOutboundConn() {
 			if len(batch)+totalLen > maxBatchSize {
 				if err := writeBatch(); err != nil {
 					c.bufferPool.Put(pkt)
-					c.logger.Errorf("failed to write batch to connection: %v", err)
+					c.logger.Debugf("failed to write batch to connection: %v", err)
 					return
 				}
 			}
@@ -187,7 +187,7 @@ func (c *Client) processOutboundConn() {
 			// If batch is full, write immediately
 			if len(batch) >= maxBatchSize {
 				if err := writeBatch(); err != nil {
-					c.logger.Errorf("failed to write batch to connection: %v", err)
+					c.logger.Debugf("failed to write batch to connection: %v", err)
 					return
 				}
 			}

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 
-	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/packet"
@@ -23,16 +23,17 @@ type Server struct {
 	clients        *sync.Map //*ash.Map
 	ipPool         *IPPool
 	bufferPool     *sync.Pool
-	inbound        common.PacketQueue
+	inbound        []common.PacketQueue
 	outbound       common.PacketQueue
 	done           chan struct{}
 	scriptExecutor *script.Executor
 	authenticator  common.Authenticator
+	_next_queue_id atomic.Uint64
 }
 
 // New creates a new Server instance
 func New(logger common.Logger, cfg *config.Config, authenticator common.Authenticator) (*Server, error) {
-	adapter, err := adapter.NewAdapter(cfg)
+	adapter, err := getAdapter(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +58,6 @@ func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.Tun
 		adapter:  adapter,
 		clients:  &sync.Map{}, //new(ash.Map).From(ash.NewSkipList(32)),
 		ipPool:   newIPPool(network),
-		inbound:  make(common.PacketQueue, cfg.QueueSize),
 		outbound: make(common.PacketQueue, cfg.QueueSize),
 		bufferPool: &sync.Pool{
 			New: func() interface{} {
@@ -65,7 +65,7 @@ func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.Tun
 			},
 		},
 		done:           make(chan struct{}),
-		scriptExecutor: script.New(logger, cfg),
+		scriptExecutor: script.New(logger, cfg.StartScript, cfg.StopScript),
 		authenticator:  authenticator,
 	}, nil
 }
@@ -83,8 +83,8 @@ func (s *Server) Start(ctx context.Context, listenFunc func() (transport.Listene
 	s.logger.Infof("Listening on %s:%d", s.config.Target.Address, s.config.Target.Port)
 
 	go s.acceptClients(ctx)
-	go s.processInboundQueue(ctx)
-	go s.processOutboundQueue(ctx)
+	go s.processInbound(ctx)
+	go s.processOutbound(ctx)
 	go s.readFromAdapter()
 
 	return nil

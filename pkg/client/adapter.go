@@ -3,8 +3,19 @@ package client
 import (
 	"context"
 
+	"github.com/riraccuia/pig/pkg/adapter"
+	"github.com/riraccuia/pig/pkg/common"
+	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/packet"
 )
+
+func getAdapter(cfg *config.Config) (common.TunnelAdapter, error) {
+	adapterCfg := adapter.AdapterConfig{
+		Address: cfg.TunnelAddress,
+		MTU:     cfg.MTU,
+	}
+	return adapter.NewAdapter(adapterCfg)
+}
 
 func (c *Client) readFromAdapter(ctx context.Context) {
 	for {

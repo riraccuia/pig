@@ -10,7 +10,7 @@ import (
 
 // QueryServerUDP is a convenience function that uses a StunClient under the hood.
 func QueryServerUDP(logger common.Logger, stunServerAddr string, connOrSrcPort any) (mappedIP net.IP, mappedPort int, err error) {
-	client := NewStunClient(logger, stunServerAddr)
+	client := NewStunClient(logger, stunServerAddr, nil)
 	return client.QueryStunServerUDP(connOrSrcPort)
 }
 
@@ -30,12 +30,10 @@ func (c *StunClient) QueryStunServerUDP(connOrSrcPort any) (mappedIP net.IP, map
 // QueryStunServerUDP sends a STUN Binding Request and returns the mapped IP and port.
 // It uses the client's configured ServerAddr. connOrSrcPort is the UDP connection or the source port to send from.
 func (c *StunClient) queryStunServerUDP(connOrSrcPort any) (mappedIP net.IP, mappedPort int, err error) {
-	stunServerAddr := c.ServerAddr
-
 	// Resolve server address
-	serverAddr, err := net.ResolveUDPAddr("udp", stunServerAddr)
+	serverAddr, err := net.ResolveUDPAddr("udp", c.ServerAddr)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to resolve STUN server address %s: %w", stunServerAddr, err)
+		return nil, 0, fmt.Errorf("failed to resolve STUN server address %s: %w", c.ServerAddr, err)
 	}
 
 	// Create transaction ID and request
@@ -63,7 +61,7 @@ func (c *StunClient) queryStunServerUDP(connOrSrcPort any) (mappedIP net.IP, map
 	}
 
 	if c.logger != nil {
-		c.logger.Infof("STUN: Found mapped address %s:%d", mappedIP, mappedPort)
+		c.logger.Infof("STUN: Found mapped address %s:%d (UDP)", mappedIP, mappedPort)
 	}
 
 	return mappedIP, mappedPort, nil
@@ -93,13 +91,13 @@ func (c *StunClient) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrSrcPort a
 	srcPort := udpConn.LocalAddr().(*net.UDPAddr).Port
 
 	if c.logger != nil {
-		c.logger.Infof("STUN: Sending Binding Request from :%d to %s (TX ID: %x)", srcPort, serverAddr, txID[:4])
+		c.logger.Infof("STUN: Sending Binding Request over UDP from :%d to %s (TX ID: %x)", srcPort, serverAddr, txID[:4])
 	}
 
 	// Send request
 	_, err = udpConn.WriteToUDP(requestBytes, serverAddr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send STUN request: %w", err)
+		return nil, fmt.Errorf("failed to send STUN request over UDP: %w", err)
 	}
 
 	// Receive response with timeout
@@ -109,7 +107,7 @@ func (c *StunClient) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrSrcPort a
 	n, remoteAddr, err := udpConn.ReadFromUDP(responseBytes)
 	if err != nil {
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			return nil, fmt.Errorf("STUN request timed out")
+			return nil, fmt.Errorf("STUN UDP request timed out")
 		}
 		return nil, fmt.Errorf("failed to read STUN response: %w", err)
 	}
@@ -118,7 +116,7 @@ func (c *StunClient) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrSrcPort a
 	responseBytes = responseBytes[:n]
 
 	if c.logger != nil {
-		c.logger.Debugf("STUN: Received %d bytes response from %s", n, remoteAddr)
+		c.logger.Debugf("STUN: Received %d bytes response over UDP from %s", n, remoteAddr)
 	}
 
 	return responseBytes, nil

@@ -29,6 +29,9 @@ func (s *Server) acceptClients(ctx context.Context) {
 }
 
 func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCloser) {
+	// assign a queue to the client
+	inbound := s.getInboundPktQueue()
+
 	const readBufferSize = 64 * 1024 // 64KB buffer
 	buffer := make([]byte, readBufferSize)
 	unprocessed := buffer[:0]
@@ -72,7 +75,7 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 			newPkt.UpdateChecksum()
 
 			select {
-			case s.inbound <- newPkt:
+			case inbound <- newPkt:
 			default:
 				s.bufferPool.Put(newPkt)
 			}

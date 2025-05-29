@@ -1,8 +1,6 @@
 module github.com/riraccuia/pig
 
-go 1.23.0
-
-toolchain go1.23.3
+go 1.24.3
 
 require (
 	github.com/BurntSushi/toml v1.3.2
@@ -12,7 +10,6 @@ require (
 	github.com/lestrrat-go/jwx/v3 v3.0.0
 	github.com/quic-go/quic-go v0.49.0
 	github.com/rs/zerolog v1.33.0
-	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
 	golang.org/x/net v0.34.0
 	golang.org/x/sys v0.31.0
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2

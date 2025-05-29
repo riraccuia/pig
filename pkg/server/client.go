@@ -19,7 +19,6 @@ type ClientTunnel struct {
 	conn       transport.Conn
 	streams    *streams.StreamManager
 	sourceIP   net.IP
-	inbound    common.PacketQueue
 	outbound   *queue.ChanQueue
 	dropLogger *common.DelayedCounterProcessor
 	connError  chan error
@@ -70,7 +69,6 @@ func (s *Server) handleNewClient(ctx context.Context, conn transport.Conn) {
 		conn:     conn,
 		streams:  streams.New(),
 		sourceIP: sourceIP,
-		inbound:  make(common.PacketQueue, s.config.QueueSize),
 		outbound: outbound,
 		dropLogger: common.NewDelayedCounterProcessor(func(c1, c2 *atomic.Uint64) {
 			s.logger.Infof("Client %s dropped %d packets (%d bytes)", conn.RemoteAddr(), c1.Load(), c2.Load())
