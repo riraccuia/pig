@@ -5,14 +5,25 @@
 - [Features](#features)
 - [Implementation Notes](#implementation-notes)
 - [Components](#components)
+  - [Core UDP/TCP Hole Punching](#core-udptcp-hole-punching)
+  - [Listen and Connect Methods](#listen-and-connect-methods)
 - [Configuration](#configuration)
+  - [Signaling Options](#signaling-options)
+  - [ICE Message Format](#ice-message-format)
 - [How It Works](#how-it-works)
+  - [Simplified vs. Full ICE](#simplified-vs-full-ice)
+  - [Port Selection](#port-selection)
 - [Security](#security)
+  - [Message Encryption](#message-encryption)
+  - [ICE Credentials](#ice-credentials)
+  - [Topics](#topics)
 - [Best Practices](#best-practices)
 - [Limitations](#limitations)
 - [Dependencies](#dependencies)
 - [Future Enhancements](#future-enhancements)
 - [Example Implementation](#example-implementation)
+  - [Setting Up the Server with Listen](#setting-up-the-server-with-listen)
+  - [Setting Up the Client with Connect](#setting-up-the-client-with-connect)
 
 ## Introduction
 
@@ -65,26 +76,57 @@ if err != nil {
 }
 ```
 
-### MQTT/ICE Signaling
+### Listen and Connect Methods
 
-The signaling package implements MQTT-based ICE signaling for hole punching:
+#### Listen
 
-#### Client
+The `Listen` function starts a new ICE server and returns a listener for incoming connections. It supports both UDP and TCP, performs STUN queries for public endpoint discovery, and processes incoming ICE offers via MQTT-based signaling.
 
-The client is responsible for:
-- Performing STUN queries (UDP, TCP, or TLS) to discover its public endpoint
-- Creating ICE candidate information including host and server reflexive candidates
-- Publishing its ICE offer to MQTT
-- Establishing the initial connection (UDP or TCP)
+```go
+func Listen(ctx context.Context, opts *signaling.Options, listenAddr net.Addr) (listener any, err error)
+```
 
-#### Server
+- **Parameters:**
+  - `ctx`: Context for cancellation and timeout.
+  - `opts`: Signaling options (see Configuration section).
+  - `listenAddr`: The local address to listen on (`*net.UDPAddr` for UDP, `*net.TCPAddr` for TCP).
+- **Returns:**
+  - `listener`: For UDP, a `*net.UDPConn`; for TCP, a `*conn.TCPListener` (custom type).
+  - `err`: Error if setup fails.
 
-The server is responsible for:
-- Listening for client ICE offer messages on MQTT topics
-- Processing ICE candidates to determine the best endpoint to connect to
-- Sending ICE answers with its own candidates
-- Performing UDP or TCP hole punching to establish direct connections
-- Managing MQTT connections and subscriptions
+**Behavior:**
+- For UDP, binds to the specified address and performs a STUN query to discover the public endpoint.
+- For TCP, creates a TCP listener (see `conn.TCPListener`).
+- Listens for ICE offers via MQTT signaling and responds with ICE answers.
+- Performs UDP or TCP hole punching to establish direct connections with clients.
+- The returned listener can be used to accept connections (TCP) or receive packets (UDP).
+
+#### Connect
+
+The `Connect` function establishes a connection to a remote peer using ICE. It gathers local and server reflexive candidates, selects the best candidate, and performs the connection using the specified protocol.
+
+```go
+func Connect(ctx context.Context, opts *signaling.Options, srcPort, dstPort int, addr string, network string) (co net.Conn, remoteAddr net.Addr, err error)
+```
+
+- **Parameters:**
+  - `ctx`: Context for cancellation and timeout.
+  - `opts`: Signaling options (see Configuration section).
+  - `srcPort`: Local port to use (0 for random ephemeral port).
+  - `dstPort`: Remote port to connect to.
+  - `addr`: Remote IP address as string.
+  - `network`: Protocol to use, either "udp" or "tcp".
+- **Returns:**
+  - `co`: The established connection (`net.Conn`). For UDP, this is a `*net.UDPConn` bound to the local port; for TCP, a `*net.TCPConn` connected to the remote peer.
+  - `remoteAddr`: The remote address connected to.
+  - `err`: Error if connection fails.
+
+**Behavior:**
+- Gathers ICE candidates for the local and remote addresses using STUN and signaling.
+- Selects the best candidate (prioritizing server reflexive candidates for NAT traversal).
+- For UDP, returns a `*net.UDPConn` bound to the local port; you must send to `remoteAddr`.
+- For TCP, returns a connected `*net.TCPConn`.
+- Handles all signaling and candidate exchange automatically.
 
 ## Configuration
 
@@ -229,9 +271,58 @@ Planned future implementations:
 
 ## Example Implementation
 
-Here's a complete example of implementing the ICE signaling flow with client and server:
+Here's a complete example of implementing the ICE signaling flow with client and server using the `Listen` and `Connect` methods:
 
-### Setting Up the Client
+### Setting Up the Server with Listen
+
+```go
+package main
+
+import (
+	"context"
+	"net"
+	"time"
+
+	"github.com/riraccuia/pig/pkg/log"
+	"github.com/riraccuia/pig/pkg/ice/signaling"
+	"github.com/riraccuia/pig/pkg/ice"
+)
+
+func runServer(listenPort int, protocol string, encryptionKey []byte) error {
+	logger := log.NewLogger()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := &signaling.Options{
+		BrokerURL:  "ssl://broker.hivemq.com:8883",
+		ClientID:   "pig-server-" + time.Now().Format("20060102150405"),
+		EncryptionKey: encryptionKey,
+		Logger:     logger,
+		STUNServer: "stun.l.google.com:19302",
+		Protocol:   protocol, // "udp" or "tcp"
+	}
+
+	var listenAddr net.Addr
+	switch protocol {
+	case "tcp":
+		listenAddr = &net.TCPAddr{IP: net.IPv4zero, Port: listenPort}
+	case "udp":
+		listenAddr = &net.UDPAddr{IP: net.IPv4zero, Port: listenPort}
+	default:
+		return fmt.Errorf("invalid protocol: %s", protocol)
+	}
+
+	listener, err := ice.Listen(ctx, opts, listenAddr)
+	if err != nil {
+		return err
+	}
+	// For TCP: accept connections using listener.(*conn.TCPListener).Accept()
+	// For UDP: receive packets using listener.(*net.UDPConn).ReadFromUDP()
+	return nil
+}
+```
+
+### Setting Up the Client with Connect
 
 ```go
 package main
@@ -245,17 +336,13 @@ import (
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/ice/signaling"
+	"github.com/riraccuia/pig/pkg/ice"
 )
 
-func runClient(targetAddr string, protocol string) error {
+func runClient(targetAddr string, targetPort int, protocol string, encryptionKey []byte) error {
 	logger := log.NewLogger()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
-	encryptionKey := make([]byte, 32)
-	if _, err := rand.Read(encryptionKey); err != nil {
-		return err
-	}
 
 	opts := &signaling.Options{
 		BrokerURL:  "ssl://broker.hivemq.com:8883",
@@ -263,45 +350,18 @@ func runClient(targetAddr string, protocol string) error {
 		EncryptionKey: encryptionKey,
 		Logger:     logger,
 		STUNServer: "stun.l.google.com:19302",
-		Protocol:   protocol, // "udp", "tcp", or "tls" (for STUN)
+		Protocol:   protocol, // "udp" or "tcp"
 	}
 
-	// Create the signaling client and perform ICE
-	// ... (see pkg/ice/connect.go for details)
-	return nil
-}
-```
-
-### Setting Up the Server
-
-```go
-package main
-
-import (
-	"context"
-	"net"
-	"time"
-
-	"github.com/riraccuia/pig/pkg/log"
-	"github.com/riraccuia/pig/pkg/ice/signaling"
-)
-
-func runServer(listenPort int, encryptionKey []byte, protocol string) error {
-	logger := log.NewLogger()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	opts := &signaling.Options{
-		BrokerURL:  "ssl://broker.hivemq.com:8883",
-		ClientID:   "pig-server-" + time.Now().Format("20060102150405"),
-		EncryptionKey: encryptionKey,
-		Logger:     logger,
-		STUNServer: "stun.l.google.com:19302",
-		Protocol:   protocol, // "udp", "tcp", or "tls" (for STUN)
+	srcPort := 0 // Use 0 for random local port
+	conn, remoteAddr, err := ice.Connect(ctx, opts, srcPort, targetPort, targetAddr, protocol)
+	if err != nil {
+		return err
 	}
-
-	// Create the signaling server and perform ICE
-	// ... (see pkg/ice/listen.go for details)
+	defer conn.Close()
+	logger.Infof("Connected to %s", remoteAddr.String())
+	// For UDP: send to remoteAddr using conn.(*net.UDPConn).WriteToUDP()
+	// For TCP: use conn as a net.Conn
 	return nil
 }
 ```
