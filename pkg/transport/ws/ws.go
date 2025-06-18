@@ -189,7 +189,7 @@ func (t *WSTransport) Listen(network, address string, tlsConfig *tls.Config) err
 func GetClientDialFunc(ctx context.Context, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
 		transport := NewWSTransport()
-		if config.ICE.Enabled {
+		if config.ICE != nil && config.ICE.Enabled {
 			logger := log.NewBlockingLogger()
 			logger.SetLevel(config.LogLevel)
 			_conn, remoteAddr, err := ice.Connect(
@@ -225,7 +225,7 @@ func GetServerListenFunc(ctx context.Context, config *config.Config, tlsConfig *
 	return func() (transport.Listener, error) {
 		transport := NewWSTransport()
 		go func() {
-			if config.ICE.Enabled {
+			if config.ICE != nil && config.ICE.Enabled {
 				logger := log.NewBlockingLogger()
 				logger.SetLevel(config.LogLevel)
 				listener, err := ice.Listen(
