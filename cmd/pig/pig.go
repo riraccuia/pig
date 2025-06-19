@@ -32,16 +32,16 @@ func pig(mo config.Mode) {
 		closer io.Closer
 	)
 
-	cfg = initPig(mo)
+	cfg, logger = initPig(mo)
 
 	ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
 
-	logger = log.NewLogger(ctx)
-	transport.Logger = logger
-	logger.SetLevel(cfg.LogLevel)
+	logger.Infof("Starting pig | Mode: %s | Transport: %s | MTU: %d", cfg.Mode, cfg.Proto, cfg.MTU)
 
-	logger.Infof("Mode: %s, Transport: %s, MTU: %d", cfg.Mode, cfg.Proto, cfg.MTU)
+	if cfg.ICE != nil && cfg.ICE.Enabled {
+		logger.Info("ICE enabled | STUN server: ", cfg.ICE.STUNAddress, " | MQTT broker: ", cfg.ICE.Signaling.MQTTBrokerAddress)
+	}
 
 	switch cfg.Mode {
 	case "client":
@@ -55,7 +55,7 @@ func pig(mo config.Mode) {
 		if err != nil {
 			logger.Fatalf("Failed to create authenticator: %v", err)
 		}
-		dialer, err = getClientDialFunc(ctx, cfg, logger)
+		dialer, err = getClientDialFunc(ctx, logger, cfg)
 		if err != nil {
 			logger.Fatalf("Failed to get client dialer: %v", err)
 		}
@@ -78,7 +78,7 @@ func pig(mo config.Mode) {
 		if err != nil {
 			logger.Fatalf("Failed to create authenticator: %v", err)
 		}
-		listener, err = getServerListenFunc(ctx, cfg, logger)
+		listener, err = getServerListenFunc(ctx, logger, cfg)
 		if err != nil {
 			logger.Fatalf("Failed to get server listener: %v", err)
 		}
@@ -106,71 +106,71 @@ func pig(mo config.Mode) {
 	closer.Close()
 }
 
-func getClientDialFunc(ctx context.Context, cfg *config.Config, logger *log.Logger) (func() (transport.Conn, error), error) {
+func getClientDialFunc(ctx context.Context, logger *log.Logger, cfg *config.Config) (func() (transport.Conn, error), error) {
 	switch cfg.Proto {
 	case config.TransportQUIC:
 		tlsConfig, err := createTLSConfig(logger, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return qt.GetClientDialFunc(ctx, cfg, tlsConfig), nil
+		return qt.GetClientDialFunc(ctx, logger, cfg, tlsConfig), nil
 	case config.TransportUDP:
-		return udp.GetClientDialFunc(ctx, cfg), nil
+		return udp.GetClientDialFunc(ctx, logger, cfg), nil
 	case config.TransportTLS:
 		tlsConfig, err := createTLSConfig(logger, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return trtls.GetClientDialFunc(ctx, cfg, tlsConfig), nil
+		return trtls.GetClientDialFunc(ctx, logger, cfg, tlsConfig), nil
 	case config.TransportWS:
 		tlsConfig, err := createTLSConfig(logger, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return ws.GetClientDialFunc(ctx, cfg, tlsConfig), nil
+		return ws.GetClientDialFunc(ctx, logger, cfg, tlsConfig), nil
 	case config.TransportICMP:
-		return icmp.GetClientDialFunc(ctx, cfg), nil
+		return icmp.GetClientDialFunc(ctx, logger, cfg), nil
 	case config.TransportTLSICMP:
 		tlsConfig, err := createTLSConfig(logger, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return tlsicmp.GetClientDialFunc(ctx, cfg, tlsConfig), nil
+		return tlsicmp.GetClientDialFunc(ctx, logger, cfg, tlsConfig), nil
 	default:
 		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 	}
 }
 
-func getServerListenFunc(ctx context.Context, cfg *config.Config, logger *log.Logger) (func() (transport.Listener, error), error) {
+func getServerListenFunc(ctx context.Context, logger *log.Logger, cfg *config.Config) (func() (transport.Listener, error), error) {
 	switch cfg.Proto {
 	case config.TransportQUIC:
 		tlsConfig, err := createTLSConfig(logger, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return qt.GetServerListenFunc(ctx, cfg, tlsConfig), nil
+		return qt.GetServerListenFunc(ctx, logger, cfg, tlsConfig), nil
 	case config.TransportUDP:
-		return udp.GetServerListenFunc(ctx, cfg), nil
+		return udp.GetServerListenFunc(ctx, logger, cfg), nil
 	case config.TransportTLS:
 		tlsConfig, err := createTLSConfig(logger, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return trtls.GetServerListenFunc(ctx, cfg, tlsConfig), nil
+		return trtls.GetServerListenFunc(ctx, logger, cfg, tlsConfig), nil
 	case config.TransportWS:
 		tlsConfig, err := createTLSConfig(logger, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return ws.GetServerListenFunc(ctx, cfg, tlsConfig), nil
+		return ws.GetServerListenFunc(ctx, logger, cfg, tlsConfig), nil
 	case config.TransportICMP:
-		return icmp.GetServerListenFunc(ctx, cfg), nil
+		return icmp.GetServerListenFunc(ctx, logger, cfg), nil
 	case config.TransportTLSICMP:
 		tlsConfig, err := createTLSConfig(logger, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return tlsicmp.GetServerListenFunc(ctx, cfg, tlsConfig), nil
+		return tlsicmp.GetServerListenFunc(ctx, logger, cfg, tlsConfig), nil
 	default:
 		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 	}

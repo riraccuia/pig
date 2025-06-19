@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/riraccuia/pig/pkg/config"
+	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 	"golang.org/x/net/quic"
 )
@@ -101,7 +102,7 @@ func (t *QuicTransport) Close() error {
 	return t.endpoint.Close(context.Background())
 }
 
-func GetClientDialFunc(ctx context.Context, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
+func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
 		endpoint, err := quic.Listen("udp", ":0", &quic.Config{TLSConfig: tlsConfig})
 		if err != nil {
@@ -122,7 +123,7 @@ func GetClientDialFunc(ctx context.Context, config *config.Config, tlsConfig *tl
 	}
 }
 
-func GetServerListenFunc(ctx context.Context, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
+func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
 	return func() (transport.Listener, error) {
 		endpoint, err := quic.Listen(
 			"udp",

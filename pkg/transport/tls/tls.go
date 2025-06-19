@@ -7,6 +7,7 @@ import (
 	"net"
 
 	"github.com/riraccuia/pig/pkg/config"
+	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -56,7 +57,7 @@ func (t *TLSTransport) Close() error {
 	return t.listener.Close()
 }
 
-func GetClientDialFunc(ctx context.Context, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
+func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
 		addr := fmt.Sprintf("%s:%d", config.Target.Address, config.Target.Port)
 		dialer := &net.Dialer{}
@@ -68,7 +69,7 @@ func GetClientDialFunc(ctx context.Context, config *config.Config, tlsConfig *tl
 	}
 }
 
-func GetServerListenFunc(ctx context.Context, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
+func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
 	return func() (transport.Listener, error) {
 		addr := fmt.Sprintf(":%d", config.Target.Port)
 		listener, err := tls.Listen("tcp", addr, tlsConfig.Clone())

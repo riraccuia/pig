@@ -3,8 +3,6 @@ package icmp
 import (
 	"encoding/binary"
 	"time"
-
-	"github.com/riraccuia/pig/pkg/transport"
 )
 
 // initNewReno initializes the congestion control variables
@@ -71,7 +69,7 @@ func (c *connection) handleDuplicateAck(ourSeq, peerSeq, peerAck uint32, data []
 	if !isDuplicateAck {
 		return
 	}
-	transport.Logger.Debugf("Duplicate ACK, seq: %d, ack: %d, our_seq: %d, our_ack: %d", peerSeq, peerAck, ourSeq, c.ack.Load())
+	c.listener.logger.Debugf("Duplicate ACK, seq: %d, ack: %d, our_seq: %d, our_ack: %d", peerSeq, peerAck, ourSeq, c.ack.Load())
 	if c.retransmit.Load() {
 		c.cwnd.Add(c.emss)
 		return
@@ -81,7 +79,7 @@ func (c *connection) handleDuplicateAck(ourSeq, peerSeq, peerAck uint32, data []
 	if c.dupCnt < 3 {
 		return
 	}
-	transport.Logger.Debugf("Triple duplicate ACK, seq: %d, ack: %d", peerSeq, peerAck)
+	c.listener.logger.Debugf("Triple duplicate ACK, seq: %d, ack: %d", peerSeq, peerAck)
 	// Enter fast recovery
 	c.retransmit.Store(true)
 	c.recover.Store(ourSeq)
@@ -90,7 +88,7 @@ func (c *connection) handleDuplicateAck(ourSeq, peerSeq, peerAck uint32, data []
 	c.ssthresh = max(c.flightSize.Load()/2, 2*c.emss)
 	// cwnd=ssthresh+3×MSS
 	c.cwnd.Store(c.ssthresh + 3*c.emss)
-	transport.Logger.Debugf("Fast retransmit triggered, new cwnd: %d", c.cwnd.Load())
+	c.listener.logger.Debugf("Fast retransmit triggered, new cwnd: %d", c.cwnd.Load())
 	// Retransmit missing segment
 	c.retransmitMissingSegment(peerAck)
 	return
@@ -118,7 +116,7 @@ func (c *connection) doFastRetransmit(peerAck uint32) {
 	// cwnd=ssthresh
 	cwnd := min(c.ssthresh, max(c.flightSize.Load(), c.emss))
 	c.cwnd.Store(cwnd)
-	transport.Logger.Debugf("Exiting fast retransmit")
+	c.listener.logger.Debugf("Exiting fast retransmit")
 }
 
 func (c *connection) recoverFromLoss(startSeq uint32) {
@@ -127,9 +125,9 @@ func (c *connection) recoverFromLoss(startSeq uint32) {
 		prevPeerSeq = c.peerSeq
 		peerAck     = c.peerAck
 	)
-	transport.Logger.Debugf("Recovering from loss, startSeq: %d", startSeq)
+	c.listener.logger.Debugf("Recovering from loss, startSeq: %d", startSeq)
 	c.ooq.RangeFrom(startSeq, func(seq uint32, nextSeq uint32, sData []byte) bool {
-		transport.Logger.Debugf("Found packet in out of order queue, seq: %d", seq)
+		c.listener.logger.Debugf("Found packet in out of order queue, seq: %d", seq)
 		purge = true
 		prevPeerSeq = seq
 		peerAck = binary.BigEndian.Uint32(sData[4:8])
@@ -138,7 +136,7 @@ func (c *connection) recoverFromLoss(startSeq uint32) {
 		}
 		// c.updateCongestionWindow()
 		if _, err := c.readBuf.Write(sData[8:]); err != nil {
-			transport.Logger.Errorf("Error writing to read buffer: %v", err)
+			c.listener.logger.Errorf("Error writing to read buffer: %v", err)
 			return false
 		}
 		nextPeerSeq := seq + uint32(len(sData[8:]))
@@ -158,16 +156,16 @@ func (c *connection) recoverFromLoss(startSeq uint32) {
 func (c *connection) retransmitMissingSegment(peerAck uint32) {
 	packet := c.rq.GetPacket(peerAck)
 	if packet == nil {
-		transport.Logger.Debugf("No data to retransmit, peerAck: %d", peerAck)
+		c.listener.logger.Debugf("No data to retransmit, peerAck: %d", peerAck)
 		return
 	}
 	packetSeq := binary.BigEndian.Uint32(packet[0:4])
 	if packetSeq != peerAck {
-		transport.Logger.Errorf("mismatch in packet seq: %d, peerAck: %d", packetSeq, peerAck)
+		c.listener.logger.Errorf("mismatch in packet seq: %d, peerAck: %d", packetSeq, peerAck)
 	}
 	// transport.Logger.Infof("First retransmit packet seq: %v", c.rq.packets[0].seq)
-	transport.Logger.Debugf("Retransmitting seq: %d, ack: %d, len: %d", peerAck, c.ack.Load(), len(packet))
+	c.listener.logger.Debugf("Retransmitting seq: %d, ack: %d, len: %d", peerAck, c.ack.Load(), len(packet))
 	if err := c.serializeRetransmitData(peerAck, c.ack.Load(), packet); err != nil {
-		transport.Logger.Errorf("Error retransmitting data: %v", err)
+		c.listener.logger.Errorf("Error retransmitting data: %v", err)
 	}
 }

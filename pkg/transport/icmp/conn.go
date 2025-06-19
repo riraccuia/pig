@@ -161,7 +161,7 @@ func (c *connection) readLoop() {
 		case <-c.ctx.Done():
 			return
 		case <-c.rto.C:
-			transport.Logger.Debugf("RTO expired, retransmitting missing segment, rtt: %v", c.GetRTT())
+			c.listener.logger.Debugf("RTO expired, retransmitting missing segment, rtt: %v", c.GetRTT())
 			c.rtt.Store(int64(c.GetRTT()) * 2) // double the RTT
 			c.ssthresh = min(c.flightSize.Load()/2, 2*c.emss)
 			c.cwnd.Store(c.emss)
@@ -179,7 +179,7 @@ func (c *connection) readLoop() {
 			c.serializeAck(ack)
 		case data := <-c.incoming:
 			if err := c.processICMPPacket(data); err != nil {
-				transport.Logger.Errorf("Error processing ICMP packet: %v", err)
+				c.listener.logger.Errorf("Error processing ICMP packet: %v", err)
 				c.Close()
 				return
 			}
@@ -237,7 +237,7 @@ func (c *connection) writeLoop() {
 
 			// Send application data
 			if err := c.serializeData(); err != nil {
-				transport.Logger.Errorf("Error sending data: %v", err)
+				c.listener.logger.Errorf("Error sending data: %v", err)
 				continue
 			}
 		}

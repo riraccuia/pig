@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/riraccuia/pig/pkg/config"
+	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -17,7 +18,8 @@ import (
 var defaultBufferSize = 64 * 1024
 
 // GetClientDialFunc returns a function that creates client connections based on config
-func GetClientDialFunc(ctx context.Context, config *config.Config) func() (transport.Conn, error) {
+func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config) func() (transport.Conn, error) {
+	initUDP(logger)
 	return func() (transport.Conn, error) {
 		addr := fmt.Sprintf("%s:%d", config.Target.Address, config.Target.Port)
 		conn, err := net.ListenPacket("udp", fmt.Sprintf(":%d", config.Target.SrcPort))
@@ -50,7 +52,7 @@ func GetClientDialFunc(ctx context.Context, config *config.Config) func() (trans
 					n, _, err := conn.ReadFrom(readBuffer)
 					if err != nil {
 						if !strings.Contains(err.Error(), "use of closed network connection") {
-							transport.Logger.Errorf("UDP client read error: %v", err)
+							logger.Errorf("UDP client read error: %v", err)
 						}
 						return
 					}
@@ -60,7 +62,7 @@ func GetClientDialFunc(ctx context.Context, config *config.Config) func() (trans
 					select {
 					case c.readChan <- data:
 					default:
-						transport.Logger.Errorf("UDP client data channel full, dropping packet")
+						logger.Errorf("UDP client data channel full, dropping packet")
 					}
 				}
 			}
@@ -71,7 +73,8 @@ func GetClientDialFunc(ctx context.Context, config *config.Config) func() (trans
 }
 
 // GetServerListenFunc returns a function that creates server listeners based on config
-func GetServerListenFunc(ctx context.Context, config *config.Config) func() (transport.Listener, error) {
+func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.Config) func() (transport.Listener, error) {
+	initUDP(logger)
 	return func() (transport.Listener, error) {
 		addr := fmt.Sprintf("%s:%d", config.Target.Address, config.Target.Port)
 		conn, err := net.ListenPacket("udp", addr)
@@ -79,7 +82,7 @@ func GetServerListenFunc(ctx context.Context, config *config.Config) func() (tra
 			return nil, fmt.Errorf("failed to listen on UDP: %w", err)
 		}
 
-		return newListener(conn, conn.LocalAddr()), nil
+		return newListener(logger, conn, conn.LocalAddr()), nil
 	}
 }
 
@@ -93,9 +96,10 @@ type listener struct {
 	readBuffer []byte
 	ctx        context.Context
 	cancel     context.CancelFunc
+	logger     *log.Logger
 }
 
-func newListener(conn net.PacketConn, addr net.Addr) *listener {
+func newListener(logger *log.Logger, conn net.PacketConn, addr net.Addr) *listener {
 	ctx, cancel := context.WithCancel(context.Background())
 	l := &listener{
 		conn:       conn,
@@ -105,6 +109,7 @@ func newListener(conn net.PacketConn, addr net.Addr) *listener {
 		readBuffer: make([]byte, defaultBufferSize),
 		ctx:        ctx,
 		cancel:     cancel,
+		logger:     logger,
 	}
 	go l.readPackets()
 	return l
@@ -119,7 +124,7 @@ func (l *listener) readPackets() {
 			n, raddr, err := l.conn.ReadFrom(l.readBuffer)
 			if err != nil {
 				if !strings.Contains(err.Error(), "use of closed network connection") {
-					transport.Logger.Errorf("UDP server read error: %v", err)
+					l.logger.Errorf("UDP server read error: %v", err)
 				}
 				return
 			}
@@ -150,7 +155,7 @@ func (l *listener) readPackets() {
 			case conn.readChan <- data:
 			default:
 				// Drop packet if buffer is full
-				transport.Logger.Errorf("UDP server data channel full, dropping packet from %s", raddrStr)
+				l.logger.Errorf("UDP server data channel full, dropping packet from %s", raddrStr)
 			}
 		}
 	}

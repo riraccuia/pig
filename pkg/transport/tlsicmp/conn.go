@@ -27,7 +27,6 @@ func newConn(icmpConn transport.Conn, tlsConfig *tls.Config, isClient bool) (*co
 
 	// Perform TLS handshake
 	if err := c.Conn.Handshake(); err != nil {
-		transport.Logger.Errorf("failed to handshake: %v", err)
 		icmpConn.Close()
 		return nil, err
 	}

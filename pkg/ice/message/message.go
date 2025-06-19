@@ -5,8 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"math/rand"
-	"net"
-	"strconv"
 	"time"
 )
 
@@ -58,6 +56,9 @@ type ICECandidate struct {
 	// Foundation is a unique identifier for the candidate
 	Foundation string `json:"foundation"`
 
+	// Component ID of the candidate
+	ComponentID int `json:"componentId"`
+
 	// Priority of the candidate (higher is better)
 	Priority uint32 `json:"priority"`
 
@@ -90,92 +91,12 @@ type ICECredentials struct {
 }
 
 // GenerateICEOffer creates an ICE offer message with host and STUN-derived candidates
-func GenerateICEOffer(mappedIP net.IP, mappedPort int, localAddr net.Addr, encryptionKey []byte) (*ICEMessage, error) {
-	host, port, err := net.SplitHostPort(localAddr.String())
-	if err != nil {
-		return nil, err
-	}
-
-	portInt, err := strconv.Atoi(port)
-	if err != nil {
-		return nil, err
-	}
-
-	proto := localAddr.Network()
-
+func GenerateICEOffer(candidates []ICECandidate, encryptionKey []byte) (*ICEMessage, error) {
 	// Create the message
 	message := &ICEMessage{
-		SessionID: RandStringFromRunes(12, az09Runes),
-		Type:      ICEMessageTypeOffer,
-		Timestamp: time.Now().Unix(),
-		Candidates: []ICECandidate{
-			// Host candidate (local address)
-			{
-				Foundation: generateFoundation(localAddr.String()),
-				Priority:   calculateHostPriority(),
-				Protocol:   proto,
-				Address:    host,
-				Port:       portInt,
-				Type:       ICECandidateTypeHost,
-			},
-			// Server reflexive candidate (from STUN)
-			{
-				Foundation:  generateFoundation(mappedIP.String()),
-				Priority:    calculateSrflxPriority(),
-				Protocol:    proto,
-				Address:     mappedIP.String(),
-				Port:        mappedPort,
-				Type:        ICECandidateTypeSrflx,
-				RelatedAddr: host,
-				RelatedPort: portInt,
-			},
-		},
-		Credentials: generateCredentials(encryptionKey),
-	}
-
-	return message, nil
-}
-
-// GenerateICEAnswer creates an ICE answer message with host and STUN-derived candidates
-func GenerateICEAnswer(mappedIP net.IP, mappedPort int, localAddr net.Addr, encryptionKey []byte) (*ICEMessage, error) {
-	host, port, err := net.SplitHostPort(localAddr.String())
-	if err != nil {
-		return nil, err
-	}
-
-	portInt, err := strconv.Atoi(port)
-	if err != nil {
-		return nil, err
-	}
-
-	proto := localAddr.Network()
-
-	// Create the message, similar to the offer but with different type
-	message := &ICEMessage{
-		Type:      ICEMessageTypeAnswer,
-		Timestamp: time.Now().Unix(),
-		Candidates: []ICECandidate{
-			// Host candidate (local address)
-			{
-				Foundation: generateFoundation(localAddr.String()),
-				Priority:   calculateHostPriority(),
-				Protocol:   proto,
-				Address:    host,
-				Port:       portInt,
-				Type:       ICECandidateTypeHost,
-			},
-			// Server reflexive candidate (from STUN)
-			{
-				Foundation:  generateFoundation(mappedIP.String()),
-				Priority:    calculateSrflxPriority(),
-				Protocol:    proto,
-				Address:     mappedIP.String(),
-				Port:        mappedPort,
-				Type:        ICECandidateTypeSrflx,
-				RelatedAddr: host,
-				RelatedPort: portInt,
-			},
-		},
+		Type:        ICEMessageTypeOffer,
+		Timestamp:   time.Now().Unix(),
+		Candidates:  candidates,
 		Credentials: generateCredentials(encryptionKey),
 	}
 
@@ -183,6 +104,102 @@ func GenerateICEAnswer(mappedIP net.IP, mappedPort int, localAddr net.Addr, encr
 
 	return message, nil
 }
+
+// GenerateICEAnswer creates an ICE answer message with host and STUN-derived candidates
+func GenerateICEAnswer(candidates []ICECandidate, encryptionKey []byte) (*ICEMessage, error) {
+	message := &ICEMessage{
+		Type:        ICEMessageTypeAnswer,
+		Timestamp:   time.Now().Unix(),
+		Candidates:  candidates,
+		Credentials: generateCredentials(encryptionKey),
+	}
+
+	return message, nil
+}
+
+// GenerateICEOffer creates an ICE offer message with host and STUN-derived candidates
+/*func _GenerateICEOffer(mappedIP net.IP, mappedPort int, localAddr net.Addr, encryptionKey []byte) (*ICEMessage, error) {
+	host, port, err := net.SplitHostPort(localAddr.String())
+	if err != nil {
+		return nil, err
+	}
+
+	portInt, err := strconv.Atoi(port)
+	if err != nil {
+		return nil, err
+	}
+
+	proto := localAddr.Network()
+
+	localCandidates, err := GetLocalCandidates(proto, portInt)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create the message
+	message := &ICEMessage{
+		Type:      ICEMessageTypeOffer,
+		Timestamp: time.Now().Unix(),
+		Candidates: append(localCandidates, ICECandidate{
+			// Server reflexive candidate (from STUN)
+			Foundation:  GenerateFoundation(mappedIP.String()),
+			Priority:    CalculateSrflxPriority(),
+			Protocol:    proto,
+			Address:     mappedIP.String(),
+			Port:        mappedPort,
+			Type:        ICECandidateTypeSrflx,
+			RelatedAddr: host,
+			RelatedPort: portInt,
+		}),
+		Credentials: generateCredentials(encryptionKey),
+	}
+
+	message.GenerateSessionID()
+
+	return message, nil
+}
+
+// GenerateICEAnswer creates an ICE answer message with host and STUN-derived candidates
+func _GenerateICEAnswer(mappedIP net.IP, mappedPort int, localAddr net.Addr, encryptionKey []byte) (*ICEMessage, error) {
+	host, port, err := net.SplitHostPort(localAddr.String())
+	if err != nil {
+		return nil, err
+	}
+
+	portInt, err := strconv.Atoi(port)
+	if err != nil {
+		return nil, err
+	}
+
+	proto := localAddr.Network()
+
+	localCandidates, err := GetLocalCandidates(proto, portInt)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create the message, similar to the offer but with different type
+	message := &ICEMessage{
+		Type:      ICEMessageTypeAnswer,
+		Timestamp: time.Now().Unix(),
+		Candidates: append(localCandidates, ICECandidate{
+			// Server reflexive candidate (from STUN)
+			Foundation:  GenerateFoundation(mappedIP.String()),
+			Priority:    CalculateSrflxPriority(),
+			Protocol:    proto,
+			Address:     mappedIP.String(),
+			Port:        mappedPort,
+			Type:        ICECandidateTypeSrflx,
+			RelatedAddr: host,
+			RelatedPort: portInt,
+		}),
+		Credentials: generateCredentials(encryptionKey),
+	}
+
+	// message.GenerateSessionID()
+
+	return message, nil
+}*/
 
 func (msg *ICEMessage) GenerateSessionID() {
 	msg.SessionID = RandStringFromRunes(12, az09Runes)
@@ -195,20 +212,20 @@ func (msg *ICEMessage) String() string {
 
 // Helper functions
 
-// generateFoundation creates a unique foundation string for the candidate
-func generateFoundation(addr string) string {
+// GenerateFoundation creates a unique foundation string for the candidate
+func GenerateFoundation(addr string) string {
 	hash := sha256.Sum256([]byte(addr))
 	return base64.StdEncoding.EncodeToString(hash[:8])[:8] // First 8 chars of hash
 }
 
-// calculateHostPriority returns the priority for host candidates
-func calculateHostPriority() uint32 {
+// CalculateHostPriority returns the priority for host candidates
+func CalculateHostPriority() uint32 {
 	// Per ICE RFC: type preference (126) << 24 | local preference (65535) << 8 | 255
 	return (126 << 24) | (65535 << 8) | 255
 }
 
-// calculateSrflxPriority returns the priority for server reflexive candidates
-func calculateSrflxPriority() uint32 {
+// CalculateSrflxPriority returns the priority for server reflexive candidates
+func CalculateSrflxPriority() uint32 {
 	// Per ICE RFC: type preference (100) << 24 | local preference (65535) << 8 | 255
 	return (100 << 24) | (65535 << 8) | 255
 }

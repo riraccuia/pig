@@ -71,7 +71,9 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 			// Get new packet from pool and copy data
 			newPkt := s.bufferPool.Get().(packet.IPv4Packet)
 			copy(newPkt[:totalLen], unprocessed[processed:processed+totalLen])
-			newPkt.SetSourceIP(client.sourceIP)
+			if newPkt.IsMarked() {
+				newPkt.SetSourceIP(client.sourceIP)
+			}
 			newPkt.UpdateChecksum()
 
 			select {

@@ -3,19 +3,17 @@ package signaling
 import (
 	"context"
 	"fmt"
-	"net"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/riraccuia/pig/pkg/ice/message"
-	"github.com/riraccuia/pig/pkg/stun"
 )
 
 // Signaler handles ICE signaling operations
 type Signaler struct {
-	ctx         context.Context
-	opts        *Options
-	mqttClient  mqtt.Client
-	stunUdpConn *net.UDPConn
+	ctx          context.Context
+	opts         *Options
+	mqttClient   mqtt.Client
+	mqttLostConn chan struct{}
 }
 
 // NewSignaler creates a new signaler instance
@@ -28,73 +26,43 @@ func NewSignaler(ctx context.Context, opts *Options) (*Signaler, error) {
 		return nil, fmt.Errorf("STUN server is not set")
 	}
 
+	s := &Signaler{
+		ctx:  ctx,
+		opts: opts,
+	}
+
 	// Create and connect MQTT client
-	client, err := connectMQTTClient(opts)
+	client, err := s.connectMQTTClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to MQTT broker %s: %w", opts.BrokerURL, err)
 	}
 
-	return &Signaler{
-		ctx:        ctx,
-		opts:       opts,
-		mqttClient: client,
-	}, nil
-}
+	s.mqttClient = client
+	s.mqttLostConn = make(chan struct{})
 
-func (s *Signaler) SetSTUNUDPConn(conn *net.UDPConn) {
-	s.stunUdpConn = conn
+	return s, nil
 }
 
 // GatherICECandidates performs a STUN query, publishes an offer, and waits for an answer
-func GatherICECandidates(ctx context.Context, opts *Options, localAddr, targetAddr net.Addr) (ic []message.ICECandidate, err error) {
+func GatherICECandidates(ctx context.Context, opts *Options, targetHost string, offerCandidates []message.ICECandidate) (ic []message.ICECandidate, err error) {
 	signaler, err := NewSignaler(ctx, opts)
 	defer signaler.Disconnect()
 	if err != nil {
 		return nil, err
 	}
-	ic, err = signaler.GatherICECandidates(localAddr, targetAddr)
+	ic, err = signaler.GatherICECandidates(targetHost, offerCandidates)
 	return
 }
 
 // GatherICECandidates performs a STUN query, publishes an offer, and waits for an answer
-func (s *Signaler) GatherICECandidates(localAddr net.Addr, targetAddr net.Addr) ([]message.ICECandidate, error) {
-	// Get mapped endpoint
-	mappedIP, mappedPort, err := s.PerformSTUNQuery(localAddr)
-	if err != nil {
-		return nil, fmt.Errorf("STUN query failed: %w", err)
-	}
-
-	host, _, err := net.SplitHostPort(targetAddr.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to split host and port: %w", err)
-	}
-
-	topicBase := s.getTopicPrefix(host) + "/"
-	iceMsg, err := s.publishICEOffer(topicBase, mappedIP, mappedPort, localAddr)
+func (s *Signaler) GatherICECandidates(targetHost string, offerCandidates []message.ICECandidate) ([]message.ICECandidate, error) {
+	topicBase := s.getTopicPrefix(targetHost) + "/"
+	iceMsg, err := s.publishICEOffer(topicBase, offerCandidates)
 	if err != nil {
 		return nil, err
 	}
 	// Wait for answer
 	return s.waitForAnswer(topicBase, iceMsg.SessionID)
-}
-
-// PerformSTUNQuery performs a STUN query to get the public endpoint
-func (s *Signaler) PerformSTUNQuery(localAddr net.Addr) (mappedIP net.IP, mappedPort int, err error) {
-	// Perform STUN query to get our public endpoint
-	switch localAddr.Network() {
-	case "udp":
-		var connOrSrcPort any = localAddr.(*net.UDPAddr).Port
-		if s.stunUdpConn != nil {
-			connOrSrcPort = s.stunUdpConn
-		}
-		mappedIP, mappedPort, err = stun.QueryServerUDP(s.opts.Logger, s.opts.STUNServer, connOrSrcPort)
-	case "tcp":
-		mappedIP, mappedPort, err = stun.QueryServerTCP(s.opts.Logger, s.opts.STUNServer, localAddr.(*net.TCPAddr).Port)
-	default:
-		return nil, 0, fmt.Errorf("unsupported network type: %s", localAddr.Network())
-	}
-
-	return mappedIP, mappedPort, err
 }
 
 func (s *Signaler) GetOptions() *Options {

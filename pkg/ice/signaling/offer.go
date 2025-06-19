@@ -2,16 +2,15 @@ package signaling
 
 import (
 	"fmt"
-	"net"
 
 	"github.com/riraccuia/pig/pkg/ice/message"
 )
 
-func (s *Signaler) publishICEOffer(topicBase string, mappedIP net.IP, mappedPort int, localAddr net.Addr) (*message.ICEMessage, error) {
-	// Create and publish offer
-	iceMsg, err := s.createICEOffer(mappedIP, mappedPort, localAddr)
+func (s *Signaler) publishICEOffer(topicBase string, candidates []message.ICECandidate) (*message.ICEMessage, error) {
+	// Create ICE offer message
+	iceMsg, err := message.GenerateICEOffer(candidates, s.opts.EncryptionKey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to generate ICE offer: %w", err)
 	}
 
 	// Create topic for offer
@@ -31,17 +30,6 @@ func (s *Signaler) publishICEOffer(topicBase string, mappedIP net.IP, mappedPort
 	err = s.connectAndPublish(offerTopic, payload)
 	if err != nil {
 		return nil, err
-	}
-
-	return iceMsg, nil
-}
-
-// createICEOffer creates an ICE offer message
-func (s *Signaler) createICEOffer(mappedIP net.IP, mappedPort int, localAddr net.Addr) (*message.ICEMessage, error) {
-	// Create ICE offer message
-	iceMsg, err := message.GenerateICEOffer(mappedIP, mappedPort, localAddr, s.opts.EncryptionKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate ICE offer: %w", err)
 	}
 
 	return iceMsg, nil

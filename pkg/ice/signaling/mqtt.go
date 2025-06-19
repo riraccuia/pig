@@ -4,10 +4,15 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+)
+
+var (
+	ErrMQTTFailure = errors.New("MQTT failure")
 )
 
 func getMQTTClientOptions(opts *Options) *mqtt.ClientOptions {
@@ -31,20 +36,23 @@ func getMQTTClientOptions(opts *Options) *mqtt.ClientOptions {
 	return mqttOpts
 }
 
-func connectMQTTClient(opts *Options) (mqtt.Client, error) {
-	mqttOpts := getMQTTClientOptions(opts)
+func (s *Signaler) connectMQTTClient() (mqtt.Client, error) {
+	mqttOpts := getMQTTClientOptions(s.opts)
 
 	mqttOpts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
-		if opts.Logger != nil {
-			opts.Logger.Errorf("MQTT connection lost: %v", err)
+		if s.opts.Logger != nil {
+			s.opts.Logger.Errorf("MQTT connection lost: %v", err)
 		}
+		close(s.mqttLostConn)
+		s.mqttLostConn = make(chan struct{})
 	})
 
 	client := mqtt.NewClient(mqttOpts)
 
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
-		return nil, token.Error()
+		return nil, errors.Join(ErrMQTTFailure, token.Error())
 	}
+
 	return client, nil
 }
 

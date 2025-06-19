@@ -78,6 +78,7 @@ func (m ICMPMode) IsValid() bool {
 
 type Config struct {
 	Mode              Mode          `toml:"mode"`           // "client" or "server"
+	LogConfig         LogConfig     `toml:"log"`            // Log configuration
 	TunnelAddress     string        `toml:"tunnel_address"` // CIDR format
 	MTU               int           `toml:"mtu"`
 	CertFile          string        `toml:"cert_file"`
@@ -89,12 +90,17 @@ type Config struct {
 	ReconnectInterval int           `toml:"reconnect_interval"` // in seconds
 	BindAdapter       string        `toml:"bind_adapter"`       // The adapter to bind to
 	Wred              WredConfig    `toml:"wred"`
-	LogLevel          string        `toml:"log_level"`
 	StartScript       string        `toml:"start_script"` // Script to execute when a tunnel connection is established
 	StopScript        string        `toml:"stop_script"`  // Script to execute when a tunnel connection is disconnected
 	Auth              *AuthConfig   `toml:"auth"`
 	QueueSize         int           `toml:"queue_size"` // Size of packet queues (default: 256)
 	ICE               *ICEConfig    `toml:"ice"`
+}
+
+type LogConfig struct {
+	File       string `toml:"file"`        // Path to log file
+	Level      string `toml:"level"`       // Log level
+	RotateSize any    `toml:"rotate_size"` // e.g. 100k, 1m, 1g, or actual size in bytes
 }
 
 type ICEConfig struct {

@@ -125,20 +125,18 @@ func (t *QuicTransport) Close() error {
 	return t.listener.Close()
 }
 
-func GetClientDialFunc(ctx context.Context, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
-	return dialFuncWithSrcPort(ctx, config.Target.Address, config.Target.SrcPort, config.Target.Port, tlsConfig, config)
+func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
+	return dialFuncWithSrcPort(ctx, logger, config.Target.Address, config.Target.SrcPort, config.Target.Port, tlsConfig, config)
 }
 
-func GetServerListenFunc(ctx context.Context, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
+func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
 	return func() (transport.Listener, error) {
 		var (
-			logger       = log.NewBlockingLogger()
 			udpConn      *net.UDPConn
 			listenerAddr = &net.UDPAddr{IP: net.IPv4zero, Port: config.Target.Port}
 			err          error
 		)
-		logger.SetLevel(config.LogLevel)
-		if config.ICE.Enabled {
+		if config.ICE != nil && config.ICE.Enabled {
 			var listener any
 			listener, err = ice.Listen(ctx, signaling.GetOptions(logger, config.ICE), listenerAddr)
 			if err != nil {
@@ -185,17 +183,15 @@ func dialFuncDefault(ctx context.Context, address string, dstPort int, tlsConfig
 	}
 }
 
-func dialFuncWithSrcPort(ctx context.Context, address string, srcPort, dstPort int, tlsConfig *tls.Config, cfg *config.Config) func() (transport.Conn, error) {
+func dialFuncWithSrcPort(ctx context.Context, logger *log.Logger, address string, srcPort, dstPort int, tlsConfig *tls.Config, cfg *config.Config) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
 		var (
 			udpConn *net.UDPConn
 			udpAddr *net.UDPAddr
 			err     error
 		)
-		if cfg.ICE.Enabled {
-			logger := log.NewBlockingLogger()
-			logger.SetLevel(cfg.LogLevel)
-			_conn, remoteAddr, err := ice.Connect(ctx, signaling.GetOptions(logger, cfg.ICE), srcPort, dstPort, address, "udp")
+		if cfg.ICE != nil && cfg.ICE.Enabled {
+			_conn, remoteAddr, err := ice.Connect(ctx, signaling.GetOptions(logger, cfg.ICE), srcPort, dstPort, address, transport.ICEProtocolQUIC)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get ICE connection: %w", err)
 			}

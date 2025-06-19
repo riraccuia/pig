@@ -69,7 +69,9 @@ func (c *Client) processInbound(connOrStream io.ReadWriteCloser) {
 			// Get new packet from pool and copy data
 			newPkt := c.bufferPool.Get().(packet.IPv4Packet)
 			copy(newPkt[:totalLen], unprocessed[processed:processed+totalLen])
-			newPkt.SetDestinationIP(c.adapter.IP())
+			if newPkt.IsMarked() {
+				newPkt.SetDestinationIP(c.adapter.IP())
+			}
 			newPkt.UpdateChecksum()
 			select {
 			case c.inbound <- newPkt:
@@ -113,6 +115,10 @@ func (c *Client) processOutboundStream() {
 		if totalLen <= 0 || totalLen > len(pkt) {
 			c.bufferPool.Put(pkt)
 			continue
+		}
+
+		if c.adapter.IP().Equal(pkt.SourceIP()) {
+			pkt.Mark()
 		}
 
 		_, err := stream.Write(pkt[:totalLen])
@@ -169,6 +175,10 @@ func (c *Client) processOutboundConn() {
 			if totalLen <= 0 || totalLen > len(pkt) {
 				c.bufferPool.Put(pkt)
 				continue
+			}
+
+			if c.adapter.IP().Equal(pkt.SourceIP()) {
+				pkt.Mark()
 			}
 
 			// If adding this packet would exceed batch size, flush current batch first

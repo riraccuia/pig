@@ -2,8 +2,10 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -16,6 +18,7 @@ var (
 	// [flag name, description]
 	flagConfig      = [2]string{"config", "Path to configuration file"}
 	flagVerbose     = [2]string{"v", "Print more verbose output"}
+	flagLogFile     = [2]string{"log-file", "Enables logging to a file. Optionally specify the path to the log file, otherwise './pig.log' is used"}
 	flagConnect     = [2]string{"c", "Connect address (host:port)"}
 	flagListen      = [2]string{"l", "Listen address (host:port)"}
 	flagInterface   = [2]string{"I", "The adapter/interface to bind to, useful for icmp based protos"}
@@ -46,6 +49,7 @@ var (
 type pigFlags struct {
 	configPath     string
 	verbose        int
+	logFile        string
 	remoteAddr     string
 	serverAddr     string
 	proto          string
@@ -98,27 +102,49 @@ func setConfigField[T comparable](f *T, v T) (changed bool) {
 	return
 }
 
-func initPig(mode config.Mode) *config.Config {
-	flags := parsePigFlags()
-	logger := log.NewBlockingLogger()
-	cfg := loadConfigFile(flags.configPath, logger)
+func initPig(mode config.Mode) (*config.Config, *log.Logger) {
+	var (
+		logger *log.Logger
+		cfg    *config.Config
+		flags  *pigFlags
+		err    error
+	)
+	flags = parsePigFlags()
+	cfg, err = loadConfigFile(flags.configPath)
+	if err != nil {
+		log.NewBlockingLogger().Fatalf("Failed to load config file: %v", err)
+	}
+	err = applyLogSettings(cfg, flags)
+	if err != nil {
+		log.NewBlockingLogger().Fatalf("Failed to apply log settings: %v", err)
+	}
+	switch cfg.LogConfig.File {
+	case "":
+		logger = log.NewLogger()
+		logger.SetLevel(cfg.LogConfig.Level)
+	default:
+		logger, err = log.NewFileLogger(cfg.LogConfig.File, cfg.LogConfig.RotateSize.(int64))
+		if err != nil {
+			logger.Fatalf("Failed to create file logger: %v", err)
+		}
+		logger.SetLevel(cfg.LogConfig.Level)
+	}
 	applyCommandLineFlags(cfg, flags, mode, logger)
 	applyAuthSettings(cfg, flags, logger)
 	applyICESettings(cfg, flags, logger)
 	validateConfig(cfg, logger)
-	return cfg
+	return cfg, logger
 }
 
-func loadConfigFile(configPath string, logger common.Logger) *config.Config {
+func loadConfigFile(configPath string) (*config.Config, error) {
 	if configPath == "" {
-		return &config.Config{}
+		return &config.Config{}, nil
 	}
-	logger.Infof("Loading settings from config file: %s", configPath)
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
-		logger.Fatalf("Failed to load config file: %v", err)
+		return nil, fmt.Errorf("failed to load config file: %v", err)
 	}
-	return cfg
+	return cfg, nil
 }
 
 func defineFlags(flagSet *flag.FlagSet) *pigFlags {
@@ -149,6 +175,8 @@ func defineFlags(flagSet *flag.FlagSet) *pigFlags {
 	flagSet.StringVar(&flags.mtlsCA, flagMTLSCA[0], "", flagMTLSCA[1])
 	flagSet.IntVar(&flags.queueSize, flagQueueSize[0], 256, flagQueueSize[1])
 	flagSet.StringVar(&flags.stunServerAddr, flagSTUN[0], "stun.nextcloud.com:443", flagSTUN[1])
+	flagSet.StringVar(&flags.iceKey, flagICEKey[0], "", flagICEKey[1])
+
 	flagSet.Func(flagICE[0], flagICE[1],
 		func(s string) error {
 			if s == "false" {
@@ -167,7 +195,15 @@ func defineFlags(flagSet *flag.FlagSet) *pigFlags {
 			return nil
 		},
 	)
-	flagSet.StringVar(&flags.iceKey, flagICEKey[0], "", flagICEKey[1])
+	flagSet.Func(flagLogFile[0], flagLogFile[1],
+		func(s string) error {
+			if strings.HasPrefix(s, "-") || s == "" {
+				s = "pig.log"
+			}
+			flags.logFile = s
+			return nil
+		},
+	)
 	return flags
 }
 
@@ -198,19 +234,6 @@ func applyCommandLineFlags(cfg *config.Config, flags *pigFlags, mode config.Mode
 		}
 	}
 
-	if cfg.LogLevel == "" {
-		switch flags.verbose {
-		case 0:
-			cfg.LogLevel = "info"
-		case 1:
-			cfg.LogLevel = "debug"
-		case 2:
-			cfg.LogLevel = "trace"
-		default:
-			cfg.LogLevel = "info"
-		}
-	}
-
 	setConfigField(&cfg.Insecure, flags.insecure)
 	setConfigField(&cfg.CertFile, flags.certFile)
 	setConfigField(&cfg.KeyFile, flags.keyFile)
@@ -227,6 +250,67 @@ func applyCommandLineFlags(cfg *config.Config, flags *pigFlags, mode config.Mode
 	setConfigField(&cfg.Wred.DropProbability, flags.wredDP)
 	setConfigField(&cfg.Wred.Threshold, flags.wredThresh)
 	setConfigField(&cfg.Wred.WeightFactor, flags.wredWF)
+
+}
+
+func applyLogSettings(cfg *config.Config, flags *pigFlags) (err error) {
+	if cfg.LogConfig.Level == "" {
+		switch flags.verbose {
+		case 0:
+			cfg.LogConfig.Level = "info"
+		case 1:
+			cfg.LogConfig.Level = "debug"
+		case 2:
+			cfg.LogConfig.Level = "trace"
+		default:
+			cfg.LogConfig.Level = "info"
+		}
+	}
+
+	if cfg.LogConfig.File == "" {
+		return nil
+	}
+
+	rotateSizeStr, ok := cfg.LogConfig.RotateSize.(string)
+	if !ok {
+		rotateSizeInt, ok := cfg.LogConfig.RotateSize.(int64)
+		if !ok {
+			err = fmt.Errorf("invalid rotate size: %v", cfg.LogConfig.RotateSize)
+			return
+		}
+		cfg.LogConfig.RotateSize = rotateSizeInt
+		return
+	}
+
+	if rotateSizeStr == "" {
+		cfg.LogConfig.RotateSize = 5 * 1024 * 1024
+		return
+	}
+
+	re := regexp.MustCompile(`^(\d+)([kmg])$`)
+	sub := re.FindStringSubmatch(rotateSizeStr)
+	if len(sub) != 3 {
+		err = fmt.Errorf("invalid rotate size: %s", rotateSizeStr)
+		return
+	}
+
+	rotateSize, err := strconv.Atoi(sub[1])
+	if err != nil {
+		err = fmt.Errorf("invalid rotate size: %s", rotateSizeStr)
+		return
+	}
+
+	switch sub[2] {
+	case "k":
+		cfg.LogConfig.RotateSize = int64(rotateSize * 1024)
+	case "m":
+		cfg.LogConfig.RotateSize = int64(rotateSize * 1024 * 1024)
+	case "g":
+		cfg.LogConfig.RotateSize = int64(rotateSize * 1024 * 1024 * 1024)
+	default:
+		err = fmt.Errorf("invalid rotate size: %s", cfg.LogConfig.RotateSize)
+	}
+	return
 }
 
 func applyAuthSettings(cfg *config.Config, flags *pigFlags, logger common.Logger) {
@@ -274,7 +358,6 @@ func applyICESettings(cfg *config.Config, flags *pigFlags, logger common.Logger)
 			setConfigField(&cfg.ICE.Signaling.EncryptionKey, flags.iceKey)
 		}
 		setConfigField(&cfg.ICE.Signaling.MQTTBrokerAddress, flags.iceMQTTBroker)
-		logger.Info("Enabling ICE | STUN server: ", cfg.ICE.STUNAddress, " | MQTT broker: ", cfg.ICE.Signaling.MQTTBrokerAddress)
 		return
 	}
 
@@ -291,7 +374,6 @@ func applyICESettings(cfg *config.Config, flags *pigFlags, logger common.Logger)
 		EncryptionKey:     flags.iceKey,
 		MQTTBrokerAddress: flags.iceMQTTBroker,
 	}
-	logger.Info("Enabling ICE | STUN server: ", cfg.ICE.STUNAddress, " | MQTT broker: ", cfg.ICE.Signaling.MQTTBrokerAddress)
 }
 
 func configureTarget(cfg *config.Config, addr string, addrType string, logger common.Logger) {

@@ -15,7 +15,11 @@ func TestTOMLConfigUnmarshal(t *testing.T) {
 		TunnelAddress: "10.0.0.1/24",
 		MTU:           1500,
 		Proto:         TransportQUIC,
-		LogLevel:      "debug",
+		LogConfig: LogConfig{
+			File:       "pig.log",
+			Level:      "debug",
+			RotateSize: "5m",
+		},
 		ICE: &ICEConfig{
 			Enabled:     true,
 			STUNAddress: "stun.server.com:19302",

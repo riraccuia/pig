@@ -186,30 +186,28 @@ func (t *WSTransport) Listen(network, address string, tlsConfig *tls.Config) err
 	return t.server.ListenAndServe()
 }
 
-func GetClientDialFunc(ctx context.Context, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
+func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
-		transport := NewWSTransport()
+		tr := NewWSTransport()
 		if config.ICE != nil && config.ICE.Enabled {
-			logger := log.NewBlockingLogger()
-			logger.SetLevel(config.LogLevel)
 			_conn, remoteAddr, err := ice.Connect(
 				ctx,
 				signaling.GetOptions(logger, config.ICE),
 				config.Target.SrcPort,
 				config.Target.Port,
 				config.Target.Address,
-				"tcp",
+				transport.ICEProtocolWS,
 			)
 			if err != nil {
 				return nil, fmt.Errorf("failed to establish ICE connection: %w", err)
 			}
-			conn, err := transport.DialConn(ctx, _conn, remoteAddr.String(), tlsConfig)
+			conn, err := tr.DialConn(ctx, _conn, remoteAddr.String(), tlsConfig)
 			if err != nil {
 				return nil, fmt.Errorf("failed to establish WebSocket connection: %w", err)
 			}
 			return conn, nil
 		}
-		conn, err := transport.Dial(
+		conn, err := tr.Dial(
 			ctx,
 			fmt.Sprintf("%s:%d", config.Target.Address, config.Target.Port),
 			tlsConfig,
@@ -221,13 +219,11 @@ func GetClientDialFunc(ctx context.Context, config *config.Config, tlsConfig *tl
 	}
 }
 
-func GetServerListenFunc(ctx context.Context, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
+func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
 	return func() (transport.Listener, error) {
 		transport := NewWSTransport()
 		go func() {
 			if config.ICE != nil && config.ICE.Enabled {
-				logger := log.NewBlockingLogger()
-				logger.SetLevel(config.LogLevel)
 				listener, err := ice.Listen(
 					ctx,
 					signaling.GetOptions(logger, config.ICE),

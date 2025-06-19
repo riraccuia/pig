@@ -59,3 +59,18 @@ func (p IPv4Packet) DestinationPort() uint16 {
 func (p IPv4Packet) PayloadOffset() int {
 	return int(p[0]&0x0F) << 2 // IHL * 4 gives header length in bytes
 }
+
+func (p IPv4Packet) Mark() {
+	// Preserve ECN bits (lower 2 bits) and set DSCP to 0x3F (upper 6 bits)
+	// 0x3F << 2 = 0xFC (11111100 in binary)
+	// p[1] & 0x03 preserves the ECN bits (00000011)
+	// (0x3F << 2) | (p[1] & 0x03) sets DSCP to 0x3F while keeping ECN
+	p[1] = (0x3F << 2) | (p[1] & 0x03)
+}
+
+func (p IPv4Packet) IsMarked() bool {
+	// Check if DSCP value (upper 6 bits) is set to 0x3F
+	// p[1] >> 2 extracts the DSCP field (upper 6 bits)
+	// 0x3F is 63 in decimal, which is the expected DSCP value
+	return (p[1] >> 2) == 0x3F
+}

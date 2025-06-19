@@ -4,22 +4,22 @@
 package udp
 
 import (
-	"github.com/riraccuia/pig/pkg/transport"
+	"github.com/riraccuia/pig/pkg/log"
 	"golang.org/x/sys/unix"
 )
 
-func init() {
+func initUDP(logger *log.Logger) {
 	// Get UDP max datagram size using Sysctl
 	value, err := unix.Sysctl("net.inet.udp.maxdgram")
 	if err != nil {
-		transport.Logger.Errorf("Failed to get UDP maxdgram: %v", err)
+		logger.Errorf("Failed to get UDP maxdgram: %v", err)
 		return
 	}
 
 	bytes := []byte(value)
 	length := len(bytes)
 	if length == 0 {
-		transport.Logger.Errorf("Empty value returned from sysctl for UDP maxdgram")
+		logger.Errorf("Empty value returned from sysctl for UDP maxdgram")
 		return
 	}
 
