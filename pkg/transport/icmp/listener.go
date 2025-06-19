@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"sync"
 
+	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/packet"
 	"github.com/riraccuia/pig/pkg/transport"
 	"golang.org/x/net/icmp"
@@ -27,6 +28,7 @@ type sharedListener struct {
 	connChan   chan transport.Conn
 	packetChan chan *icmpPacket
 	bufPool    sync.Pool
+	logger     *log.Logger
 }
 
 // icmpPacket represents a processed ICMP packet ready for dispatch
@@ -48,7 +50,7 @@ func (l *sharedListener) clearMemory(m *rawSockBuffer) {
 }
 
 // newSharedListener creates a new shared ICMP socket listener
-func newSharedListener(ctx context.Context, bindAddr *net.IPAddr, iface *net.Interface, isServer bool) (*sharedListener, error) {
+func newSharedListener(ctx context.Context, logger *log.Logger, bindAddr *net.IPAddr, iface *net.Interface, isServer bool) (*sharedListener, error) {
 	conn, err := net.ListenIP("ip4:icmp", bindAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ICMP socket: %w", err)
@@ -75,6 +77,7 @@ func newSharedListener(ctx context.Context, bindAddr *net.IPAddr, iface *net.Int
 		connChan:   make(chan transport.Conn, 1024),
 		packetChan: make(chan *icmpPacket, 1024),
 		bufPool:    sync.Pool{New: func() any { return &rawSockBuffer{b: make([]byte, iface.MTU)} }},
+		logger:     logger,
 	}
 
 	// Start the packet dispatch loop
@@ -128,7 +131,7 @@ func (l *sharedListener) readPackets() {
 
 			n, _, _, ipSrc, err := l.conn.ReadMsgIP(buffer.b, nil)
 			if err != nil {
-				transport.Logger.Errorf("Error reading ICMP packet: %v", err)
+				l.logger.Errorf("Error reading ICMP packet: %v", err)
 				l.clearMemory(buffer)
 				continue
 			}
@@ -150,7 +153,7 @@ func (l *sharedListener) readPackets() {
 			}:
 			default:
 				l.clearMemory(buffer)
-				transport.Logger.Errorf("packet channel full, dropping packet, icmp type: %d, icmp id: %d, icmp seq: %d", ipv4.ICMPType(payload[0]), binary.BigEndian.Uint16(payload[4:6]), binary.BigEndian.Uint16(payload[6:8]))
+				l.logger.Errorf("packet channel full, dropping packet, icmp type: %d, icmp id: %d, icmp seq: %d", ipv4.ICMPType(payload[0]), binary.BigEndian.Uint16(payload[4:6]), binary.BigEndian.Uint16(payload[6:8]))
 			}
 
 			// buffer := l.bufPool.Get().([]byte)
@@ -198,12 +201,12 @@ func (l *sharedListener) dispatchPackets() {
 			icmpID := binary.BigEndian.Uint16(payload[4:6])
 
 			if l.isServer && icmpType != ipv4.ICMPTypeEcho {
-				transport.Logger.Errorf("received non-echo request, icmp type: %d", icmpType)
+				l.logger.Errorf("received non-echo request, icmp type: %d", icmpType)
 				l.clearMemory(packet.buffer)
 				continue
 			}
 			if !l.isServer && icmpType != ipv4.ICMPTypeEchoReply {
-				transport.Logger.Errorf("received non-echo reply, icmp type: %d", icmpType)
+				l.logger.Errorf("received non-echo reply, icmp type: %d", icmpType)
 				l.clearMemory(packet.buffer)
 				continue
 			}
@@ -217,7 +220,7 @@ func (l *sharedListener) dispatchPackets() {
 			conn = l.getClientConn(packet.dst, key, icmpCode)
 
 			if conn == nil {
-				transport.Logger.Errorf("failed to find packet connection, ip: %s, icmp id: %d", packet.dst.String(), icmpID)
+				l.logger.Errorf("failed to find packet connection, ip: %s, icmp id: %d", packet.dst.String(), icmpID)
 				l.clearMemory(packet.buffer)
 				continue
 			}
@@ -228,7 +231,7 @@ func (l *sharedListener) dispatchPackets() {
 				// transport.Logger.Infof("forwarded packet to connection, ip: %s, icmp id: %d, icmp seq: %d", packet.header.Src.String(), icmpID, binary.BigEndian.Uint16(packet.payload[6:8]))
 			default:
 				l.clearMemory(packet.buffer)
-				transport.Logger.Errorf("Connection buffer full, dropping packet")
+				l.logger.Errorf("Connection buffer full, dropping packet")
 			}
 		}
 	}
@@ -244,7 +247,7 @@ func (l *sharedListener) getClientConn(ip net.IP, key clientKey, echoCode uint8)
 		return nil
 	}
 
-	transport.Logger.Infof("New client connection, ip: %s, icmp id: %d", key.ip, key.icmpID)
+	l.logger.Infof("New client connection, ip: %s, icmp id: %d", key.ip, key.icmpID)
 
 	conn := newConnection(
 		l.ctx,
@@ -260,7 +263,7 @@ func (l *sharedListener) getClientConn(ip net.IP, key clientKey, echoCode uint8)
 	default:
 		conn.Close()
 		l.clients.Delete(key)
-		transport.Logger.Errorf("Accept channel full, dropping client connection, ip: %s, icmp id: %d", ip.String(), key.icmpID)
+		l.logger.Errorf("Accept channel full, dropping client connection, ip: %s, icmp id: %d", ip.String(), key.icmpID)
 		return nil
 	}
 	return conn

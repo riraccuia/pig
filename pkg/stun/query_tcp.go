@@ -41,28 +41,48 @@ func (c *StunClient) queryStunServerTCP(connOrSrcPort any) (mappedIP net.IP, map
 		return nil, 0, fmt.Errorf("failed to resolve STUN server address %s: %w", c.ServerAddr, err)
 	}
 
-	// Create transaction ID and request
-	txID, requestBytes, err := c.createStunRequest()
+	// Create STUN message
+	msg, err := CreateStunMessage(stunBindingRequest, nil)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("failed to create STUN request: %w", err)
+	}
+
+	err = AddFingerprint(msg)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to add fingerprint: %w", err)
 	}
 
 	// Send request and receive response
-	responseBytes, err := c.sendStunRequestTCP(serverAddr, connOrSrcPort, requestBytes, txID)
+	responseBytes, err := c.sendStunRequestTCP(serverAddr, connOrSrcPort, msg.Raw, msg.Header.TransactionID)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// Validate response header
-	err = c.validateStunResponse(responseBytes, txID)
+	// Parse and validate response
+	response, err := ParseStunMessage(responseBytes)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("failed to parse STUN response: %w", err)
+	}
+
+	if err := ValidateStunMessage(response, stunBindingResponse, msg.Header.TransactionID); err != nil {
+		return nil, 0, fmt.Errorf("invalid STUN response: %w", err)
+	}
+
+	// Verify FINGERPRINT attribute (RFC 5389 Section 15.5)
+	/*if !VerifyFingerprint(response) {
+		return nil, 0, fmt.Errorf("invalid STUN response: fingerprint verification failed")
+	}*/
+
+	// Check for error response first
+	if response.Header.Type == stunBindingErrorResponse {
+		errorCode, errorReason := ParseStunError(response.Attributes)
+		return nil, 0, fmt.Errorf("STUN error %d: %s", errorCode, errorReason)
 	}
 
 	// Extract mapped address
-	mappedIP, mappedPort, err = c.extractMappedAddress(responseBytes[20:])
+	mappedIP, mappedPort, err = ExtractMappedAddress(response.Attributes)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("failed to extract mapped address: %w", err)
 	}
 
 	if c.logger != nil {

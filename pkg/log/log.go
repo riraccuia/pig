@@ -40,7 +40,7 @@ func parseLevel(level string) zerolog.Level {
 }
 
 // NewLogger creates a new Logger instance
-func NewLogger(ctx context.Context) *Logger {
+func NewLogger() *Logger {
 	wr := diode.NewWriter(os.Stdout, 1024, 10*time.Millisecond, func(missed int) {
 		fmt.Printf("Logger Dropped %d messages", missed)
 	})
@@ -52,6 +52,25 @@ func NewLogger(ctx context.Context) *Logger {
 	return &Logger{
 		log: zl,
 	}
+}
+
+func NewFileLogger(path string, rotateSize int64) (*Logger, error) {
+	fw, err := NewFileWriter(path)
+	if err != nil {
+		return nil, err
+	}
+	if rotateSize > 0 {
+		fw = fw.WithRotateSize(rotateSize)
+	}
+	output := zerolog.ConsoleWriter{
+		Out:        fw,
+		NoColor:    true,
+		TimeFormat: time.RFC3339,
+	}
+	zl := zerolog.New(output).Level(zerolog.InfoLevel).With().Timestamp().Logger()
+	return &Logger{
+		log: zl,
+	}, nil
 }
 
 // NewBlockingLogger creates a new Logger instance that writes directly to stdout

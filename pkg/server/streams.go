@@ -100,6 +100,10 @@ func (s *Server) handleOutboundConn(ctx context.Context, client *ClientTunnel) {
 				continue
 			}
 
+			if client.sourceIP.Equal(ipPkt.DestinationIP()) {
+				ipPkt.Mark()
+			}
+
 			// If adding this packet would exceed batch size, flush current batch first
 			if len(batch)+totalLen > maxBatchSize {
 				if err := writeBatch(); err != nil {
@@ -144,6 +148,11 @@ func (s *Server) handleOutboundStream(ctx context.Context, client *ClientTunnel)
 				s.bufferPool.Put(pkt)
 				continue
 			}
+
+			if client.sourceIP.Equal(ipPkt.DestinationIP()) {
+				ipPkt.Mark()
+			}
+
 			stream := client.streams.SelectByIPAndPort(pkt.SourceIP(), pkt.SourcePort())
 			if stream == nil {
 				s.logger.Infof("no stream found for client %s", client.conn.RemoteAddr())

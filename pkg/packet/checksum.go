@@ -78,7 +78,7 @@ func (p IPv4Packet) updateUDPChecksum() {
 	}
 
 	// Get UDP length and validate it
-	udpLen := int(uint16(p[offset+4]) | uint16(p[offset+5])<<8) //binary.BigEndian.Uint16(p[offset+4 : offset+6])
+	udpLen := int(uint16(p[offset+4])<<8 | uint16(p[offset+5])) //binary.BigEndian.Uint16(p[offset+4 : offset+6])
 	if offset+udpLen > len(p) {
 		return // UDP length exceeds packet bounds
 	}

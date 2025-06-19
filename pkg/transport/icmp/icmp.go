@@ -13,6 +13,7 @@ import (
 	"golang.org/x/net/ipv4"
 
 	"github.com/riraccuia/pig/pkg/config"
+	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -39,7 +40,7 @@ var (
 )
 
 // GetClientDialFunc returns a function that creates client connections based on config
-func GetClientDialFunc(ctx context.Context, config *config.Config) func() (transport.Conn, error) {
+func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config) func() (transport.Conn, error) {
 	var sharedListener *sharedListener
 	var initOnce sync.Once
 	var initErr error
@@ -58,7 +59,7 @@ func GetClientDialFunc(ctx context.Context, config *config.Config) func() (trans
 				}
 			}
 
-			sharedListener, err = newSharedListener(ctx, bindAddr, iface, false)
+			sharedListener, err = newSharedListener(ctx, logger, bindAddr, iface, false)
 			if err != nil {
 				initErr = fmt.Errorf("failed to create shared listener: %w", err)
 				return
@@ -93,7 +94,7 @@ func GetClientDialFunc(ctx context.Context, config *config.Config) func() (trans
 }
 
 // GetServerListenFunc returns a function that creates server listeners based on config
-func GetServerListenFunc(ctx context.Context, config *config.Config) func() (transport.Listener, error) {
+func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.Config) func() (transport.Listener, error) {
 	return func() (transport.Listener, error) {
 		var bindAddr *net.IPAddr
 		var iface *net.Interface
@@ -110,7 +111,7 @@ func GetServerListenFunc(ctx context.Context, config *config.Config) func() (tra
 			return nil, fmt.Errorf("failed to initialize system: %w", err)
 		}
 
-		sharedListener, err := newSharedListener(ctx, bindAddr, iface, true)
+		sharedListener, err := newSharedListener(ctx, logger, bindAddr, iface, true)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create shared listener: %w", err)
 		}
@@ -132,7 +133,7 @@ func (c *connection) processICMPPacket(dataBuf *rawSockBuffer) error {
 	data := payload[icmpHeaderSize:]
 
 	if icmpType != c.wantType {
-		transport.Logger.Errorf("received unexpected icmp packet, icmp type: %d, icmp id: %d, icmp seq: %d", icmpType, binary.BigEndian.Uint16(payload[4:6]), binary.BigEndian.Uint16(payload[6:8]))
+		c.listener.logger.Errorf("received unexpected icmp packet, icmp type: %d, icmp id: %d, icmp seq: %d", icmpType, binary.BigEndian.Uint16(payload[4:6]), binary.BigEndian.Uint16(payload[6:8]))
 		return nil
 	}
 
@@ -141,7 +142,7 @@ func (c *connection) processICMPPacket(dataBuf *rawSockBuffer) error {
 	}
 
 	if echoID != c.icmpID {
-		transport.Logger.Errorf("received unexpected icmp packet, icmp id: %d, expected: %d", echoID, c.icmpID)
+		c.listener.logger.Errorf("received unexpected icmp packet, icmp id: %d, expected: %d", echoID, c.icmpID)
 		return nil
 	}
 
@@ -177,7 +178,7 @@ func (c *connection) processICMPPacket(dataBuf *rawSockBuffer) error {
 		c.recovery = true
 		// transport.Logger.Infof("Sequence debug - received_seq: %d, peer_seq: %d, data_len: %d, last_ack: %d",
 		//	peerSeq, c.peerSeq.Load(), len(echo.Data[8:]), c.ack.Load())
-		transport.Logger.Errorf("Invalid peer seq number (cwnd:%v): got %d, expected == %d", c.cwnd.Load(), peerSeq, c.peerSeq)
+		c.listener.logger.Errorf("Invalid peer seq number (cwnd:%v): got %d, expected == %d", c.cwnd.Load(), peerSeq, c.peerSeq)
 		c.ooq.Put(dataBuf)
 		c.serializeDuplicateAck(c.seq.Load(), c.peerSeq)
 		return nil
@@ -185,7 +186,7 @@ func (c *connection) processICMPPacket(dataBuf *rawSockBuffer) error {
 
 	// Handle acknowledgment
 	if isUint32SeqHigher(peerAck, c.seq.Load()) {
-		transport.Logger.Errorf("Invalid peer ack number: got %d, expected <= %d", peerAck, c.seq.Load())
+		c.listener.logger.Errorf("Invalid peer ack number: got %d, expected <= %d", peerAck, c.seq.Load())
 		return nil
 	}
 
@@ -216,7 +217,7 @@ func (c *connection) processICMPPacket(dataBuf *rawSockBuffer) error {
 
 	// Process data
 	if n, err := c.readBuf.Write(data); err != nil || n != len(data) {
-		transport.Logger.Errorf("error writing to read buffer: %v", err)
+		c.listener.logger.Errorf("error writing to read buffer: %v", err)
 		return nil
 	}
 
@@ -375,7 +376,7 @@ func (c *connection) sendEchoMessage(data []byte) error {
 }
 
 func (c *connection) sendCloseMessage() error {
-	transport.Logger.Infof("Sending close message to %s", c.remoteAddr.IP.To4())
+	c.listener.logger.Infof("Sending close message to %s", c.remoteAddr.IP.To4())
 
 	seq := c.nextIcmpSeq.Load()
 	c.nextIcmpSeq.Add(1)

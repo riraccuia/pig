@@ -6,11 +6,7 @@ import (
 	"io"
 	"net"
 	"time"
-
-	"github.com/riraccuia/pig/pkg/log"
 )
-
-var Logger *log.Logger = log.NewLogger(context.Background())
 
 var ErrNotImplemented = errors.New("not implemented")
 

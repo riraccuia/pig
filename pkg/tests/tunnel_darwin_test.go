@@ -47,7 +47,7 @@ func TestEndToEndTunnelWithQUIC(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	logger := log.NewLogger(ctx)
+	logger := log.NewLogger()
 	logger.SetLevel("debug")
 
 	// Create and start client with mock adapter

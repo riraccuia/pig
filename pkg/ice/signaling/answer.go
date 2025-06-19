@@ -13,9 +13,9 @@ import (
 	"github.com/riraccuia/pig/pkg/stun"
 )
 
-func (s *Signaler) SendICEAnswer(topicBase string, iceMsg *message.ICEMessage, listenAddr net.Addr, mappedIP net.IP, mappedPort int) (err error) {
+func (s *Signaler) SendICEAnswer(topicBase string, iceMsg *message.ICEMessage, candidates []message.ICECandidate) (err error) {
 	// Create an ICE answer message
-	answer, err := message.GenerateICEAnswer(mappedIP, mappedPort, listenAddr, s.opts.EncryptionKey)
+	answer, err := message.GenerateICEAnswer(candidates, s.opts.EncryptionKey)
 	if err != nil {
 		if s.opts.Logger != nil {
 			s.opts.Logger.Errorf("Failed to generate ICE answer: %v", err)
@@ -62,15 +62,22 @@ func (s *Signaler) ReceiveICEOffers(ctx context.Context, listenAddr net.Addr) (o
 	topicBase = s.getTopicPrefix(mappedIP.String()) + "/"
 	ch := make(chan *message.ICEMessage)
 
+	s.opts.Logger.Debugf("receiving ICE offers from topic: %s", topicBase+"+/offer")
+
 	err = s.connectAndSubscribe(topicBase+"+/offer", s.getICEOfferHandler(ch))
 	if err != nil {
 		close(ch)
 		return nil, "", err
 	}
 
+	connLost := s.mqttLostConn
+
 	go func() {
-		<-ctx.Done()
-		s.mqttClient.Unsubscribe(topicBase + "+/offer")
+		select {
+		case <-ctx.Done():
+			s.mqttClient.Unsubscribe(topicBase + "+/offer")
+		case <-connLost:
+		}
 		close(ch)
 	}()
 
@@ -94,6 +101,7 @@ func (s *Signaler) handleOfferMessage(msg []byte) (*message.ICEMessage, error) {
 		payload []byte
 		err     error
 	)
+	s.opts.Logger.Debugf("received ICE offer message: %s", string(msg))
 	if s.opts.EncryptionKey != nil {
 		// Decrypt the message
 		ciphertext, err := base64.StdEncoding.DecodeString(string(msg))
