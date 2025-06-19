@@ -8,21 +8,28 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: "ubuntu-latest"
+            goos: "linux"
+            goarch: "amd64"
+          - os: "windows-latest"
+            goos: "windows"
+            goarch: "amd64"
+          - os: "macos-latest"
+            goos: "darwin"
+            goarch: "amd64"
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-      - name: Set up Go (or replace with your language runtime)
+      - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.21"
+          go-version: "1.24"
 #      - name: Run Tests
 #        run: go test ./...
       - name: Build Binary
         run: |
-          GOOS=$(echo "${{ matrix.os }}" | sed 's/-latest//')
-          GOARCH=amd64
-          go build -o pig-${GOOS}-${GOARCH} ./cmd/pig
+          CGO_ENABLED=0 GOOS=${{matrix.goos}} GOARCH=${{matrix.goarch}} go build -ldflags="-s -w" -o pig-${{matrix.goos}}-${{matrix.goarch}} ./cmd/pig
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
