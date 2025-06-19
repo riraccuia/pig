@@ -31,6 +31,7 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: |
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags="-s -w" -o pig-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/pig
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags="-s -w" -o signtool-${{ matrix.goos }}-${{ matrix.goarch }} ./tools/signtool
       - name: Build Binary (Windows)
         if: matrix.os == 'windows-latest'
         run: | 
@@ -38,11 +39,17 @@ jobs:
           SET GOOS=${{ matrix.goos }}
           SET GOARCH=${{ matrix.goarch }}
           go build -ldflags="-s -w" -o pig-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/pig
-      - name: Upload Artifact
+          go build -ldflags="-s -w" -o signtool-${{ matrix.goos }}-${{ matrix.goarch }} ./tools/signtool
+      - name: Upload Artifact - pig
         uses: actions/upload-artifact@v4
         with:
           name: pig-${{ matrix.goos }}-${{ matrix.goarch }}
           path: pig-${{ matrix.goos }}-${{ matrix.goarch }}
+      - name: Upload Artifact - signtool
+        uses: actions/upload-artifact@v4
+        with:
+          name: signtool-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: signtool-${{ matrix.goos }}-${{ matrix.goarch }}
   release:
     needs: build
     runs-on: ubuntu-latest
@@ -52,8 +59,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: pig-*/pig-*
+          files: |
+            pig-*
+            signtool-*
           tag_name: ${{ github.ref_name }}
-          body: "Automated release of ${{ github.ref_name }}."
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
