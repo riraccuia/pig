@@ -9,15 +9,15 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: "ubuntu-latest"
-            goos: "linux"
-            goarch: "amd64"
-#          - os: "windows-latest"
-#            goos: "windows"
+#          - os: "ubuntu-latest"
+#            goos: "linux"
 #            goarch: "amd64"
-          - os: "macos-latest"
-            goos: "darwin"
+          - os: "windows-latest"
+            goos: "windows"
             goarch: "amd64"
+ #         - os: "macos-latest"
+ #           goos: "darwin"
+ #           goarch: "amd64"
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -27,13 +27,21 @@ jobs:
           go-version: "1.24"
 #      - name: Run Tests
 #        run: go test ./...
-      - name: Build Binary
+      - name: Build Binary (Non-Windows)
+        if: matrix.os != 'windows-latest'
         run: |
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags="-s -w" -o pig-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/pig
+      - name: Build Binary (Windows)
+        if: matrix.os == 'windows-latest'
+        run: | 
+          SET CGO_ENABLED=0
+          SET GOOS=${{ matrix.goos }}
+          SET GOARCH=${{ matrix.goarch }}
+          go build -ldflags="-s -w" -o pig-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/pig
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pig-${{ matrix.os }}
+          name: pig-${{ matrix.goos }}-${{ matrix.goarch }}
           path: pig-${{ matrix.goos }}-${{ matrix.goarch }}
   release:
     needs: build
