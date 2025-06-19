@@ -9,22 +9,22 @@ jobs:
     strategy:
       matrix:
         include:
-#          - os: "ubuntu-latest"
-#            goos: "linux"
-#            goarch: "amd64"
+          - os: "ubuntu-latest"
+            goos: "linux"
+            goarch: "amd64"
           - os: "windows-latest"
             goos: "windows"
             goarch: "amd64"
- #         - os: "macos-latest"
- #           goos: "darwin"
- #           goarch: "amd64"
+          - os: "macos-latest"
+            goos: "darwin"
+            goarch: "amd64"
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: '1.24'
 #      - name: Run Tests
 #        run: go test ./...
       - name: Build Binary (Non-Windows)
