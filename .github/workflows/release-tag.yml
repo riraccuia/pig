@@ -22,7 +22,7 @@ jobs:
         run: |
           GOOS=$(echo "${{ matrix.os }}" | sed 's/-latest//')
           GOARCH=amd64
-          go build -o pig-${GOOS}-${GOARCH} .
+          go build -o pig-${GOOS}-${GOARCH} cmd/pig
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
