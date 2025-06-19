@@ -1,0 +1,82 @@
+name: Release (Tag-Based)
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  GO_VERSION: "1.24"
+  CGO_ENABLED: 0
+  LDFLAGS: "-s -w"
+
+jobs:
+  build:
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: "ubuntu-latest"
+            goos: "linux"
+            goarch: "amd64"
+            ext: ""
+          - os: "windows-latest"
+            goos: "windows"
+            goarch: "amd64"
+            ext: ".exe"
+          - os: "macos-latest"
+            goos: "darwin"
+            goarch: "amd64"
+            ext: ""
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Get dependencies
+        run: go mod download
+#      - name: Run Tests
+#        run: go test ./...
+      - name: Build Binary (Non-Windows)
+        if: matrix.os != 'windows-latest'
+        run: |
+          CGO_ENABLED=${{ env.CGO_ENABLED }} GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags="${{ env.LDFLAGS }}" -o pig-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./cmd/pig
+          CGO_ENABLED=${{ env.CGO_ENABLED }} GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags="${{ env.LDFLAGS }}" -o signtool-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./tools/signtool
+      - name: Build Binary (Windows)
+        if: matrix.os == 'windows-latest'
+        run: | 
+          SET CGO_ENABLED=${{ env.CGO_ENABLED }}
+          SET GOOS=${{ matrix.goos }}
+          SET GOARCH=${{ matrix.goarch }}
+          go build -ldflags="${{ env.LDFLAGS }}" -o pig-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./cmd/pig
+          go build -ldflags="${{ env.LDFLAGS }}" -o signtool-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./tools/signtool
+      - name: Upload Artifact - pig
+        uses: actions/upload-artifact@v4
+        with:
+          name: pig-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          path: pig-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+      - name: Upload Artifact - signtool
+        uses: actions/upload-artifact@v4
+        with:
+          name: signtool-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          path: signtool-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
