@@ -12,9 +12,9 @@ jobs:
           - os: "ubuntu-latest"
             goos: "linux"
             goarch: "amd64"
-          - os: "windows-latest"
-            goos: "windows"
-            goarch: "amd64"
+#          - os: "windows-latest"
+#            goos: "windows"
+#            goarch: "amd64"
           - os: "macos-latest"
             goos: "darwin"
             goarch: "amd64"
@@ -29,12 +29,12 @@ jobs:
 #        run: go test ./...
       - name: Build Binary
         run: |
-          CGO_ENABLED=0 GOOS=${{matrix.goos}} GOARCH=${{matrix.goarch}} go build -ldflags="-s -w" -o pig-${{matrix.goos}}-${{matrix.goarch}} ./cmd/pig
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags="-s -w" -o pig-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/pig
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: pig-${{ matrix.os }}
-          path: pig-${{ matrix.os }}-amd64
+          path: pig-${{ matrix.goos }}-${{ matrix.goarch }}
   release:
     needs: build
     runs-on: ubuntu-latest
