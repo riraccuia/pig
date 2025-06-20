@@ -1,6 +1,10 @@
 package server
 
-import "context"
+import (
+	"context"
+
+	"github.com/riraccuia/pig/pkg/packet"
+)
 
 func (s *Server) processOutbound(ctx context.Context) {
 	for {
@@ -13,6 +17,7 @@ func (s *Server) processOutbound(ctx context.Context) {
 				freeBuf := true
 				s.clients.Range(func(key, value any) bool {
 					client := value.(*ClientTunnel)
+					pkt.Mark(packet.DSCP_MARK_FOR_SNAT)
 					select {
 					case client.outbound.C <- pkt:
 						freeBuf = false

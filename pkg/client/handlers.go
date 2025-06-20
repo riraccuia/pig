@@ -69,7 +69,10 @@ func (c *Client) processInbound(connOrStream io.ReadWriteCloser) {
 			// Get new packet from pool and copy data
 			newPkt := c.bufferPool.Get().(packet.IPv4Packet)
 			copy(newPkt[:totalLen], unprocessed[processed:processed+totalLen])
-			if newPkt.IsMarked() {
+			switch newPkt.GetMark() {
+			case packet.DSCP_MARK_FOR_SNAT:
+				newPkt.SetSourceIP(c.adapter.IP())
+			case packet.DSCP_MARK_FOR_DNAT:
 				newPkt.SetDestinationIP(c.adapter.IP())
 			}
 			newPkt.UpdateChecksum()
@@ -118,7 +121,7 @@ func (c *Client) processOutboundStream() {
 		}
 
 		if c.adapter.IP().Equal(pkt.SourceIP()) {
-			pkt.Mark()
+			pkt.Mark(packet.DSCP_MARK_FOR_SNAT)
 		}
 
 		_, err := stream.Write(pkt[:totalLen])
@@ -178,7 +181,7 @@ func (c *Client) processOutboundConn() {
 			}
 
 			if c.adapter.IP().Equal(pkt.SourceIP()) {
-				pkt.Mark()
+				pkt.Mark(packet.DSCP_MARK_FOR_SNAT)
 			}
 
 			// If adding this packet would exceed batch size, flush current batch first
