@@ -13,12 +13,10 @@ func (p IPv4Packet) Version() int {
 
 func (p IPv4Packet) SetSourceIP(ip net.IP) {
 	copy(p[12:16], ip.To4())
-	p.UpdateChecksum()
 }
 
 func (p IPv4Packet) SetDestinationIP(ip net.IP) {
 	copy(p[16:20], ip.To4())
-	p.UpdateChecksum()
 }
 
 func (p IPv4Packet) TotalLength() int {
@@ -61,8 +59,8 @@ func (p IPv4Packet) PayloadOffset() int {
 }
 
 const (
-	DSCP_MARK_FOR_SNAT = byte(0x3E)
-	DSCP_MARK_FOR_DNAT = byte(0x0F)
+	DSCP_MARK_FOR_SNAT = byte(143)
+	DSCP_MARK_FOR_DNAT = byte(144)
 )
 
 func (p IPv4Packet) Mark(flag byte) {
@@ -70,7 +68,7 @@ func (p IPv4Packet) Mark(flag byte) {
 	// 0x3F << 2 = 0xFC (11111100 in binary)
 	// p[1] & 0x03 preserves the ECN bits (00000011)
 	// (0x3F << 2) | (p[1] & 0x03) sets DSCP to 0x3F while keeping ECN
-	p[1] = (flag << 2) | (p[1] & 0x03)
+	p[1] = (flag & 0b11111100) | (p[1] & 0b00000011)
 }
 
 func (p IPv4Packet) GetMark() byte {
@@ -80,7 +78,7 @@ func (p IPv4Packet) GetMark() byte {
 	return (p[1] >> 2)
 }
 
-func (p IPv4Packet) NotMarked() bool {
-	mark := p.GetMark()
-	return mark != DSCP_MARK_FOR_SNAT && mark != DSCP_MARK_FOR_DNAT
+func (p IPv4Packet) ClearMark() {
+	// remove any dscp mark except for ECN
+	p[1] = p[1] & 0b00000011
 }
