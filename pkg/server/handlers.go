@@ -71,11 +71,14 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 			// Get new packet from pool and copy data
 			newPkt := s.bufferPool.Get().(packet.IPv4Packet)
 			copy(newPkt[:totalLen], unprocessed[processed:processed+totalLen])
+
 			switch newPkt.GetMark() {
-			case packet.DSCP_MARK_FOR_SNAT >> 2:
+			case packet.DSCP_MARK_FOR_SNAT:
 				newPkt.SetSourceIP(client.sourceIP)
-			case packet.DSCP_MARK_FOR_DNAT >> 2:
+			case packet.DSCP_MARK_FOR_DNAT:
 				newPkt.SetDestinationIP(client.sourceIP)
+			case packet.DSCP_MARK_FOR_BIDI_DNAT:
+				newPkt.SetDestinationIP(s.adapter.IP())
 			}
 			newPkt.ClearMark()
 			newPkt.UpdateChecksum()

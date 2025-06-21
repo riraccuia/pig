@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,6 +28,7 @@ type Client struct {
 	conn              transport.Conn
 	streams           *streams.StreamManager
 	adapter           common.TunnelAdapter
+	masqAddr          net.IP
 	inbound           common.PacketQueue
 	outbound          *queue.ChanQueue //common.PacketQueue
 	bufferPool        *sync.Pool
@@ -66,11 +68,14 @@ func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.Tun
 		outbound = outbound.WithWRED(wred, cfg.Wred.DropProbability, cfg.Wred.Threshold)
 	}
 
+	masqAddr, _ := getMasqAddress(cfg.TunnelAddress)
+
 	return &Client{
 		logger:   logger,
 		config:   cfg,
 		streams:  streams.New(),
 		adapter:  adapter,
+		masqAddr: masqAddr,
 		inbound:  make(common.PacketQueue, cfg.QueueSize),
 		outbound: outbound,
 		bufferPool: &sync.Pool{

@@ -59,8 +59,10 @@ func (p IPv4Packet) PayloadOffset() int {
 }
 
 const (
-	DSCP_MARK_FOR_SNAT = byte(143)
-	DSCP_MARK_FOR_DNAT = byte(144)
+	DSCP_MARK_FOR_SNAT      = byte(8)
+	DSCP_MARK_FOR_BIDI_SNAT = byte(16)
+	DSCP_MARK_FOR_DNAT      = byte(24)
+	DSCP_MARK_FOR_BIDI_DNAT = byte(32)
 )
 
 func (p IPv4Packet) Mark(flag byte) {
@@ -68,7 +70,7 @@ func (p IPv4Packet) Mark(flag byte) {
 	// 0x3F << 2 = 0xFC (11111100 in binary)
 	// p[1] & 0x03 preserves the ECN bits (00000011)
 	// (0x3F << 2) | (p[1] & 0x03) sets DSCP to 0x3F while keeping ECN
-	p[1] = (flag & 0b11111100) | (p[1] & 0b00000011)
+	p[1] = (flag << 2) | (p[1] & 0b00000011)
 }
 
 func (p IPv4Packet) GetMark() byte {

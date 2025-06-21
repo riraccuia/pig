@@ -70,10 +70,12 @@ func (c *Client) processInbound(connOrStream io.ReadWriteCloser) {
 			newPkt := c.bufferPool.Get().(packet.IPv4Packet)
 			copy(newPkt[:totalLen], unprocessed[processed:processed+totalLen])
 			switch newPkt.GetMark() {
-			case packet.DSCP_MARK_FOR_SNAT >> 2:
+			case packet.DSCP_MARK_FOR_SNAT:
 				newPkt.SetSourceIP(c.adapter.IP())
-			case packet.DSCP_MARK_FOR_DNAT >> 2:
+			case packet.DSCP_MARK_FOR_DNAT:
 				newPkt.SetDestinationIP(c.adapter.IP())
+			case packet.DSCP_MARK_FOR_BIDI_SNAT:
+				newPkt.SetSourceIP(c.masqAddr)
 			}
 			newPkt.ClearMark()
 			newPkt.UpdateChecksum()
@@ -121,8 +123,11 @@ func (c *Client) processOutboundStream() {
 			continue
 		}
 
-		if c.adapter.IP().Equal(pkt.SourceIP()) {
+		switch {
+		case c.adapter.IP().Equal(pkt.SourceIP()):
 			pkt.Mark(packet.DSCP_MARK_FOR_SNAT)
+		case c.masqAddr.Equal(pkt.DestinationIP()):
+			pkt.Mark(packet.DSCP_MARK_FOR_BIDI_SNAT)
 		}
 
 		_, err := stream.Write(pkt[:totalLen])
@@ -181,8 +186,11 @@ func (c *Client) processOutboundConn() {
 				continue
 			}
 
-			if c.adapter.IP().Equal(pkt.SourceIP()) {
+			switch {
+			case c.adapter.IP().Equal(pkt.SourceIP()):
 				pkt.Mark(packet.DSCP_MARK_FOR_SNAT)
+			case c.masqAddr.Equal(pkt.DestinationIP()):
+				pkt.Mark(packet.DSCP_MARK_FOR_BIDI_SNAT)
 			}
 
 			// If adding this packet would exceed batch size, flush current batch first

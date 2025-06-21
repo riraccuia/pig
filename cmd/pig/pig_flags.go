@@ -24,7 +24,7 @@ var (
 	flagInterface   = [2]string{"I", "The adapter/interface to bind to, useful for icmp based protos"}
 	flagProto       = [2]string{"proto", "Transport protocol for the tunnel, valid values are: quic, udp, tls, ws, icmp, tls-in-icmp"}
 	flagPort        = [2]string{"p", "Source port to use for the connection"}
-	flagTunnel      = [2]string{"tunnel", "Tunnel address, defaults to 172.31.254.1/32 for clients and 172.31.255.1/24 for servers"}
+	flagTunnel      = [2]string{"tunnel", "Tunnel address, defaults to 172.31.254.1/29 for clients and 172.31.255.1/24 for servers"}
 	flagCert        = [2]string{"cert", "Path to certificate file"}
 	flagKey         = [2]string{"key", "Path to private key file"}
 	flagInsecure    = [2]string{"k", "Insecure: disable certificate verification"}
@@ -228,7 +228,7 @@ func applyCommandLineFlags(cfg *config.Config, flags *pigFlags, mode config.Mode
 	setConfigField(&cfg.TunnelAddress, flags.tunnelAddress)
 
 	if cfg.TunnelAddress == "" {
-		cfg.TunnelAddress = "172.31.254.1/32"
+		cfg.TunnelAddress = "172.31.254.1/29"
 		if cfg.Mode == "server" {
 			cfg.TunnelAddress = "172.31.255.1/24"
 		}

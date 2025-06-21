@@ -2,6 +2,9 @@ package client
 
 import (
 	"context"
+	"encoding/binary"
+	"fmt"
+	"net"
 
 	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/common"
@@ -71,4 +74,21 @@ func (c *Client) writeToAdapter(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func getMasqAddress(ipNetStr string) (net.IP, error) {
+	ip, ipNet, err := net.ParseCIDR(ipNetStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse IP net: %w", err)
+	}
+	// get the next ip in the subnet
+	ipInt := binary.BigEndian.Uint32(ip.To4())
+	ipInt++
+	nextIP := make(net.IP, 4)
+	binary.BigEndian.PutUint32(nextIP, ipInt)
+	// check if the next ip is in the subnet
+	if !ipNet.Contains(nextIP) {
+		return nil, fmt.Errorf("no more IPs in subnet")
+	}
+	return nextIP, nil
 }

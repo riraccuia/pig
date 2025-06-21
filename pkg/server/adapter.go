@@ -17,7 +17,7 @@ func (s *Server) processOutbound(ctx context.Context) {
 				freeBuf := true
 				s.clients.Range(func(key, value any) bool {
 					client := value.(*ClientTunnel)
-					pkt.Mark(packet.DSCP_MARK_FOR_SNAT)
+					pkt.Mark(packet.DSCP_MARK_FOR_BIDI_SNAT)
 					select {
 					case client.outbound.C <- pkt:
 						freeBuf = false
