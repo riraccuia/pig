@@ -101,7 +101,7 @@ func (s *Server) handleOutboundConn(ctx context.Context, client *ClientTunnel) {
 			}
 
 			if client.sourceIP.Equal(ipPkt.DestinationIP()) {
-				ipPkt.Mark(packet.DSCP_MARK_FOR_DNAT)
+				ipPkt.Mark(packet.DSCP_MARK_ADAPTER_DNAT)
 			}
 
 			// If adding this packet would exceed batch size, flush current batch first
@@ -150,7 +150,7 @@ func (s *Server) handleOutboundStream(ctx context.Context, client *ClientTunnel)
 			}
 
 			if client.sourceIP.Equal(ipPkt.DestinationIP()) {
-				ipPkt.Mark(packet.DSCP_MARK_FOR_DNAT)
+				ipPkt.Mark(packet.DSCP_MARK_ADAPTER_DNAT)
 			}
 
 			stream := client.streams.SelectByIPAndPort(pkt.SourceIP(), pkt.SourcePort())

@@ -30,7 +30,7 @@ func (s *Server) acceptClients(ctx context.Context) {
 
 func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCloser) {
 	// assign a queue to the client
-	inbound := s.getInboundPktQueue()
+	// inbound := s.getInboundPktQueue()
 
 	const readBufferSize = 64 * 1024 // 64KB buffer
 	buffer := make([]byte, readBufferSize)
@@ -73,15 +73,17 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 			copy(newPkt[:totalLen], unprocessed[processed:processed+totalLen])
 
 			switch newPkt.GetMark() {
-			case packet.DSCP_MARK_FOR_SNAT:
+			case packet.DSCP_MARK_MASQ_SNAT:
 				newPkt.SetSourceIP(client.sourceIP)
-			case packet.DSCP_MARK_FOR_DNAT:
+			case packet.DSCP_MARK_MASQ_DNAT:
 				newPkt.SetDestinationIP(client.sourceIP)
-			case packet.DSCP_MARK_FOR_BIDI_DNAT:
+			case packet.DSCP_MARK_ADAPTER_DNAT:
 				newPkt.SetDestinationIP(s.adapter.IP())
 			}
 			newPkt.ClearMark()
 			newPkt.UpdateChecksum()
+
+			inbound := s.getInboundPktQueue()
 
 			select {
 			case inbound <- newPkt:
