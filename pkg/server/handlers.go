@@ -30,7 +30,7 @@ func (s *Server) acceptClients(ctx context.Context) {
 
 func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCloser) {
 	// assign a queue to the client
-	// inbound := s.getInboundPktQueue()
+	inbound := s.getInboundPktQueue()
 
 	const readBufferSize = 64 * 1024 // 64KB buffer
 	buffer := make([]byte, readBufferSize)
@@ -83,7 +83,7 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 			newPkt.ClearMark()
 			newPkt.UpdateChecksum()
 
-			inbound := s.getInboundPktQueue()
+			// inbound := s.getInboundPktQueue()
 
 			select {
 			case inbound <- newPkt:
