@@ -49,12 +49,27 @@ func (c *QuicConn) IsStreamed() bool {
 	return true
 }
 
+// Read reads a datagram from the quic connection
+// it requires datagrams to be enabled explicitly
 func (c *QuicConn) Read(b []byte) (n int, err error) {
-	return 0, transport.ErrNotImplemented
+	//return 0, transport.ErrNotImplemented
+	datagram, err := c.conn.ReceiveDatagram(context.Background())
+	if err != nil {
+		return 0, err
+	}
+	copy(b, datagram)
+	return len(datagram), nil
 }
 
+// Write writes a datagram to the quic connection
+// it requires datagrams to be enabled explicitly
 func (c *QuicConn) Write(b []byte) (n int, err error) {
-	return 0, transport.ErrNotImplemented
+	//return 0, transport.ErrNotImplemented
+	err = c.conn.SendDatagram(b)
+	if err != nil {
+		return 0, err
+	}
+	return len(b), nil
 }
 
 func (c *QuicConn) Close() error {
@@ -159,6 +174,7 @@ func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config
 			tlsConfig.Clone(),
 			&quic.Config{
 				MaxIncomingStreams: maxStreams,
+				EnableDatagrams:    true,
 			},
 		)
 		if err != nil {
@@ -220,7 +236,9 @@ func dialFuncWithSrcPort(ctx context.Context, logger *log.Logger, address string
 			ctx,
 			udpAddr,
 			tlsConfig,
-			&quic.Config{},
+			&quic.Config{
+				EnableDatagrams: true,
+			},
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to establish QUIC connection: %w", err)

@@ -37,6 +37,7 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 	unprocessed := buffer[:0]
 
 	for {
+		// inbound := s.getInboundPktQueue()
 		// Read more data
 		n, err := connOrStream.Read(buffer[len(unprocessed):])
 		if err != nil {
@@ -82,8 +83,6 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 			}
 			newPkt.ClearMark()
 			newPkt.UpdateChecksum()
-
-			// inbound := s.getInboundPktQueue()
 
 			select {
 			case inbound <- newPkt:

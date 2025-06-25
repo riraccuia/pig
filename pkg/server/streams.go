@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"io"
-	"time"
 
 	"github.com/riraccuia/pig/pkg/packet"
 	"github.com/riraccuia/pig/pkg/transport"
@@ -55,10 +54,6 @@ func (s *Server) handleOutboundConn(ctx context.Context, client *ClientTunnel) {
 	buffer := make([]byte, 0, maxBatchSize)
 	batch := buffer[:0]
 
-	// Create a timer for flushing partial batches
-	flushTicker := time.NewTicker(5 * time.Millisecond)
-	defer flushTicker.Stop()
-
 	// Helper function to write and reset batch
 	writeBatch := func() error {
 		for len(batch) > 0 {
@@ -73,55 +68,69 @@ func (s *Server) handleOutboundConn(ctx context.Context, client *ClientTunnel) {
 		return nil
 	}
 
+	processPacket := func(pkt packet.IPv4Packet) error {
+		if client.outbound.IsDrop() {
+			client.dropLogger.Incr(1, uint64(pkt.TotalLength()))
+			s.bufferPool.Put(pkt)
+			return nil
+		}
+		ipPkt := packet.IPv4Packet(pkt)
+		totalLen := ipPkt.TotalLength()
+		if totalLen <= 0 || totalLen > len(pkt) {
+			s.logger.Debugf("outbound packet with invalid length: %d", totalLen)
+			s.bufferPool.Put(pkt)
+			return nil
+		}
+
+		if client.sourceIP.Equal(ipPkt.DestinationIP()) {
+			ipPkt.Mark(packet.DSCP_MARK_ADAPTER_DNAT)
+		}
+
+		// If adding this packet would exceed batch size, flush current batch first
+		if len(batch)+totalLen > maxBatchSize {
+			if err := writeBatch(); err != nil {
+				s.bufferPool.Put(pkt)
+				return err
+			}
+		}
+
+		// Append packet to batch
+		batch = append(batch, pkt[:totalLen]...)
+		s.bufferPool.Put(pkt)
+
+		// If batch is full, write immediately
+		if len(batch) >= maxBatchSize {
+			if err := writeBatch(); err != nil {
+				s.bufferPool.Put(pkt)
+				return err
+			}
+		}
+		return nil
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-s.done:
 			return
-		case <-flushTicker.C:
-			if err := writeBatch(); err != nil {
-				return
-			}
 		case pkt, ok := <-client.outbound.C:
 			if !ok {
 				return
 			}
-			if client.outbound.IsDrop() {
-				client.dropLogger.Incr(1, uint64(pkt.TotalLength()))
-				s.bufferPool.Put(pkt)
-				continue
-			}
-			ipPkt := packet.IPv4Packet(pkt)
-			totalLen := ipPkt.TotalLength()
-			if totalLen <= 0 || totalLen > len(pkt) {
-				s.logger.Debugf("outbound packet with invalid length: %d", totalLen)
-				s.bufferPool.Put(pkt)
-				continue
-			}
-
-			if client.sourceIP.Equal(ipPkt.DestinationIP()) {
-				ipPkt.Mark(packet.DSCP_MARK_ADAPTER_DNAT)
-			}
-
-			// If adding this packet would exceed batch size, flush current batch first
-			if len(batch)+totalLen > maxBatchSize {
-				if err := writeBatch(); err != nil {
-					s.bufferPool.Put(pkt)
+			// process all queued packets fast
+			for {
+				if err := processPacket(pkt); err != nil {
+					s.logger.Debugf("failed to process packet: %v", err)
 					return
 				}
-			}
-
-			// Append packet to batch
-			batch = append(batch, pkt[:totalLen]...)
-			s.bufferPool.Put(pkt)
-
-			// If batch is full, write immediately
-			if len(batch) >= maxBatchSize {
-				if err := writeBatch(); err != nil {
-					return
+				if len(client.outbound.C) == 0 {
+					break
 				}
+				pkt = <-client.outbound.C
 			}
+			// write any remaining data
+			writeBatch()
 		}
 	}
 }

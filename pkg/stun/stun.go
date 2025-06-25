@@ -36,8 +36,8 @@ const (
 	// ICE attribute types
 	attrPriority       uint16 = 0x0024
 	attrUseCandidate   uint16 = 0x0025
-	attrIceControlling uint16 = 0x8029
-	attrIceControlled  uint16 = 0x802A
+	attrIceControlled  uint16 = 0x8029
+	attrIceControlling uint16 = 0x802A
 
 	// FINGERPRINT attribute type (RFC 5389 Section 15.5)
 	attrFingerprint uint16 = 0x8028
@@ -802,7 +802,7 @@ func SendErrorResponse(conn net.Conn, transactionID [12]byte, code int, reason s
 
 // CreateResponseAttributes creates a combined set of attributes for a STUN response
 // including XOR-MAPPED-ADDRESS, authentication attributes, and ICE attributes if provided
-func CreateResponseAttributes(remoteAddr net.Addr, auth *StunAuthConfig, ice *IceAttributes) ([]byte, error) {
+func CreateResponseAttributes(remoteAddr net.Addr, auth *StunAuthConfig) ([]byte, error) {
 	if remoteAddr == nil {
 		return nil, fmt.Errorf("invalid input: remote address is required")
 	}
@@ -831,12 +831,12 @@ func CreateResponseAttributes(remoteAddr net.Addr, auth *StunAuthConfig, ice *Ic
 	}
 
 	// Add ICE attributes if present
-	if ice != nil {
+	/*if ice != nil {
 		iceAttrs := CreateIceAttributes(ice)
 		if len(iceAttrs) > 0 {
 			responseAttrs = append(responseAttrs, iceAttrs...)
 		}
-	}
+	}*/
 
 	return responseAttrs, nil
 }
@@ -897,6 +897,27 @@ func AddFingerprint(msg *StunMessage) error {
 	msg.Header.Length = uint16(len(msg.Attributes))
 
 	return nil
+}
+
+// VerifyFingerprint verifies the FINGERPRINT attribute in a STUN message.
+// It returns true if the FINGERPRINT attribute is present and valid.
+func VerifyFingerprint(msg *StunMessage) bool {
+	if len(msg.Attributes) < 8 {
+		return false
+	}
+	// Check if the attribute FINGERPRINT is present (it must be the last attribute)
+	pos := len(msg.Attributes) - 8
+	if binary.BigEndian.Uint16(msg.Attributes[pos:pos+2]) != attrFingerprint {
+		return false
+	}
+	// Check if the attribute length is 4 bytes
+	if binary.BigEndian.Uint16(msg.Attributes[pos+2:pos+4]) != 4 {
+		return false
+	}
+	// Calculate the expected fingerprint value
+	expectedFingerprint := CalculateFingerprint(msg.Raw[:len(msg.Raw)-8])
+	// Compare the fingerprint with the expected fingerprint
+	return expectedFingerprint == binary.BigEndian.Uint32(msg.Attributes[pos+4:pos+8])
 }
 
 // calculatePadding returns the number of bytes needed to align the given length to 4 bytes.

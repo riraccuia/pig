@@ -22,12 +22,22 @@ func NewFileWriter(path string) (*FileWriter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &FileWriter{
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	fw := &FileWriter{
 		File:         file,
 		path:         path,
 		bytesWritten: atomic.Int64{},
 		rotating:     atomic.Bool{},
-	}, nil
+	}
+
+	fw.bytesWritten.Store(info.Size())
+
+	return fw, nil
 }
 
 // WithRotateSize sets the rotate size for the FileLogger

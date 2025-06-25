@@ -8,16 +8,16 @@ import (
 	"github.com/riraccuia/pig/pkg/common"
 )
 
-// BindRequest represents a STUN binding request
-type BindRequest struct {
+// IceBindRequest represents a STUN binding request
+type IceBindRequest struct {
 	Logger common.Logger
 	Ice    *IceAttributes
 	Auth   *StunAuthConfig
 }
 
-// NewBindRequest creates a new STUN binding request handler
-func NewBindRequest(logger common.Logger) *BindRequest {
-	return &BindRequest{
+// NewIceBindRequest creates a new STUN binding request handler
+func NewIceBindRequest(logger common.Logger) *IceBindRequest {
+	return &IceBindRequest{
 		Logger: logger,
 		Ice:    &IceAttributes{},
 		Auth:   &StunAuthConfig{},
@@ -25,7 +25,7 @@ func NewBindRequest(logger common.Logger) *BindRequest {
 }
 
 // ReceiveMessage reads a STUN request from the connection
-func (b *BindRequest) ReceiveMessage(co net.Conn) (message []byte, err error) {
+func (b *IceBindRequest) ReceiveMessage(co net.Conn) (message []byte, err error) {
 	co.SetReadDeadline(time.Now().Add(stunTimeout))
 	defer co.SetReadDeadline(time.Time{})
 
@@ -40,7 +40,7 @@ func (b *BindRequest) ReceiveMessage(co net.Conn) (message []byte, err error) {
 }
 
 // SetAuthConfig sets the authentication configuration for the bind request
-func (b *BindRequest) SetAuthConfig(username, peerUsername, password, realm, nonce string) {
+func (b *IceBindRequest) SetAuthConfig(username, peerUsername, password, realm, nonce string) {
 	b.Auth = &StunAuthConfig{
 		SendUsername: peerUsername + ":" + username, // peer_frag:local_frag
 		Username:     username,                      // local_frag
@@ -51,7 +51,7 @@ func (b *BindRequest) SetAuthConfig(username, peerUsername, password, realm, non
 }
 
 // SendBindingRequest sends a STUN binding request and returns the mapped address
-func (b *BindRequest) SendBindingRequest(co net.Conn) (mappedIP net.IP, mappedPort int, err error) {
+func (b *IceBindRequest) SendBindingRequest(co net.Conn) (mappedIP net.IP, mappedPort int, err error) {
 	var (
 		attributes  []byte
 		stunRequest *StunMessage
@@ -88,6 +88,11 @@ func (b *BindRequest) SendBindingRequest(co net.Conn) (mappedIP net.IP, mappedPo
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to add message integrity: %w", err)
 		}
+	}
+
+	err = AddFingerprint(stunRequest)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to add fingerprint: %w", err)
 	}
 
 	// Send request
@@ -136,6 +141,10 @@ func (b *BindRequest) SendBindingRequest(co net.Conn) (mappedIP net.IP, mappedPo
 		return nil, 0, fmt.Errorf("invalid STUN response: %w", err)
 	}
 
+	if !VerifyFingerprint(stunResponse) {
+		return nil, 0, fmt.Errorf("invalid STUN response: fingerprint verification failed")
+	}
+
 	var (
 		ip   net.IP
 		port int
@@ -155,7 +164,7 @@ func (b *BindRequest) SendBindingRequest(co net.Conn) (mappedIP net.IP, mappedPo
 }
 
 // HandleBindingRequest handles an incoming STUN binding request and sends a response
-func (b *BindRequest) HandleBindingRequest(co net.Conn, requestBytes []byte) error {
+func (b *IceBindRequest) HandleBindingRequest(co net.Conn, requestBytes []byte) error {
 	// Parse request
 	request, err := ParseStunMessage(requestBytes)
 	if err != nil {
@@ -167,23 +176,29 @@ func (b *BindRequest) HandleBindingRequest(co net.Conn, requestBytes []byte) err
 		return fmt.Errorf("unexpected STUN message type: 0x%x", request.Header.Type)
 	}
 
+	if !VerifyFingerprint(request) {
+		return fmt.Errorf("invalid STUN request: fingerprint verification failed")
+	}
+
 	// Parse and validate authentication
 	requestAuth, err := b.validateAuthentication(co, request)
 	if err != nil {
 		return err
 	}
 
+	var requestAttrs *IceAttributes
 	// Parse ICE attributes if present
 	if len(request.Attributes) > 0 {
-		iceAttrs, err := ParseIceAttributes(request.Attributes)
+		requestAttrs, err = ParseIceAttributes(request.Attributes)
 		if err != nil {
 			return fmt.Errorf("failed to parse ICE attributes: %w", err)
 		}
-		b.Ice = iceAttrs
 	}
+	// TODO: use requestAttrs
+	_ = requestAttrs
 
 	// Create response attributes
-	responseAttrs, err := CreateResponseAttributes(co.RemoteAddr(), requestAuth, b.Ice)
+	responseAttrs, err := CreateResponseAttributes(co.RemoteAddr(), requestAuth)
 	if err != nil {
 		return fmt.Errorf("failed to create response attributes: %w", err)
 	}
@@ -205,6 +220,11 @@ func (b *BindRequest) HandleBindingRequest(co net.Conn, requestBytes []byte) err
 		}
 	}
 
+	err = AddFingerprint(response)
+	if err != nil {
+		return fmt.Errorf("failed to add fingerprint: %w", err)
+	}
+
 	// Send response
 	if _, err := co.Write(response.Raw); err != nil {
 		return fmt.Errorf("failed to send STUN response: %w", err)
@@ -214,7 +234,7 @@ func (b *BindRequest) HandleBindingRequest(co net.Conn, requestBytes []byte) err
 }
 
 // validateAuthentication parses and validates authentication attributes from the request
-func (b *BindRequest) validateAuthentication(co net.Conn, request *StunMessage) (*StunAuthConfig, error) {
+func (b *IceBindRequest) validateAuthentication(co net.Conn, request *StunMessage) (*StunAuthConfig, error) {
 	// Parse authentication attributes if present
 	var authAttrs *StunAuthConfig
 	if len(request.Attributes) == 0 {
@@ -235,13 +255,6 @@ func (b *BindRequest) validateAuthentication(co net.Conn, request *StunMessage) 
 	// Validate authentication if required
 	if b.Auth == nil || b.Auth.Password == "" {
 		return nil, nil
-	}
-
-	// Check if all required authentication attributes are present
-	if authAttrs.Username == "" || authAttrs.Realm == "" || authAttrs.Nonce == "" {
-		b.Logger.Debugf("Missing required auth attributes")
-		SendErrorResponse(co, request.Header.TransactionID, 401, "Unauthorized", b.Auth)
-		return nil, fmt.Errorf("missing required auth attributes")
 	}
 
 	// For ICE, username is formed as "peer_frag:local_frag"

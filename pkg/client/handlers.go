@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"io"
-	"time"
 
 	"github.com/riraccuia/pig/pkg/packet"
 )
@@ -20,10 +19,10 @@ func (c *Client) handleInbound(ctx context.Context) {
 // handleOutbound manages outbound packet routing based on connection type
 func (c *Client) handleOutbound(ctx context.Context) {
 	if c.conn.IsStreamed() {
-		go c.processOutboundStream()
+		go c.processOutboundStream(ctx)
 		return
 	}
-	go c.processOutboundConn()
+	go c.processOutboundConn(ctx)
 }
 
 // processInbound processes incoming IPv4 packets from the connection or stream
@@ -103,74 +102,13 @@ func (c *Client) processInbound(connOrStream io.ReadWriteCloser) {
 
 // processOutboundStream processes outbound packets for streamed connections,
 // selecting appropriate streams based on destination IP
-func (c *Client) processOutboundStream() {
-	for {
-		pkt := <-c.outbound.C
-		if c.outbound.IsDrop() {
-			c.dropLogger.Incr(1, uint64(pkt.TotalLength()))
-			c.bufferPool.Put(pkt)
-			continue
-		}
-		stream := c.streams.SelectByIPAndPort(pkt.DestinationIP(), pkt.DestinationPort())
-		if stream == nil {
-			c.bufferPool.Put(pkt)
-			continue
-		}
-
-		totalLen := pkt.TotalLength()
-		if totalLen <= 0 || totalLen > len(pkt) {
-			c.bufferPool.Put(pkt)
-			continue
-		}
-
-		switch {
-		case c.adapter.IP().Equal(pkt.SourceIP()):
-			pkt.Mark(packet.DSCP_MARK_MASQ_SNAT)
-		case c.masqAddr.Equal(pkt.DestinationIP()):
-			pkt.Mark(packet.DSCP_MARK_ADAPTER_DNAT)
-		}
-
-		_, err := stream.Write(pkt[:totalLen])
-		stream.Flush()
-		c.bufferPool.Put(pkt)
-		if err == nil {
-			continue
-		}
-		c.logger.Errorf("failed to write to stream: %v", err)
-		stream.Close()
-		return
-	}
-}
-
-// processOutboundConn processes outbound packets for non-streamed connections
-func (c *Client) processOutboundConn() {
-	// Create a buffer to hold multiple packets
-	const maxBatchSize = 64 * 1024 // 64KB batch size
-	buffer := make([]byte, 0, maxBatchSize)
-	batch := buffer[:0]
-	// Create a timer for flushing partial batches
-	flushTicker := time.NewTicker(5 * time.Millisecond)
-	defer flushTicker.Stop()
-
-	// Helper function to write and reset batch
-	writeBatch := func() error {
-		for len(batch) > 0 {
-			n, err := c.conn.Write(batch)
-			batch = batch[n:]
-			if err != nil && err != io.ErrShortWrite {
-				return err
-			}
-		}
-		batch = buffer[:0]
-		return nil
-	}
+func (c *Client) processOutboundStream(ctx context.Context) {
 	for {
 		select {
-		case <-flushTicker.C:
-			if err := writeBatch(); err != nil {
-				c.logger.Debugf("failed to write batch to connection: %v", err)
-				return
-			}
+		case <-ctx.Done():
+			return
+		case <-c.done:
+			return
 		case pkt, ok := <-c.outbound.C:
 			if !ok {
 				return
@@ -180,6 +118,12 @@ func (c *Client) processOutboundConn() {
 				c.bufferPool.Put(pkt)
 				continue
 			}
+			stream := c.streams.SelectByIPAndPort(pkt.DestinationIP(), pkt.DestinationPort())
+			if stream == nil {
+				c.bufferPool.Put(pkt)
+				continue
+			}
+
 			totalLen := pkt.TotalLength()
 			if totalLen <= 0 || totalLen > len(pkt) {
 				c.bufferPool.Put(pkt)
@@ -193,26 +137,104 @@ func (c *Client) processOutboundConn() {
 				pkt.Mark(packet.DSCP_MARK_ADAPTER_DNAT)
 			}
 
-			// If adding this packet would exceed batch size, flush current batch first
-			if len(batch)+totalLen > maxBatchSize {
-				if err := writeBatch(); err != nil {
-					c.bufferPool.Put(pkt)
-					c.logger.Debugf("failed to write batch to connection: %v", err)
-					return
-				}
-			}
-
-			// Append packet to batch
-			batch = append(batch, pkt[:totalLen]...)
+			_, err := stream.Write(pkt[:totalLen])
+			stream.Flush()
 			c.bufferPool.Put(pkt)
+			if err == nil {
+				continue
+			}
+			c.logger.Errorf("failed to write to stream: %v", err)
+			stream.Close()
+			return
+		}
+	}
+}
 
-			// If batch is full, write immediately
-			if len(batch) >= maxBatchSize {
-				if err := writeBatch(); err != nil {
-					c.logger.Debugf("failed to write batch to connection: %v", err)
+// processOutboundConn processes outbound packets for non-streamed connections
+func (c *Client) processOutboundConn(ctx context.Context) {
+	// Create a buffer to hold multiple packets
+	const maxBatchSize = 64 * 1024 // 64KB batch size
+	buffer := make([]byte, 0, maxBatchSize)
+	batch := buffer[:0]
+
+	// Helper function to write and reset batch
+	writeBatch := func() error {
+		for len(batch) > 0 {
+			n, err := c.conn.Write(batch)
+			batch = batch[n:]
+			if err != nil && err != io.ErrShortWrite {
+				return err
+			}
+		}
+		batch = buffer[:0]
+		return nil
+	}
+
+	processPacket := func(pkt packet.IPv4Packet) error {
+		if c.outbound.IsDrop() {
+			c.dropLogger.Incr(1, uint64(pkt.TotalLength()))
+			c.bufferPool.Put(pkt)
+			return nil
+		}
+		totalLen := pkt.TotalLength()
+		if totalLen <= 0 || totalLen > len(pkt) {
+			c.bufferPool.Put(pkt)
+			return nil
+		}
+
+		switch {
+		case c.adapter.IP().Equal(pkt.SourceIP()):
+			pkt.Mark(packet.DSCP_MARK_MASQ_SNAT)
+		case c.masqAddr.Equal(pkt.DestinationIP()):
+			pkt.Mark(packet.DSCP_MARK_ADAPTER_DNAT)
+		}
+
+		// If adding this packet would exceed batch size, flush current batch first
+		if len(batch)+totalLen > maxBatchSize {
+			if err := writeBatch(); err != nil {
+				c.bufferPool.Put(pkt)
+				c.logger.Debugf("failed to write batch to connection: %v", err)
+				return err
+			}
+		}
+
+		// Append packet to batch
+		batch = append(batch, pkt[:totalLen]...)
+		c.bufferPool.Put(pkt)
+
+		// If batch is full, write immediately
+		if len(batch) >= maxBatchSize {
+			if err := writeBatch(); err != nil {
+				c.logger.Debugf("failed to write batch to connection: %v", err)
+				return err
+			}
+		}
+		return nil
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.done:
+			return
+		case pkt, ok := <-c.outbound.C:
+			if !ok {
+				return
+			}
+			// process all queued packets fast
+			for {
+				if err := processPacket(pkt); err != nil {
+					c.logger.Debugf("failed to process packet: %v", err)
 					return
 				}
+				if len(c.outbound.C) == 0 {
+					break
+				}
+				pkt = <-c.outbound.C
 			}
+			// write any remaining data
+			writeBatch()
 		}
 	}
 }

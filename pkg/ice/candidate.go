@@ -14,7 +14,19 @@ func GetCandidates(logger common.Logger, mappedIP net.IP, mappedPort int, listen
 		logger.Errorf("Failed to get reflexive candidates: %v", err)
 		return
 	}
-	localCandidates, err := GetLocalCandidates(listenAddr.Network(), listenAddr.(*net.TCPAddr).Port)
+
+	var portInt int
+	switch listenAddr.Network() {
+	case "tcp":
+		portInt = listenAddr.(*net.TCPAddr).Port
+	case "udp":
+		portInt = listenAddr.(*net.UDPAddr).Port
+	default:
+		// for protocols like icmp, there is no port
+		portInt = 0
+	}
+
+	localCandidates, err := GetLocalCandidates(listenAddr.Network(), portInt)
 	if err != nil {
 		logger.Errorf("Failed to get local candidates: %v", err)
 		return

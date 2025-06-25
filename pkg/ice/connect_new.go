@@ -81,6 +81,8 @@ func GetConnectPaths(ctx context.Context, opts *signaling.Options, addr string, 
 		return c.RemoteAddr == nil
 	})
 
+	opts.Logger.Debugf("connectPaths: %v", cp)
+
 	if len(cp) == 0 {
 		err = fmt.Errorf("no valid candidates found")
 		return
