@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
+	"github.com/riraccuia/pig/pkg/ice/conn"
 )
 
 // QueryServerUDP is a convenience function that uses a StunClient under the hood.
@@ -90,7 +91,7 @@ func (c *StunClient) queryStunServerUDP(connOrSrcPort any) (mappedIP net.IP, map
 // sendStunRequestUDP sends a STUN UDP request and receives the response.
 // connOrSrcPort is the UDP connection or the source port to send from.
 func (c *StunClient) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrSrcPort any, requestBytes []byte, txID [12]byte) (responseBytes []byte, err error) {
-	udpConn, ok := connOrSrcPort.(*net.UDPConn)
+	udpConn, ok := connOrSrcPort.(net.Conn)
 	if !ok {
 		srcPort, ok := connOrSrcPort.(int)
 		if !ok {
@@ -100,10 +101,16 @@ func (c *StunClient) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrSrcPort a
 			IP:   net.IPv4zero, // Listen on all available IPs
 			Port: srcPort,
 		}
-		udpConn, err = net.ListenUDP("udp4", laddr)
+		/*udpConn, err = net.ListenUDP("udp4", laddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to listen on UDP port %d: %w", srcPort, err)
+		}*/
+		var _udpConn *net.UDPConn
+		_udpConn, err = conn.DialUDP("udp4", laddr, serverAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to dial UDP: %w", err)
 		}
+		udpConn = conn.NewUDPPacketConn(_udpConn)
 		// only close the connection if we created it
 		defer udpConn.Close()
 	}
@@ -115,7 +122,8 @@ func (c *StunClient) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrSrcPort a
 	}
 
 	// Send request
-	_, err = udpConn.WriteToUDP(requestBytes, serverAddr)
+	_, err = udpConn.Write(requestBytes)
+	//_, err = udpConn.WriteToUDP(requestBytes, serverAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send STUN request over UDP: %w", err)
 	}
@@ -124,7 +132,8 @@ func (c *StunClient) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrSrcPort a
 	responseBytes = make([]byte, 1500) // MTU size buffer
 	udpConn.SetReadDeadline(time.Now().Add(stunTimeout))
 	defer udpConn.SetReadDeadline(time.Time{})
-	n, remoteAddr, err := udpConn.ReadFromUDP(responseBytes)
+	n, err := udpConn.Read(responseBytes)
+	//n, remoteAddr, err := udpConn.ReadFromUDP(responseBytes)
 	if err != nil {
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 			return nil, fmt.Errorf("STUN UDP request timed out")
@@ -136,7 +145,7 @@ func (c *StunClient) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrSrcPort a
 	responseBytes = responseBytes[:n]
 
 	if c.logger != nil {
-		c.logger.Debugf("STUN: Received %d bytes response over UDP from %s", n, remoteAddr)
+		c.logger.Debugf("STUN: Received %d bytes response over UDP from %s", n, serverAddr)
 	}
 
 	return responseBytes, nil

@@ -130,7 +130,10 @@ func (s *Server) handleOutboundConn(ctx context.Context, client *ClientTunnel) {
 				pkt = <-client.outbound.C
 			}
 			// write any remaining data
-			writeBatch()
+			if err := writeBatch(); err != nil {
+				s.logger.Errorf("failed to send outbound data: %v", err)
+				return
+			}
 		}
 	}
 }

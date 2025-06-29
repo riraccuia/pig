@@ -234,7 +234,10 @@ func (c *Client) processOutboundConn(ctx context.Context) {
 				pkt = <-c.outbound.C
 			}
 			// write any remaining data
-			writeBatch()
+			if err := writeBatch(); err != nil {
+				c.logger.Errorf("failed to send outbound data: %v", err)
+				return
+			}
 		}
 	}
 }

@@ -76,9 +76,10 @@ type StunError struct {
 type StunAuthConfig struct {
 	// For ICE, username is formed as "peer_frag:local_frag"
 	// See RFC 8445 Section 7.2.2
-	SendUsername string // peer_frag:local_frag
 	Username     string // local_frag
 	Password     string
+	PeerUsername string // peer_frag
+	PeerPassword string
 	Realm        string
 	Nonce        string
 }
@@ -490,8 +491,8 @@ func CreateAuthAttributes(auth *StunAuthConfig) []byte {
 
 	// For ICE, username is formed as "peer_frag:local_frag"
 	// See RFC 8445 Section 7.2.2
-	if auth.SendUsername != "" {
-		username := auth.SendUsername // peer_frag:local_frag format per RFC 8445 Section 7.2.2
+	if auth.Username != "" && auth.PeerUsername != "" {
+		username := auth.PeerUsername + ":" + auth.Username // peer_frag:local_frag format per RFC 8445 Section 7.2.2
 		usernameBytes := []byte(username)
 		attr := make([]byte, 4+len(usernameBytes))
 		binary.BigEndian.PutUint16(attr[0:2], attrUsername)

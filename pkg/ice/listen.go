@@ -3,23 +3,21 @@ package ice
 import (
 	"context"
 	"errors"
-	"fmt"
-	"math/rand"
 	"net"
+	"slices"
 	"time"
 
-	"github.com/riraccuia/pig/pkg/ice/conn"
 	"github.com/riraccuia/pig/pkg/ice/message"
 	"github.com/riraccuia/pig/pkg/ice/signaling"
 	"github.com/riraccuia/pig/pkg/stun"
+	"github.com/riraccuia/pig/pkg/transport"
 )
 
-// Listen starts a new ICE server and returns the listener.
-// It returns the listener, and any error that occurs, based on the listenAddr's
-// network type, it will be either a *net.UDPConn or a net.Listener.
-// The listenAddr parameter is the address to listen on.
-func Listen(ctx context.Context, opts *signaling.Options, listenAddr net.Addr) (listener any, err error) {
-	var signaler *signaling.Signaler
+func GetListenPaths(ctx context.Context, opts *signaling.Options, listenPort uint16, pigProtos []transport.ICEProtocolDefinition) (chan []*ConnectPath, error) {
+	var (
+		signaler *signaling.Signaler
+		err      error
+	)
 	for {
 		select {
 		case <-ctx.Done():
@@ -36,114 +34,136 @@ func Listen(ctx context.Context, opts *signaling.Options, listenAddr net.Addr) (
 		}
 		break
 	}
+	listenPaths := make(chan []*ConnectPath, 10)
+	go receiveOffers(ctx, signaler, listenPort, listenPaths, pigProtos)
+	return listenPaths, nil
+}
 
-	if err != nil {
-		return nil, err
-	}
-
+func receiveOffers(ctx context.Context, signaler *signaling.Signaler, listenPort uint16, listenPaths chan []*ConnectPath, pigProtos []transport.ICEProtocolDefinition) {
 	var (
-		mappedIP   net.IP
-		mappedPort int
+		err        error
+		offersChan <-chan *message.ICEMessage
+		topicBase  string
 	)
-
-	switch listenAddr.Network() {
-	case "udp":
-		listener, err = net.ListenUDP("udp4", listenAddr.(*net.UDPAddr))
-		if err != nil {
-			break
+	for {
+		if offersChan == nil {
+			offersChan, topicBase, err = signaler.ReceiveICEOffers(ctx)
 		}
-		mappedIP, mappedPort, err = stun.QueryServerUDP(opts.Logger, opts.STUNServer, listener)
-	case "tcp":
-		listener = conn.NewTCPListener(listenAddr.(*net.TCPAddr))
-	default:
-		return nil, fmt.Errorf("unsupported network type: %s", listenAddr.Network())
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	go func() {
-		var (
-			ok         bool
-			offer      *message.ICEMessage
-			offersChan <-chan *message.ICEMessage
-			topicBase  string
-		)
-		for {
-			if offersChan == nil {
-				offersChan, topicBase, err = signaler.ReceiveICEOffers(ctx, listenAddr)
-			}
-			if err != nil {
-				time.Sleep(time.Second * 5)
-				continue
-			}
+		if err != nil {
+			time.Sleep(time.Second * 5)
+			continue
+		}
+		for offersChan != nil {
 			select {
 			case <-ctx.Done():
 				err = ctx.Err()
-				if opts.Logger != nil {
-					opts.Logger.Errorf("Stopped waiting for ICE offers: %v", err)
-				}
+				signaler.GetOptions().Logger.Errorf("Stopped waiting for ICE offers: %v", err)
 				return
-			case offer, ok = <-offersChan:
+			case offer, ok := <-offersChan:
 				if !ok {
 					offersChan = nil
-					continue
+					break
 				}
-				handleOffer(signaler, topicBase, offer, listenAddr, listener, mappedIP, mappedPort)
+				signaler.GetOptions().Logger.Debugf("Received ICE offer. SessionID: %s", offer.SessionID)
+				processOffer(signaler, topicBase, offer, listenPort, listenPaths, pigProtos)
 			}
 		}
-	}()
-	return
+	}
 }
 
-func handleOffer(signaler *signaling.Signaler, topicBase string, offer *message.ICEMessage, listenAddr net.Addr, listener any, mappedIP net.IP, mappedPort int) (err error) {
-	logger := signaler.GetOptions().Logger
+func processOffer(signaler *signaling.Signaler, topicBase string, offer *message.ICEMessage, listenPort uint16, listenPaths chan []*ConnectPath, pigProtos []transport.ICEProtocolDefinition) {
+	localNets, localIps, err := getLocalNetworks()
+	if err != nil {
+		return
+	}
 
-	if listenAddr.Network() == "tcp" {
-		if listenAddr.(*net.TCPAddr).Port == 0 {
-			// generate random port
-			listenAddr = &net.TCPAddr{IP: listenAddr.(*net.TCPAddr).IP, Port: rand.Intn(65535-1024) + 1024}
+	var (
+		answerCandidates []message.ICECandidate
+		cp               []*ConnectPath
+		opts             = signaler.GetOptions()
+	)
+
+	for _, tr := range pigProtos {
+		// local candidates
+		for i, localIp := range localIps {
+			bindAgent := stun.NewIceBindingAgent(opts.Logger, nil)
+			cp = append(cp, &ConnectPath{
+				LocalNet:  localNets[i],
+				LocalAddr: AddressFrom(tr.Network, localIp, int(listenPort)),
+				Protocol:  tr,
+				BindAgent: bindAgent,
+			})
+			candidate := CandidateFrom(tr.Network, tr.ComponentID, localIp, int(listenPort))
+			answerCandidates = append(answerCandidates, candidate)
+			bindAgent.Ice = &stun.IceAttributes{
+				Priority:      candidate.Priority,
+				IceControlled: 0x12345678,
+			}
 		}
-		mappedIP, mappedPort, err = PerformSTUNQuery(logger, signaler.GetOptions().STUNServer, listenAddr)
+		// reflexive candidate
+		localAddr := AddressFrom(tr.Network, net.IPv4zero, int(listenPort))
+		// Get mapped endpoint
+		mappedIP, mappedPort, err := PerformSTUNQuery(opts.Logger, opts.STUNServer, localAddr)
 		if err != nil {
-			logger.Errorf("Failed to query STUN server for TCP: %v", err)
-			return
-		}
-	}
-	answerCandidates, err := GetCandidates(logger, mappedIP, mappedPort, listenAddr)
-	if err != nil {
-		return
-	}
-	logger.Debugf("Preparing to send ICE answer to: %s:%d", mappedIP, mappedPort)
-	err = signaler.SendICEAnswer(topicBase, offer, answerCandidates)
-	if err != nil {
-		return
-	}
-	for _, candidate := range offer.Candidates {
-		logger.Debugf("Handling ICE candidate: %s | %s | %s", candidate.Type, candidate.Protocol, candidate.Address)
-		if candidate.Protocol != listenAddr.Network() {
+			opts.Logger.Errorf("STUN query failed: %v", err)
 			continue
 		}
-		switch candidate.Protocol {
-		case "udp":
-			_, err = conn.PunchUDP(signaler.GetOptions().Logger, listener, fmt.Sprintf("%s:%d", candidate.Address, candidate.Port))
-			if err != nil {
-				return
-			}
-		case "tcp":
-			go func() {
-				var co net.Conn
-				co, err = conn.DialTCP("tcp4", listenAddr.(*net.TCPAddr), &net.TCPAddr{IP: net.ParseIP(candidate.Address).To4(), Port: candidate.Port})
-				if err != nil {
-					return
-				}
-				err = listener.(*conn.TCPListener).Load(co)
-				if err != nil {
-					return
-				}
-			}()
+
+		bindAgent := stun.NewIceBindingAgent(opts.Logger, nil)
+		cp = append(cp, &ConnectPath{
+			LocalAddr: localAddr,
+			Protocol:  tr,
+			BindAgent: bindAgent,
+		})
+		candidate := CandidateFrom(tr.Network, tr.ComponentID, mappedIP, mappedPort)
+		answerCandidates = append(answerCandidates, candidate)
+		bindAgent.Ice = &stun.IceAttributes{
+			Priority:      candidate.Priority,
+			IceControlled: 0x12345678,
 		}
 	}
-	return fmt.Errorf("no valid candidate found")
+
+	opts.Logger.Debugf("Preparing to send ICE answer to client. SessionID: %s", offer.SessionID)
+
+	var answer *message.ICEMessage
+	answer, err = signaler.SendICEAnswer(topicBase, offer, answerCandidates)
+	if err != nil {
+		opts.Logger.Errorf("Failed to send ICE answer: %v", err)
+		return
+	}
+
+	iceAuth := &stun.StunAuthConfig{
+		Username:     answer.Credentials.Username,
+		Password:     answer.Credentials.Password,
+		PeerUsername: offer.Credentials.Username,
+		PeerPassword: offer.Credentials.Password,
+	}
+
+	for _, candidate := range offer.Candidates {
+		targetIP := net.ParseIP(candidate.Address)
+		for _, connect := range cp {
+			if connect.Protocol.Network != candidate.Protocol {
+				continue
+			}
+			if connect.Protocol.ComponentID != candidate.ComponentID {
+				continue
+			}
+			if connect.LocalNet != nil && !connect.LocalNet.Contains(targetIP) {
+				continue
+			}
+			connect.ICEID = answer.SessionID
+			connect.RemoteAddr = AddressFrom(connect.Protocol.Network, targetIP, candidate.Port)
+			connect.BindAgent.Auth = iceAuth
+		}
+	}
+
+	// remove from the connectMap the ones that do not have a remote address
+	cp = slices.DeleteFunc(cp, func(c *ConnectPath) bool {
+		return c.RemoteAddr == nil
+	})
+
+	select {
+	case listenPaths <- cp:
+	default:
+	}
 }

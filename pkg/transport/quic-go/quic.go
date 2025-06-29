@@ -11,8 +11,6 @@ import (
 
 	"github.com/quic-go/quic-go"
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/ice"
-	"github.com/riraccuia/pig/pkg/ice/signaling"
 	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 )
@@ -141,7 +139,7 @@ func (t *QuicTransport) Close() error {
 }
 
 func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
-	return dialFuncWithSrcPort(ctx, logger, config.Target.Address, config.Target.SrcPort, config.Target.Port, tlsConfig, config)
+	return dialFuncWithSrcPort(ctx, logger, config.Target.Address, config.Target.SrcPort, config.Target.Port, tlsConfig)
 }
 
 func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
@@ -151,19 +149,9 @@ func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config
 			listenerAddr = &net.UDPAddr{IP: net.IPv4zero, Port: config.Target.Port}
 			err          error
 		)
-		if config.ICE != nil && config.ICE.Enabled {
-			var listener any
-			listener, err = ice.Listen(ctx, signaling.GetOptions(logger, config.ICE), listenerAddr)
-			if err != nil {
-				return nil, fmt.Errorf("failed to setup punch signaling channel: %w", err)
-			}
-			udpConn = listener.(*net.UDPConn)
-		}
-		if udpConn == nil {
-			udpConn, err = net.ListenUDP("udp4", listenerAddr)
-			if err != nil {
-				return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
-			}
+		udpConn, err = net.ListenUDP("udp4", listenerAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
 		}
 		maxStreams := int64(config.StreamCount)
 		if maxStreams <= 0 {
@@ -184,6 +172,45 @@ func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config
 	}
 }
 
+func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Config, tlsConfig *tls.Config) (transport.Conn, error) {
+	if tlsConfig == nil {
+		return nil, errors.New("quic: tls.Config not set")
+	}
+	tr := &quic.Transport{
+		Conn: conn.(net.PacketConn),
+	}
+	qConn, err := tr.Dial(
+		ctx,
+		conn.RemoteAddr(),
+		tlsConfig.Clone(),
+		&quic.Config{
+			EnableDatagrams: true,
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to establish QUIC connection: %w", err)
+	}
+	return NewQuicConn(qConn), nil
+}
+
+func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Config, tlsConfig *tls.Config) (transport.Listener, error) {
+	if tlsConfig == nil {
+		return nil, errors.New("quic: tls.Config not set")
+	}
+	maxStreams := int64(config.StreamCount)
+	if maxStreams <= 0 {
+		maxStreams = int64(runtime.NumCPU())
+	}
+	listener, err := quic.Listen(co.(net.PacketConn), tlsConfig.Clone(), &quic.Config{
+		EnableDatagrams:    true,
+		MaxIncomingStreams: maxStreams,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to listen using QUIC on endpoint: %w", err)
+	}
+	return NewQuicTransport(listener), nil
+}
+
 func dialFuncDefault(ctx context.Context, address string, dstPort int, tlsConfig *tls.Config) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
 		conn, err := quic.DialAddr(
@@ -199,32 +226,20 @@ func dialFuncDefault(ctx context.Context, address string, dstPort int, tlsConfig
 	}
 }
 
-func dialFuncWithSrcPort(ctx context.Context, logger *log.Logger, address string, srcPort, dstPort int, tlsConfig *tls.Config, cfg *config.Config) func() (transport.Conn, error) {
+func dialFuncWithSrcPort(ctx context.Context, logger *log.Logger, address string, srcPort, dstPort int, tlsConfig *tls.Config) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
 		var (
 			udpConn *net.UDPConn
 			udpAddr *net.UDPAddr
 			err     error
 		)
-		if cfg.ICE != nil && cfg.ICE.Enabled {
-			_conn, remoteAddr, err := ice.Connect(ctx, signaling.GetOptions(logger, cfg.ICE), srcPort, dstPort, address, transport.ICEProtocolQUIC)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get ICE connection: %w", err)
-			}
-			udpConn = _conn.(*net.UDPConn)
-			udpAddr = remoteAddr.(*net.UDPAddr)
+		udpConn, err = net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: srcPort})
+		if err != nil {
+			return nil, err
 		}
-		if udpConn == nil {
-			udpConn, err = net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: srcPort})
-			if err != nil {
-				return nil, err
-			}
-		}
-		if udpAddr == nil {
-			udpAddr, err = net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", address, dstPort))
-			if err != nil {
-				return nil, err
-			}
+		udpAddr, err = net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", address, dstPort))
+		if err != nil {
+			return nil, err
 		}
 		if tlsConfig == nil {
 			return nil, errors.New("quic: tls.Config not set")

@@ -11,9 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/ice"
 	"github.com/riraccuia/pig/pkg/ice/conn"
-	"github.com/riraccuia/pig/pkg/ice/signaling"
 	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 )
@@ -77,7 +75,7 @@ func (t *WSTransport) Accept(ctx context.Context) (transport.Conn, error) {
 	}
 }
 
-func (t *WSTransport) DialConn(ctx context.Context, conn net.Conn, address string, tlsConfig *tls.Config) (transport.Conn, error) {
+func DialConn(ctx context.Context, conn net.Conn, address string, tlsConfig *tls.Config) (transport.Conn, error) {
 	scheme := "ws"
 	if tlsConfig != nil {
 		scheme = "wss"
@@ -110,7 +108,7 @@ func (t *WSTransport) DialConn(ctx context.Context, conn net.Conn, address strin
 	}, nil
 }
 
-func (t *WSTransport) Dial(ctx context.Context, address string, tlsConfig *tls.Config) (transport.Conn, error) {
+func Dial(ctx context.Context, address string, tlsConfig *tls.Config) (transport.Conn, error) {
 	scheme := "ws"
 	if tlsConfig != nil {
 		scheme = "wss"
@@ -186,28 +184,25 @@ func (t *WSTransport) Listen(network, address string, tlsConfig *tls.Config) err
 	return t.server.ListenAndServe()
 }
 
+func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Config, tlsConfig *tls.Config) (transport.Conn, error) {
+	wsConn, err := DialConn(ctx, conn, conn.RemoteAddr().String(), tlsConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to establish WebSocket connection: %w", err)
+	}
+	return wsConn, nil
+}
+
+func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Config, tlsConfig *tls.Config) (transport.Listener, error) {
+	tr := NewWSTransport()
+	l := conn.NewTCPListener(co.LocalAddr().(*net.TCPAddr))
+	l.Load(co)
+	go tr.ListenWithListener(l, tlsConfig)
+	return tr, nil
+}
+
 func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
-		tr := NewWSTransport()
-		if config.ICE != nil && config.ICE.Enabled {
-			_conn, remoteAddr, err := ice.Connect(
-				ctx,
-				signaling.GetOptions(logger, config.ICE),
-				config.Target.SrcPort,
-				config.Target.Port,
-				config.Target.Address,
-				transport.ICEProtocolWS,
-			)
-			if err != nil {
-				return nil, fmt.Errorf("failed to establish ICE connection: %w", err)
-			}
-			conn, err := tr.DialConn(ctx, _conn, remoteAddr.String(), tlsConfig)
-			if err != nil {
-				return nil, fmt.Errorf("failed to establish WebSocket connection: %w", err)
-			}
-			return conn, nil
-		}
-		conn, err := tr.Dial(
+		conn, err := Dial(
 			ctx,
 			fmt.Sprintf("%s:%d", config.Target.Address, config.Target.Port),
 			tlsConfig,
@@ -221,24 +216,9 @@ func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.C
 
 func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
 	return func() (transport.Listener, error) {
-		transport := NewWSTransport()
+		tr := NewWSTransport()
 		go func() {
-			if config.ICE != nil && config.ICE.Enabled {
-				listener, err := ice.Listen(
-					ctx,
-					signaling.GetOptions(logger, config.ICE),
-					&net.TCPAddr{IP: net.ParseIP(config.Target.Address).To4(), Port: config.Target.Port},
-				)
-				if err != nil {
-					fmt.Printf("ICE server error: %v\n", err)
-				}
-				err = transport.ListenWithListener(listener.(*conn.TCPListener), tlsConfig.Clone())
-				if err != nil {
-					fmt.Printf("ICE server error: %v\n", err)
-				}
-				return
-			}
-			err := transport.Listen(
+			err := tr.Listen(
 				"ws",
 				fmt.Sprintf(":%d", config.Target.Port),
 				tlsConfig.Clone(),
@@ -247,7 +227,7 @@ func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config
 				fmt.Printf("WebSocket server error: %v\n", err)
 			}
 		}()
-		return transport, nil
+		return tr, nil
 	}
 }
 

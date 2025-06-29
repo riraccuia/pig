@@ -155,7 +155,7 @@ func defineFlags(flagSet *flag.FlagSet) *pigFlags {
 	flagSet.StringVar(&flags.remoteAddr, flagConnect[0], "", flagConnect[1])
 	flagSet.StringVar(&flags.serverAddr, flagListen[0], "", flagListen[1])
 	flagSet.StringVar(&flags.bindAdapter, flagInterface[0], "", flagInterface[1])
-	flagSet.StringVar(&flags.proto, flagProto[0], "quic", flagProto[1])
+	flagSet.StringVar(&flags.proto, flagProto[0], "ws", flagProto[1])
 	flagSet.IntVar(&flags.srcPort, flagPort[0], 0, flagPort[1])
 	flagSet.StringVar(&flags.tunnelAddress, flagTunnel[0], "", flagTunnel[1])
 	flagSet.StringVar(&flags.certFile, flagCert[0], "", flagCert[1])
@@ -362,6 +362,9 @@ func applyICESettings(cfg *config.Config, flags *pigFlags, logger common.Logger)
 	}
 
 	if !flags.iceEnabled {
+		cfg.ICE = &config.ICEConfig{
+			Enabled: false,
+		}
 		return
 	}
 
@@ -407,19 +410,8 @@ func validateConfig(cfg *config.Config, logger common.Logger) {
 		logger.Fatalf("Invalid pig mode: %s", cfg.Mode)
 	}
 
-	if cfg.Proto == "" {
-		logger.Info("Transport not specified, defaulting to quic")
-		cfg.Proto = config.TransportQUIC
-	}
-
 	if !cfg.Proto.IsValid() {
 		logger.Fatalf("Invalid transport: %s", cfg.Proto)
-	}
-
-	if cfg.Proto == config.TransportICMP || cfg.Proto == config.TransportTLSICMP {
-		if cfg.BindAdapter == "" {
-			logger.Fatalf("Bind adapter not specified, but required for %s. Use -I flag to specify the adapter.", cfg.Proto)
-		}
 	}
 
 	if cfg.Target.Address == "" {
@@ -429,7 +421,25 @@ func validateConfig(cfg *config.Config, logger common.Logger) {
 		logger.Fatalf("Target address not specified")
 	}
 
-	if cfg.Target.Port == 0 && cfg.Proto != config.TransportWS {
+	if cfg.ICE.Enabled {
+		if len(cfg.ICE.Protos) == 0 {
+			cfg.ICE.Protos = []string{string(cfg.Proto)}
+		}
+		for _, proto := range cfg.ICE.Protos {
+			if !config.TransportType(proto).IsValid() {
+				logger.Fatalf("Invalid ICE protocol: %s", proto)
+			}
+		}
+		return
+	}
+
+	if cfg.Proto == config.TransportICMP || cfg.Proto == config.TransportTLSICMP {
+		if cfg.BindAdapter == "" {
+			logger.Fatalf("Bind adapter not specified, but required for %s. Use -I flag to specify the adapter.", cfg.Proto)
+		}
+	}
+
+	if cfg.Target.Port == 0 {
 		if cfg.Proto == config.TransportICMP || cfg.Proto == config.TransportTLSICMP {
 			return
 		}

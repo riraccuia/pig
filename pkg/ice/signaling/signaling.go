@@ -44,25 +44,24 @@ func NewSignaler(ctx context.Context, opts *Options) (*Signaler, error) {
 }
 
 // GatherICECandidates performs a STUN query, publishes an offer, and waits for an answer
-func GatherICECandidates(ctx context.Context, opts *Options, targetHost string, offerCandidates []message.ICECandidate) (ic []message.ICECandidate, err error) {
+func GatherICECandidates(ctx context.Context, opts *Options, targetHost string, offer *message.ICEMessage) (answer *message.ICEMessage, err error) {
 	signaler, err := NewSignaler(ctx, opts)
 	defer signaler.Disconnect()
 	if err != nil {
 		return nil, err
 	}
-	ic, err = signaler.GatherICECandidates(targetHost, offerCandidates)
-	return
+	return signaler.GatherICECandidates(targetHost, offer)
 }
 
 // GatherICECandidates performs a STUN query, publishes an offer, and waits for an answer
-func (s *Signaler) GatherICECandidates(targetHost string, offerCandidates []message.ICECandidate) ([]message.ICECandidate, error) {
+func (s *Signaler) GatherICECandidates(targetHost string, offer *message.ICEMessage) (answer *message.ICEMessage, err error) {
 	topicBase := s.getTopicPrefix(targetHost) + "/"
-	iceMsg, err := s.publishICEOffer(topicBase, offerCandidates)
+	err = s.publishICEOffer(topicBase, offer)
 	if err != nil {
 		return nil, err
 	}
 	// Wait for answer
-	return s.waitForAnswer(topicBase, iceMsg.SessionID)
+	return s.waitForAnswer(topicBase, offer.SessionID)
 }
 
 func (s *Signaler) GetOptions() *Options {

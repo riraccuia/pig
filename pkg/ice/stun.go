@@ -13,8 +13,8 @@ func PerformSTUNQuery(logger common.Logger, stunServer string, localAddr net.Add
 	// Perform STUN query to get our public endpoint
 	switch localAddr.Network() {
 	case "udp":
-		var connOrSrcPort any = localAddr.(*net.UDPAddr).Port
-		mappedIP, mappedPort, err = stun.QueryServerUDP(logger, stunServer, connOrSrcPort)
+		var port any = localAddr.(*net.UDPAddr).Port
+		mappedIP, mappedPort, err = stun.QueryServerUDP(logger, stunServer, port)
 	case "tcp":
 		mappedIP, mappedPort, err = stun.QueryServerTCP(logger, stunServer, localAddr.(*net.TCPAddr).Port)
 	default:

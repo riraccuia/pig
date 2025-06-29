@@ -13,9 +13,9 @@ import (
 	"github.com/riraccuia/pig/pkg/stun"
 )
 
-func (s *Signaler) SendICEAnswer(topicBase string, iceMsg *message.ICEMessage, candidates []message.ICECandidate) (err error) {
+func (s *Signaler) SendICEAnswer(topicBase string, iceMsg *message.ICEMessage, candidates []message.ICECandidate) (answer *message.ICEMessage, err error) {
 	// Create an ICE answer message
-	answer, err := message.GenerateICEAnswer(candidates, s.opts.EncryptionKey)
+	answer, err = message.GenerateICEAnswer(candidates)
 	if err != nil {
 		if s.opts.Logger != nil {
 			s.opts.Logger.Errorf("Failed to generate ICE answer: %v", err)
@@ -25,7 +25,8 @@ func (s *Signaler) SendICEAnswer(topicBase string, iceMsg *message.ICEMessage, c
 
 	answer.SessionID = iceMsg.SessionID
 
-	payload, err := s.preparePayload(answer)
+	var payload []byte
+	payload, err = s.preparePayload(answer)
 	if err != nil {
 		if s.opts.Logger != nil {
 			s.opts.Logger.Errorf("Failed to prepare payload: %v", err)
@@ -48,7 +49,7 @@ func (s *Signaler) SendICEAnswer(topicBase string, iceMsg *message.ICEMessage, c
 	return
 }
 
-func (s *Signaler) ReceiveICEOffers(ctx context.Context, listenAddr net.Addr) (offersChan <-chan *message.ICEMessage, topicBase string, err error) {
+func (s *Signaler) ReceiveICEOffers(ctx context.Context) (offersChan <-chan *message.ICEMessage, topicBase string, err error) {
 	// Perform STUN query to get our public IP
 	var mappedIP net.IP
 	mappedIP, _, err = stun.QueryServerUDP(s.opts.Logger, s.opts.STUNServer, 0)
@@ -101,7 +102,7 @@ func (s *Signaler) handleOfferMessage(msg []byte) (*message.ICEMessage, error) {
 		payload []byte
 		err     error
 	)
-	s.opts.Logger.Debugf("received ICE offer message: %s", string(msg))
+	// s.opts.Logger.Debugf("received ICE offer message: %s", string(msg))
 	if s.opts.EncryptionKey != nil {
 		// Decrypt the message
 		ciphertext, err := base64.StdEncoding.DecodeString(string(msg))
@@ -125,7 +126,7 @@ func (s *Signaler) handleOfferMessage(msg []byte) (*message.ICEMessage, error) {
 }
 
 // waitForAnswer subscribes to the answer topic and waits for a response
-func (s *Signaler) waitForAnswer(topicBase, sessionID string) (candidates []message.ICECandidate, err error) {
+func (s *Signaler) waitForAnswer(topicBase, sessionID string) (answer *message.ICEMessage, err error) {
 	iceMsgChan := make(chan *message.ICEMessage)
 
 	// Subscribe to answer topic
@@ -141,14 +142,12 @@ func (s *Signaler) waitForAnswer(topicBase, sessionID string) (candidates []mess
 	}
 
 	// Wait for answer or timeout
-	var iceMsg *message.ICEMessage
 	select {
-	case iceMsg = <-iceMsgChan:
-		if iceMsg.SessionID != sessionID {
-			err = fmt.Errorf("received ICE answer for different session: %s", iceMsg.SessionID)
+	case answer = <-iceMsgChan:
+		if answer.SessionID != sessionID {
+			err = fmt.Errorf("received ICE answer for different session: %s", answer.SessionID)
 			break
 		}
-		candidates = iceMsg.Candidates
 	case <-time.After(3 * time.Second):
 		err = fmt.Errorf("timeout waiting for ICE answer")
 	case <-s.ctx.Done():
@@ -157,7 +156,7 @@ func (s *Signaler) waitForAnswer(topicBase, sessionID string) (candidates []mess
 
 	s.mqttClient.Unsubscribe(answerTopic)
 
-	return candidates, err
+	return answer, err
 }
 
 // handleAnswerMessage processes an answer message from MQTT
