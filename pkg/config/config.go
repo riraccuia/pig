@@ -30,6 +30,7 @@ const (
 	TransportWS      TransportType = "ws"
 	TransportICMP    TransportType = "icmp"
 	TransportTLSICMP TransportType = "tls-in-icmp"
+	TransportDTLS    TransportType = "dtls"
 )
 
 var supportedTransports = map[TransportType]bool{
@@ -39,6 +40,7 @@ var supportedTransports = map[TransportType]bool{
 	TransportWS:      true,
 	TransportICMP:    true,
 	TransportTLSICMP: true,
+	TransportDTLS:    true,
 }
 
 type AuthType string
@@ -112,15 +114,17 @@ type ICEConfig struct {
 }
 
 func (c *ICEConfig) UseProtos() (protos []transport.ICEProtocolDefinition) {
-	if len(c.Protos) == 0 {
+	/*if len(c.Protos) == 0 {
 		return []transport.ICEProtocolDefinition{transport.ICEProtocolWS, transport.ICEProtocolQUIC}
-	}
+	}*/
 	for _, proto := range c.Protos {
 		switch proto {
 		case "ws":
 			protos = append(protos, transport.ICEProtocolWS)
 		case "quic":
 			protos = append(protos, transport.ICEProtocolQUIC)
+		case "dtls":
+			protos = append(protos, transport.ICEProtocolDTLS)
 		}
 	}
 	return

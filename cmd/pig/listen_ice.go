@@ -16,6 +16,7 @@ import (
 	"github.com/riraccuia/pig/pkg/ice/signaling"
 	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
+	"github.com/riraccuia/pig/pkg/transport/dtls"
 	qt "github.com/riraccuia/pig/pkg/transport/quic-go"
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
@@ -28,7 +29,7 @@ func getICEListenFunc(ctx context.Context, logger *log.Logger, cfg *config.Confi
 	}
 	logger.Infof("Starting ICE | Candidate protocols: %v | Listen port: %d", strings.Join(cfg.ICE.Protos, ", "), listenPort)
 	return func() (transport.Listener, error) {
-		listenPathsChan, err := ice.GetListenPaths(ctx, signaling.GetOptions(logger, cfg.ICE), listenPort, []transport.ICEProtocolDefinition{transport.ICEProtocolWS, transport.ICEProtocolQUIC})
+		listenPathsChan, err := ice.GetListenPaths(ctx, signaling.GetOptions(logger, cfg.ICE), listenPort, cfg.ICE.UseProtos())
 		if err != nil {
 			return nil, fmt.Errorf("failed to get listen paths: %w", err)
 		}
@@ -118,6 +119,9 @@ func processICEServerConnectPaths(ctx context.Context, logger *log.Logger, cfg *
 		l, err = qt.GetListenerFromConn(ctx, co, cfg, tlsConfig)
 	case "ws":
 		l, err = ws.GetListenerFromConn(ctx, nomination.Conn, cfg, tlsConfig)
+	case "dtls":
+		co := conn.NewUDPPacketConn(nomination.Conn.(*net.UDPConn))
+		l, err = dtls.GetListenerFromConn(ctx, co, cfg, tlsConfig)
 	}
 	if err != nil {
 		logger.Errorf("Failed to get listener for %s: %v", nomination.String(), err)

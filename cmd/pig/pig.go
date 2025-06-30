@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"os"
@@ -30,9 +31,14 @@ func pig(mo config.Mode) {
 	ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
 
-	logger.Infof("Starting pig | Mode: %s | Transport: %s | MTU: %d", cfg.Mode, cfg.Proto, cfg.MTU)
+	transportStr := "|"
+	if !cfg.ICE.Enabled {
+		transportStr = fmt.Sprintf("| Transport:%s |", cfg.Proto)
+	}
 
-	if cfg.ICE != nil && cfg.ICE.Enabled {
+	logger.Infof("Starting pig | Mode: %s %s MTU: %d", cfg.Mode, transportStr, cfg.MTU)
+
+	if cfg.ICE.Enabled {
 		logger.Info("ICE enabled | STUN server: ", cfg.ICE.STUNAddress, " | MQTT broker: ", cfg.ICE.Signaling.MQTTBrokerAddress)
 	}
 

@@ -7,6 +7,7 @@ import (
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
+	"github.com/riraccuia/pig/pkg/transport/dtls"
 	icmp "github.com/riraccuia/pig/pkg/transport/icmp"
 	qt "github.com/riraccuia/pig/pkg/transport/quic-go"
 	trtls "github.com/riraccuia/pig/pkg/transport/tls"
@@ -55,6 +56,12 @@ func getServerListenFunc(ctx context.Context, logger *log.Logger, cfg *config.Co
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
 		return tlsicmp.GetServerListenFunc(ctx, logger, cfg, tlsConfig), nil
+	case config.TransportDTLS:
+		tlsConfig, err := createTLSConfig(logger, cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create TLS config: %w", err)
+		}
+		return dtls.GetServerListenFunc(ctx, logger, cfg, tlsConfig), nil
 	default:
 		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 	}

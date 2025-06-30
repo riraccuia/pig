@@ -14,6 +14,7 @@ import (
 	"github.com/riraccuia/pig/pkg/ice/signaling"
 	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
+	"github.com/riraccuia/pig/pkg/transport/dtls"
 	qt "github.com/riraccuia/pig/pkg/transport/quic-go"
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
@@ -58,6 +59,11 @@ func getICEDialFunc(ctx context.Context, logger *log.Logger, cfg *config.Config)
 		case "quic":
 			co := conn.NewUDPPacketConn(selectedPath.Conn.(*net.UDPConn))
 			return qt.GetClientFromConn(ctx, co, cfg, tlsConfig)
+		case "dtls":
+			co := conn.NewUDPPacketConn(selectedPath.Conn.(*net.UDPConn))
+			co.SetReadBuffer(1024 * 2048)
+			co.SetWriteBuffer(1024 * 2048)
+			return dtls.GetClientFromConn(ctx, co, cfg, tlsConfig)
 		}
 		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 	}, nil

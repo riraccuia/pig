@@ -23,7 +23,7 @@ var (
 	flagConnect     = [2]string{"c", "Connect address host[:port]"}
 	flagListen      = [2]string{"l", "Listen address host[:port]"}
 	flagInterface   = [2]string{"I", "The adapter/interface to bind to, useful for icmp based protos"}
-	flagProto       = [2]string{"proto", "Transport protocol for the tunnel, valid values are: quic, udp, tls, ws, icmp, tls-in-icmp"}
+	flagProto       = [2]string{"proto", "Transport protocol for the tunnel, valid values are: quic, udp, tls, ws, icmp, tls-in-icmp, dtls"}
 	flagPort        = [2]string{"p", "Source port to use for the connection"}
 	flagTunnel      = [2]string{"tunnel", "Tunnel address, defaults to 172.31.254.1/29 for clients and 172.31.255.1/24 for servers"}
 	flagCert        = [2]string{"cert", "Path to certificate file"}
@@ -434,7 +434,7 @@ func validateConfig(cfg *config.Config, logger common.Logger) {
 			cfg.ICE.Protos = flagProtos
 		}
 		if cfg.Proto == "." {
-			cfg.ICE.Protos = []string{"ws", "quic"}
+			cfg.ICE.Protos = []string{"ws", "quic", "dtls"}
 		}
 		for _, proto := range cfg.ICE.Protos {
 			if !config.TransportType(proto).IsValid() {
