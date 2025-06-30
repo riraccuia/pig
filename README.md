@@ -1,12 +1,16 @@
 # pig - packet insertion gear
 ![pig gopher](assets/pig-gopher.png)
 
-pig is my playground for network protocol experimentation and a Swiss Army knife for network encapsulation. Think of it as a sandbox where networking ideas come to life - from VPN-like tunneling to creative protocol encapsulation. It creates virtual network interfaces and can push packets through just about anything. Whether you're doing serious network testing or just curious about how packets can dance between protocols, pig's got you covered.
+**What is pig?**
+
+pig can connect devices directly to each other, even when they're behind firewalls or routers, automatically finding the best path between two computers.
+
+It works with multiple connection types and doesn't require any special router setup.
 
 ## Table of Contents
 
-- [Quick Start](#quick-start)
 - [Features](#features)
+- [Quick Start](#quick-start)
 - [Transport Protocols](#transport-protocols)
   - [QUIC](#quic)
   - [TLS](#tls)
@@ -24,7 +28,9 @@ pig is my playground for network protocol experimentation and a Swiss Army knife
   - [TLS Mutual Authentication](#tls-mutual-authentication)
   - [Combined Authentication](#combined-authentication)
 - [ICE for direct p2p connectivity](#ice-for-direct-p2p-connectivity-across-nats-and-firewalls)
-  - [Enabling ICE](#enabling-ice)
+  - [Configuring ICE](#configuring-ice)
+  - [Candidate Pair Negotiation](#candidate-pair-negotiation)
+  - [STUN Binding Authentication](#stun-binding-authentication)
 - [Start/Stop Scripts](#startstop-scripts)
   - [Configuration](#configuration)
   - [Environment Variables](#environment-variables)
@@ -48,40 +54,11 @@ pig is my playground for network protocol experimentation and a Swiss Army knife
 - [Contributing](#contributing)
 - [License](#license)
 
-## Quick Start
-
-For quick testing with automatically generated certificates:
-
-```bash
-# ------------------------------------------------------------
-
-# Scenario 1: Simple WebSocket tunnel, no authentication
-# Router configuration: port forwarding on port 8080 pointing to the server
-
-# Terminal 1 - Server
-sudo pig -l :8080 -proto ws -k
-
-# Terminal 2 - Client
-sudo pig -c server:8080 -proto ws -k
-
-# ------------------------------------------------------------
-
-# Scenario 2: Simple WebSocket tunnel, no authentication, using ICE for direct p2p connectivity
-# Router configuration: none
-
-# Terminal 1 - Server
-sudo pig -l :8080 -proto ws -k -ice ssl://broker.hivemq.com:8883
-
-# Terminal 2 - Client
-sudo pig -c server:8080 -proto ws -k -ice ssl://broker.hivemq.com:8883
-
-# ------------------------------------------------------------
-```
-
 ## Features
 
 * Multiple transport protocol support (QUIC, UDP, TLS, WebSocket, ICMP, TLS-in-ICMP)
 * Direct connections over the internet with no router configuration (uses ICE, UDP/TCP hole punching)
+* ICE candidate pair negotiation with authenticated STUN binding checks (RFC 8445)
 * Cross-platform (Linux, macOS, Windows*)
 * Automatic self-signed certificate generation
 * Congestion control with WRED (Weighted Random Early Detection)
@@ -90,6 +67,47 @@ sudo pig -c server:8080 -proto ws -k -ice ssl://broker.hivemq.com:8883
 * MTLS and JWT-based authentication for secure client-server connections
 
 _*Windows support is implemented but not often tested_
+
+## Quick Start
+
+For quick testing with automatically generated certificates:
+
+```bash
+# ------------------------------------------------------------
+
+# Scenario 1: Traditional VPN style. Simple WebSocket tunnel, no authentication
+# Router configuration: port forwarding on port 443 pointing to the server
+
+# Terminal 1 - Server
+sudo pig -l :443 -proto ws -k
+
+# Terminal 2 - Client
+sudo pig -c my.server.net:443 -proto ws -k
+
+# ------------------------------------------------------------
+
+# Scenario 2: Simple WebSocket tunnel, no authentication, using ICE to attempt bypassing NATs and firewalls
+# Router configuration: none
+
+# Terminal 1 - Server
+sudo pig -l :443 -proto ws -k -ice ssl://broker.hivemq.com:8883
+
+# Terminal 2 - Client
+sudo pig -c my.server.net:443 -proto ws -k -ice ssl://broker.hivemq.com:8883
+
+# ------------------------------------------------------------
+
+# Scenario 3: ICE with all supported protocols for better connectivity
+# Router configuration: none
+
+# Terminal 1 - Server (accepts both QUIC and WebSocket candidates)
+sudo pig -l :443 -proto . -k -ice ssl://broker.hivemq.com:8883
+
+# Terminal 2 - Client (tries both QUIC and WebSocket candidates)
+sudo pig -c my.server.net -proto . -k -ice ssl://broker.hivemq.com:8883
+
+# ------------------------------------------------------------
+```
 
 ## Transport Protocols
 
@@ -137,7 +155,9 @@ WRED helps maintain low latency by:
 | Category | Flag | Description | Default |
 |----------|------|-------------|---------|
 | **Config File** | `-config` | Path to configuration file in toml format | |
-| **Networks** | `-proto` | Transport protocol: "quic", "udp", "tls", "ws", "icmp", or "tls-in-icmp" | quic |
+| **Networks** | `-proto` | Transport protocol: "quic", "udp", "tls", "ws", "icmp", or "tls-in-icmp". Multiple protocols can be specified as comma-separated values (e.g., "ws,quic") for ICE mode | quic |
+| | `-l` | Listen address host[:port] | |
+| | `-c` | Connect address host[:port] | |
 | | `-mtu` | MTU size | 1400 |
 | | `-streams` | Number of multiplexed streams for supported protocols | CPU cores available |
 | | `-retry` | Reconnection interval in seconds | 5 |
@@ -160,7 +180,7 @@ WRED helps maintain low latency by:
 | | `-jwk` | Path to public key file used to verify JWT tokens. This can be a local file or a URL. The file can be in PEM or JWKS formats. | |
 | **ICE** | `-ice` | Enable ICE based hole punching, set to true (-ice true) to use the default server or provide a MQTT broker address | ssl://test.mosquitto.org:8883 |
 | | `-ice-key` | Encryption passphrase for ICE signaling messages | |
-| | `-stun-srv` | STUN server address for hole punching | stun.l.google.com:19302 |
+| | `-stun-srv` | STUN my.server.netess for hole punching | stun.l.google.com:19302 |
 | | `-stun-qry` | Source port to query, 'R' for random port | |
 
 ### Configuration File
@@ -194,7 +214,8 @@ The configuration file uses TOML format.
 | `auth.jwt.token` | string | JWT token for client authentication |  |
 | `auth.mtls.trust_pem` | string | Path to trust bundle for mTLS | System CA |
 | `ice.enabled` | bool | Enable automatic hole punching | false |
-| `ice.stun_address` | string | STUN server address for hole punching | stun.l.google.com:19302 |
+| `ice.protos` | array of strings | Protocols to use for ICE candidate generation: ["ws", "quic"] | ["ws"] |
+| `ice.stun_address` | string | STUN my.server.netess for hole punching | stun.l.google.com:19302 |
 | `ice.signaling.encryption_key` | string | Encryption key for signaling messages | no encryption |
 | `ice.signaling.mqtt_broker_address` | string | MQTT broker address for signaling | ssl://test.mosquitto.org:8883 |
 | `ice.signaling.mqtt_client_id` | string | Client ID for MQTT connection | |
@@ -242,7 +263,8 @@ type = "jwt"                   # Authentication type: "jwt"
 
 [ice]
 enabled = true                 # Enable automatic hole punching
-stun_address = "stun.l.google.com:19302"  # STUN server address
+protos = ["ws", "quic"]        # Protocols to use for ICE candidate generation
+stun_address = "stun.l.google.com:19302"  # STUN my.server.netess
 
   [ice.signaling]
   encryption_key = "my-secure-passphrase"         # Encryption key for signaling messages
@@ -313,40 +335,69 @@ sudo pig -c server:8080 -proto tls -cert client.crt -key client.key -a jwt -tok 
 
 ## ICE for direct p2p connectivity across NATs and firewalls
 
-pig includes a simplified ICE implementation that helps establish direct peer-to-peer connections through NATs and firewalls without configuring port forwarding at all.
-This feature can be enabled using the `-ice` flag.
+pig can find the best path through NATs and firewalls without any special router setup. In other words, you don't need to open your applications to the internet.
 
-Supported transports: QUIC, WebSocket.
-Roadmap: UDP and TLS support.
+Supported transports using this method: QUIC, WebSocket.
 
 The mechanism uses:
 - STUN for discovering public endpoints
 - MQTT for secure signaling between peers
 - AES-256-GCM encryption (optional) for signaling messages
 - UDP and TCP hole punching to establish direct connectivity between peers
+- Candidate pair negotiation with STUN binding authentication following RFC 8445
 
 For more details about pig's ICE implementation, see the [ICE Documentation](pkg/ice/README.md).
 
-### Enabling ICE
+### Configuring ICE
 
-ICE can be enabled using the `-ice true` flag, or `-ice <broker_addr>`. If no broker address is provided, pig connects by default to `ssl://test.mosquitto.org:8883`. 
-You can optionally provide an encryption key as a passphrase, which will be used to encrypt messages exchanged during the signaling phase: this is particularly useful when connecting pig to free public MQTT brokers.
+ICE can be enabled using the `-ice true` flag, or `-ice <broker_addr>`. 
+
+In order to function, it needs two things:
+- A MQTT broker address to exchange signaling messages
+- A STUN my.server.netess to discover public endpoints
+
+Fortunately, there are many public MQTT brokers and STUN servers available for free.
+
+The defaults are `ssl://test.mosquitto.org:8883` for the MQTT broker and `stun.nextcloud.com:443` for the STUN server. You have of course the option to use your own MQTT broker and/or STUN server.
+
+Because of the public nature of these services, you can optionally provide a passphrase, that will be used to encrypt all messages exchanged for signaling. 
+
+When using command line flags, you can specify multiple protocols (e.g. `-proto ws,quic`) to try for candidate generation. This increases the chances of successful connectivity. 
 
 ```bash
 # Start a listener with ICE and hole punching enabled using default settings
-sudo pig -l :8080 -proto quic -k -ice
+sudo pig -l . -k -ice true
 
-# Connect to the server with ICE and hole punching using default settings
-sudo pig -c server:8080 -proto quic -k -ice
+# Connect to the server
+sudo pig -c my.server.net -k -ice true
+
+#--------------------------------
 
 # Start a listener with ICE and hole punching enabled with encryption passphrase
-sudo pig -l :8080 -proto quic -k -ice -ice-key my-secure-passphrase
+sudo pig -l . -k -ice true -ice-key my-secure-passphrase
 
-# Connect to the server with ICE and hole punching with encryption passphrase
-sudo pig -c server:8080 -proto quic -ice -ice-key my-secure-passphrase
+# Connect to the server
+sudo pig -c my.server.net -ice true -ice-key my-secure-passphrase
 
-# Configure a custom STUN server and MQTT broker
-sudo pig -c server:8080 -proto quic -ice ssl://my.broker.org:8883 -stun-srv stun.example.com:3478
+#--------------------------------
+
+# More advanced example with custom listen port, protocol, MQTT broker and STUN server
+sudo pig -l :443 -proto quic -ice ssl://my.broker.org:8883 -stun-srv stun.example.com:3478
+
+# Connect to the server, note that the port is not specified in the connect address
+sudo pig -c my.server.net -proto quic -ice ssl://my.broker.org:8883 -stun-srv stun.example.com:3478
+
+#--------------------------------
+
+# Use multiple protocols for better connectivity chances
+sudo pig -l :443 -proto ws,quic -k -ice
+sudo pig -c my.server.net -proto ws,quic -k -ice
+
+#--------------------------------
+
+# Use all supported protocols for candidate generation
+sudo pig -l :443 -proto . -k -ice true
+sudo pig -c my.server.net -proto . -k -ice true
 ```
 
 The same settings can be configured in the TOML configuration file:
@@ -354,12 +405,33 @@ The same settings can be configured in the TOML configuration file:
 ```toml
 [ice]
 enabled = true
+protos = ["ws", "quic"]        # Multiple protocols for candidate generation
 stun_address = "stun.l.google.com:19302"
 
 [ice.signaling]
 encryption_key = "my-secure-passphrase"
 mqtt_broker_address = "ssl://mqtt-broker:8883"
 ```
+
+### Candidate Pair Negotiation
+
+pig's ICE component implements RFC 8445 principles:
+
+1. **Candidate Generation**: Both peers generate host candidates (local addresses) and server reflexive candidates (public addresses via STUN)
+2. **Candidate Exchange**: Candidates are exchanged through MQTT signaling with optional encryption
+3. **Candidate Pair Formation**: The system forms candidate pairs by matching local and remote candidates
+4. **Connectivity Checks**: STUN binding requests are sent to test connectivity between candidate pairs
+5. **Candidate Selection**: The first successful connectivity check results in a nominated candidate pair
+6. **Connection Establishment**: The tunnel is established using the nominated candidate pair
+
+### STUN Connectivity Checks (RFC 8445 Sections 7.2, 7.3)
+
+- **Message Integrity**: All STUN binding requests and responses include MESSAGE-INTEGRITY attributes
+- **Credential Validation**: Each peer validates the other's credentials before accepting binding requests
+- **Error Handling**: Proper STUN error responses (401 Unauthorized) for authentication failures
+- **Fingerprint Verification**: All STUN messages include and verify FINGERPRINT attributes
+
+This ensures that only authorized peers can establish connections, preventing unauthorized access and connection hijacking.
 
 ## Start/Stop Scripts
 
@@ -518,6 +590,7 @@ openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -node
 * **Certificate Errors**: Use `-k` flag for testing, but ensure proper certificates for production
 * **Connection Refused**: Verify firewall rules allow the chosen protocol and port
 * **MTU Issues**: If experiencing packet fragmentation, try adjusting the MTU with `-mtu` flag
+* **Connectivity**: try using multiple protocols with ICE (e.g., `-proto ws,quic`) to increase connectivity chances
 
 ### Debug Logging
 
@@ -528,7 +601,7 @@ pig -l :8080 -v 2 ...  # Increased verbosity for debugging
 
 ### Command Line Examples
 
-The `-proto` flag is used to specify the transport protocol for the tunnel. Valid values are: `quic`, `udp`, `tls`, `ws`, `icmp`, and `tls-in-icmp`.
+The `-proto` flag is used to specify the transport protocol for the tunnel. Valid values are: `quic`, `udp`, `tls`, `ws`, `icmp`, and `tls-in-icmp`. When using ICE, multiple protocols can be specified as comma-separated values.
 
 #### Server mode:
 ```bash
@@ -540,6 +613,9 @@ pig -l :8080 -proto ws
 
 # Start a server using ICMP with WRED settings
 pig -l :8080 -proto icmp -I wlan0 -drop 0.50 -thresh 0.05 -k -v 2
+
+# Start a server with ICE using multiple protocols
+pig -l :8080 -proto ws,quic -k -ice true
 ```
 
 #### Client mode:
@@ -551,15 +627,18 @@ pig -c example.com:8080 -proto quic
 pig -c example.com:8080 -proto ws
 
 # Connect to a server using ICMP with WRED settings
-pig -c 192.168.1.100:8080 -proto icmp -I en0 -drop 0.50 -thresh 0.01 -k -v 2
+pig -c 1.2.3.4 -proto tls-in-icmp -I en0 -k
+
+# Connect to a server with ICE using multiple protocols
+pig -c my.server.net -proto ws,quic -k -ice true
 ```
 
-#### STUN query mode:
+#### STUN query utility:
 ```bash
 # Query default STUN server
 pig stun -p 12345
 
-# Query specific STUN server
+# Query specific STUN server with a random port
 pig stun -srv stun.example.com:3478 -p R
 ```
 

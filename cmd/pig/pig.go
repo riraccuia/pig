@@ -43,6 +43,7 @@ func pig(mo config.Mode) {
 			dialer        func() (transport.Conn, error)
 			authenticator common.Authenticator
 		)
+		logger.Infof("Resolved target: %s:%d", cfg.Target.Address, cfg.Target.Port)
 		// Create authenticator if configured
 		authenticator, err = createClientAuthenticator(logger, cfg)
 		if err != nil {
