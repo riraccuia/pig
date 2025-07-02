@@ -15,20 +15,20 @@ type TLSConn struct {
 	*tls.Conn
 }
 
-type TLSTransport struct {
+type TLSListener struct {
 	listener net.Listener
-}
-
-func (t *TLSConn) IsStreamed() bool {
-	return false
 }
 
 func NewTLSConn(conn *tls.Conn) *TLSConn {
 	return &TLSConn{Conn: conn}
 }
 
-func NewTLSTransport(listener net.Listener) *TLSTransport {
-	return &TLSTransport{listener: listener}
+func NewTLSListener(listener net.Listener) *TLSListener {
+	return &TLSListener{listener: listener}
+}
+
+func (t *TLSConn) IsStreamed() bool {
+	return false
 }
 
 func (t *TLSConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
@@ -41,7 +41,12 @@ func (t *TLSConn) NewStream(ctx context.Context) (transport.Stream, error) {
 	return nil, transport.ErrNotImplemented
 }
 
-func (t *TLSTransport) Accept(ctx context.Context) (transport.Conn, error) {
+// Implement Stream interface methods
+func (t *TLSConn) Flush() {
+	// TLS connections don't need explicit flushing
+}
+
+func (t *TLSListener) Accept() (net.Conn, error) {
 	conn, err := t.listener.Accept()
 	if err != nil {
 		return nil, err
@@ -53,7 +58,7 @@ func (t *TLSTransport) Accept(ctx context.Context) (transport.Conn, error) {
 	return NewTLSConn(tlsConn), nil
 }
 
-func (t *TLSTransport) Close() error {
+func (t *TLSListener) Close() error {
 	return t.listener.Close()
 }
 
@@ -76,11 +81,6 @@ func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS listener: %w", err)
 		}
-		return NewTLSTransport(listener), nil
+		return NewTLSListener(listener), nil
 	}
-}
-
-// Implement Stream interface methods
-func (t *TLSConn) Flush() {
-	// TLS connections don't need explicit flushing
 }

@@ -4,15 +4,17 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"sync/atomic"
 	"time"
 
+	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 	"golang.org/x/net/ipv4"
 )
 
-// connection implements both transport.Conn and net.Conn interfaces
-type connection struct {
+// Conn implements both transport.Conn and net.Conn interfaces
+type Conn struct {
 	emss       uint32
 	wantType   ipv4.ICMPType
 	incoming   chan *rawSockBuffer
@@ -49,8 +51,57 @@ type connection struct {
 	ackBytesCount    uint32
 }
 
+func Dial(ctx context.Context, logger *log.Logger, bindAdapter, targetAddr string) (transport.Conn, error) {
+	var (
+		bindAddr *net.IPAddr
+		iface    *net.Interface
+		err      error
+	)
+	if bindAdapter != "" {
+		bindAddr, iface, err = getAdapterAddr(bindAdapter)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get adapter address: %w", err)
+		}
+	}
+	return dial(ctx, logger, bindAddr, iface.MTU, targetAddr, false)
+}
+
+// dial creates a new client connection to a target address
+func dial(ctx context.Context, logger *log.Logger, bindAddr *net.IPAddr, mtu int, targetAddr string, isServer bool) (transport.Conn, error) {
+	var (
+		sharedListener *sharedListener
+		err            error
+	)
+
+	sharedListener, err = newSharedListener(ctx, logger, bindAddr, mtu, isServer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create shared listener: %w", err)
+	}
+
+	var (
+		conn *Conn
+		key  clientKey
+	)
+	// Create new connection
+	conn = newConnection(
+		ctx,
+		sharedListener,
+		&net.IPAddr{IP: net.ParseIP(targetAddr)},
+		os.Getpid()&0xffff,
+	)
+
+	// Register connection with listener
+	key = clientKey{
+		ip:     conn.remoteAddr.IP.String(),
+		icmpID: conn.icmpID,
+	}
+	sharedListener.clients.Store(key, conn)
+
+	return conn, nil
+}
+
 // newConnection creates a new connection with shared read/write loops
-func newConnection(ctx context.Context, listener *sharedListener, remoteAddr *net.IPAddr, icmpID int) *connection {
+func newConnection(ctx context.Context, listener *sharedListener, remoteAddr *net.IPAddr, icmpID int) *Conn {
 	connCtx, cancel := context.WithCancel(ctx)
 
 	wantType := ipv4.ICMPTypeEchoReply
@@ -58,7 +109,7 @@ func newConnection(ctx context.Context, listener *sharedListener, remoteAddr *ne
 		wantType = ipv4.ICMPTypeEcho
 	}
 
-	c := &connection{
+	c := &Conn{
 		emss:       uint32(listener.mss - eHeaderSize),
 		wantType:   wantType,
 		incoming:   make(chan *rawSockBuffer, 1024),
@@ -88,27 +139,27 @@ func newConnection(ctx context.Context, listener *sharedListener, remoteAddr *ne
 }
 
 // Connection interface implementation
-func (c *connection) IsStreamed() bool {
+func (c *Conn) IsStreamed() bool {
 	return false
 }
 
-func (c *connection) AcceptStream(ctx context.Context) (transport.Stream, error) {
+func (c *Conn) AcceptStream(ctx context.Context) (transport.Stream, error) {
 	return nil, transport.ErrNotImplemented
 }
 
-func (c *connection) NewStream(ctx context.Context) (transport.Stream, error) {
+func (c *Conn) NewStream(ctx context.Context) (transport.Stream, error) {
 	return nil, transport.ErrNotImplemented
 }
 
-func (c *connection) LocalAddr() net.Addr {
+func (c *Conn) LocalAddr() net.Addr {
 	return c.localAddr
 }
 
-func (c *connection) RemoteAddr() net.Addr {
+func (c *Conn) RemoteAddr() net.Addr {
 	return c.remoteAddr
 }
 
-func (c *connection) Close() error {
+func (c *Conn) Close() error {
 	c.sendCloseMessage()
 
 	c.cancel()
@@ -124,7 +175,7 @@ func (c *connection) Close() error {
 	return nil
 }
 
-func (c *connection) Read(b []byte) (n int, err error) {
+func (c *Conn) Read(b []byte) (n int, err error) {
 	select {
 	case <-c.ctx.Done():
 		return 0, fmt.Errorf("connection closed")
@@ -133,7 +184,7 @@ func (c *connection) Read(b []byte) (n int, err error) {
 	}
 }
 
-func (c *connection) Write(b []byte) (n int, err error) {
+func (c *Conn) Write(b []byte) (n int, err error) {
 	select {
 	case <-c.ctx.Done():
 		return 0, fmt.Errorf("connection closed")
@@ -142,20 +193,20 @@ func (c *connection) Write(b []byte) (n int, err error) {
 	}
 }
 
-func (c *connection) SetDeadline(t time.Time) error {
+func (c *Conn) SetDeadline(t time.Time) error {
 	return nil
 }
 
-func (c *connection) SetReadDeadline(t time.Time) error {
+func (c *Conn) SetReadDeadline(t time.Time) error {
 	return nil
 }
 
-func (c *connection) SetWriteDeadline(t time.Time) error {
+func (c *Conn) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
 // readLoop handles incoming data from the connection's incoming channel
-func (c *connection) readLoop() {
+func (c *Conn) readLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -206,7 +257,7 @@ func (c *connection) readLoop() {
 }
 
 // writeLoop handles outgoing data and sends it through the shared listener
-func (c *connection) writeLoop() {
+func (c *Conn) writeLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():

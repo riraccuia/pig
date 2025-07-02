@@ -6,7 +6,7 @@ import (
 )
 
 // initNewReno initializes the congestion control variables
-func (c *connection) initNewReno() {
+func (c *Conn) initNewReno() {
 	// Initialize congestion control (all values in MSS units)
 	c.cwnd.Store(3 * c.emss) // Start with 3 EMSS
 	c.ssthresh = maxUint32Seq
@@ -40,7 +40,7 @@ func max(a, b uint32) uint32 {
 	return b
 }
 
-func (c *connection) updateCongestionWindow(peerAck uint32) {
+func (c *Conn) updateCongestionWindow(peerAck uint32) {
 	if c.retransmit.Load() {
 		return
 	}
@@ -64,7 +64,7 @@ func (c *connection) updateCongestionWindow(peerAck uint32) {
 	// transport.Logger.Infof("Congestion avoidance, cwnd increased by %d to %d", delta, c.getCwnd())
 }
 
-func (c *connection) handleDuplicateAck(ourSeq, peerSeq, peerAck uint32, data []byte) (isDuplicateAck bool) {
+func (c *Conn) handleDuplicateAck(ourSeq, peerSeq, peerAck uint32, data []byte) (isDuplicateAck bool) {
 	isDuplicateAck = len(data) == 0 /*&& (peerSeq == c.peerSeq)*/ && (peerAck == c.peerAck) && (isUint32SeqHigher(ourSeq, peerAck))
 	if !isDuplicateAck {
 		return
@@ -94,7 +94,7 @@ func (c *connection) handleDuplicateAck(ourSeq, peerSeq, peerAck uint32, data []
 	return
 }
 
-func (c *connection) doFastRetransmit(peerAck uint32) {
+func (c *Conn) doFastRetransmit(peerAck uint32) {
 	if !c.retransmit.Load() {
 		return
 	}
@@ -119,7 +119,7 @@ func (c *connection) doFastRetransmit(peerAck uint32) {
 	c.listener.logger.Debugf("Exiting fast retransmit")
 }
 
-func (c *connection) recoverFromLoss(startSeq uint32) {
+func (c *Conn) recoverFromLoss(startSeq uint32) {
 	var (
 		purge       bool
 		prevPeerSeq = c.peerSeq
@@ -153,7 +153,7 @@ func (c *connection) recoverFromLoss(startSeq uint32) {
 	c.recovery = false
 }
 
-func (c *connection) retransmitMissingSegment(peerAck uint32) {
+func (c *Conn) retransmitMissingSegment(peerAck uint32) {
 	packet := c.rq.GetPacket(peerAck)
 	if packet == nil {
 		c.listener.logger.Debugf("No data to retransmit, peerAck: %d", peerAck)

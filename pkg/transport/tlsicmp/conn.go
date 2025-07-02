@@ -3,6 +3,7 @@ package tlsicmp
 import (
 	"context"
 	"crypto/tls"
+	"net"
 
 	"github.com/riraccuia/pig/pkg/transport"
 )
@@ -14,7 +15,7 @@ type conn struct {
 }
 
 // newConn creates a new TLS-over-ICMP connection
-func newConn(icmpConn transport.Conn, tlsConfig *tls.Config, isClient bool) (*conn, error) {
+func newConn(icmpConn net.Conn, tlsConfig *tls.Config, isClient bool) (*conn, error) {
 	c := &conn{}
 
 	// Create TLS connection using our conn as the underlying transport

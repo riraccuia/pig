@@ -18,7 +18,7 @@ type measurement struct {
 }
 
 // GetRTT returns the current RTT estimate
-func (c *connection) GetRTT() time.Duration {
+func (c *Conn) GetRTT() time.Duration {
 	srtt := time.Duration(c.rtt.Load())
 	rttvar := time.Duration(c.rttvar.Load())
 
@@ -34,7 +34,7 @@ func (c *connection) GetRTT() time.Duration {
 }
 
 // updateRTT updates the RTT estimate using exponential moving average
-func (c *connection) UpdateRTT(peerAck uint32) {
+func (c *Conn) UpdateRTT(peerAck uint32) {
 	val := c.rtoSeq.Load()
 	if val == nil {
 		return
@@ -77,7 +77,7 @@ func (c *connection) UpdateRTT(peerAck uint32) {
 
 // BackoffRTO doubles the current RTO value as specified in RFC 6298
 // Returns the new RTO value
-func (c *connection) BackoffRTO() time.Duration {
+func (c *Conn) BackoffRTO() time.Duration {
 	currentRTO := c.GetRTT() // GetRTT actually returns RTO
 
 	// Double the RTO (exponential backoff)
