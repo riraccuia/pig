@@ -8,6 +8,7 @@ require (
 	github.com/eclipse/paho.mqtt.golang v1.5.0
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/lestrrat-go/jwx/v3 v3.0.0
+	github.com/pion/dtls/v3 v3.0.6
 	github.com/quic-go/quic-go v0.49.0
 	github.com/rs/zerolog v1.33.0
 	golang.org/x/net v0.34.0
@@ -28,6 +29,8 @@ require (
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/onsi/ginkgo/v2 v2.9.5 // indirect
+	github.com/pion/logging v0.2.3 // indirect
+	github.com/pion/transport/v3 v3.0.7 // indirect
 	github.com/segmentio/asm v1.2.0 // indirect
 	go.uber.org/mock v0.5.0 // indirect
 	golang.org/x/crypto v0.36.0 // indirect

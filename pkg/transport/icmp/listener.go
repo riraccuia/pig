@@ -50,7 +50,7 @@ func (l *sharedListener) clearMemory(m *rawSockBuffer) {
 }
 
 // newSharedListener creates a new shared ICMP socket listener
-func newSharedListener(ctx context.Context, logger *log.Logger, bindAddr *net.IPAddr, iface *net.Interface, isServer bool) (*sharedListener, error) {
+func newSharedListener(ctx context.Context, logger *log.Logger, bindAddr *net.IPAddr, mtu int, isServer bool) (*sharedListener, error) {
 	conn, err := net.ListenIP("ip4:icmp", bindAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ICMP socket: %w", err)
@@ -73,10 +73,10 @@ func newSharedListener(ctx context.Context, logger *log.Logger, bindAddr *net.IP
 		localAddr:  conn.LocalAddr().(*net.IPAddr),
 		ctx:        listenerCtx,
 		cancel:     cancel,
-		mss:        iface.MTU - ipHeaderSize - icmpHeaderSize,
+		mss:        mtu - ipHeaderSize - icmpHeaderSize,
 		connChan:   make(chan transport.Conn, 1024),
 		packetChan: make(chan *icmpPacket, 1024),
-		bufPool:    sync.Pool{New: func() any { return &rawSockBuffer{b: make([]byte, iface.MTU)} }},
+		bufPool:    sync.Pool{New: func() any { return &rawSockBuffer{b: make([]byte, mtu)} }},
 		logger:     logger,
 	}
 
@@ -90,10 +90,8 @@ func newSharedListener(ctx context.Context, logger *log.Logger, bindAddr *net.IP
 }
 
 // Accept implements the Listener interface
-func (l *sharedListener) Accept(ctx context.Context) (transport.Conn, error) {
+func (l *sharedListener) Accept() (net.Conn, error) {
 	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
 	case <-l.ctx.Done():
 		return nil, fmt.Errorf("listener closed")
 	case conn := <-l.connChan:
@@ -105,7 +103,7 @@ func (l *sharedListener) Accept(ctx context.Context) (transport.Conn, error) {
 func (l *sharedListener) Close() error {
 	l.cancel()
 	l.clients.Range(func(key, value interface{}) bool {
-		conn := value.(*connection)
+		conn := value.(*Conn)
 		conn.Close()
 		l.clients.Delete(key)
 		return true
@@ -216,7 +214,7 @@ func (l *sharedListener) dispatchPackets() {
 				icmpID: int(icmpID),
 			}
 
-			var conn *connection
+			var conn *Conn
 			conn = l.getClientConn(packet.dst, key, icmpCode)
 
 			if conn == nil {
@@ -237,10 +235,10 @@ func (l *sharedListener) dispatchPackets() {
 	}
 }
 
-func (l *sharedListener) getClientConn(ip net.IP, key clientKey, echoCode uint8) *connection {
+func (l *sharedListener) getClientConn(ip net.IP, key clientKey, echoCode uint8) *Conn {
 	_conn, exists := l.clients.Load(key)
 	if exists {
-		return _conn.(*connection)
+		return _conn.(*Conn)
 	}
 
 	if echoCode == 255 {

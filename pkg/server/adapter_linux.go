@@ -56,6 +56,49 @@ func (s *Server) readFromTunQueue(q io.Reader) {
 			continue
 		}
 
+		_client, ok := s.clients.Load(pkt.DestinationIP().String())
+		if !ok {
+			freeBuf := true
+			s.clients.Range(func(key, value any) bool {
+				client := value.(*ClientTunnel)
+				pkt.Mark(packet.DSCP_MARK_MASQ_SNAT)
+				select {
+				case client.outbound.C <- buffer:
+					freeBuf = false
+				default:
+				}
+				return true
+			})
+			if freeBuf {
+				s.bufferPool.Put(buffer)
+			}
+			continue
+		}
+		client := _client.(*ClientTunnel)
+
+		select {
+		case client.outbound.C <- buffer:
+		default:
+			s.bufferPool.Put(buffer)
+		}
+	}
+}
+
+func (s *Server) _readFromTunQueue(q io.Reader) {
+	for {
+		buffer := s.bufferPool.Get().(packet.IPv4Packet)
+		n, err := q.Read(buffer)
+		if err != nil {
+			s.bufferPool.Put(buffer)
+			return
+		}
+
+		pkt := buffer[:n]
+		if pkt.Version() != 4 {
+			s.bufferPool.Put(buffer)
+			continue
+		}
+
 		select {
 		case s.outbound <- buffer:
 		default:
@@ -72,14 +115,9 @@ func (s *Server) processInboundQueue(ctx context.Context, q io.Writer, pq common
 		case pkt := <-pq:
 			totalLen := pkt.TotalLength()
 			if totalLen > 0 && totalLen <= len(pkt[:totalLen]) {
-				_, err := q.Write(pkt[:totalLen])
-				s.bufferPool.Put(pkt)
-				if err != nil {
-					continue
-				}
-			} else {
-				s.bufferPool.Put(pkt)
+				q.Write(pkt[:totalLen])
 			}
+			s.bufferPool.Put(pkt)
 		}
 	}
 }

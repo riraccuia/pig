@@ -2,6 +2,7 @@ package config
 
 import (
 	"github.com/BurntSushi/toml"
+	"github.com/riraccuia/pig/pkg/transport"
 )
 
 type Mode string
@@ -29,6 +30,7 @@ const (
 	TransportWS      TransportType = "ws"
 	TransportICMP    TransportType = "icmp"
 	TransportTLSICMP TransportType = "tls-in-icmp"
+	TransportDTLS    TransportType = "dtls"
 )
 
 var supportedTransports = map[TransportType]bool{
@@ -38,6 +40,7 @@ var supportedTransports = map[TransportType]bool{
 	TransportWS:      true,
 	TransportICMP:    true,
 	TransportTLSICMP: true,
+	TransportDTLS:    true,
 }
 
 type AuthType string
@@ -105,8 +108,26 @@ type LogConfig struct {
 
 type ICEConfig struct {
 	Enabled     bool              `toml:"enabled"`      // Enable ICE based hole punching
+	Protos      []string          `toml:"protos"`       // Protocols to use for ICE
 	STUNAddress string            `toml:"stun_address"` // STUN server address
 	Signaling   *ICESignalingOpts `toml:"signaling"`    // Signaling options
+}
+
+func (c *ICEConfig) UseProtos() (protos []transport.ICEProtocolDefinition) {
+	/*if len(c.Protos) == 0 {
+		return []transport.ICEProtocolDefinition{transport.ICEProtocolWS, transport.ICEProtocolQUIC}
+	}*/
+	for _, proto := range c.Protos {
+		switch proto {
+		case "ws":
+			protos = append(protos, transport.ICEProtocolWS)
+		case "quic":
+			protos = append(protos, transport.ICEProtocolQUIC)
+		case "dtls":
+			protos = append(protos, transport.ICEProtocolDTLS)
+		}
+	}
+	return
 }
 
 type ICESignalingOpts struct {

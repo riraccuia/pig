@@ -490,6 +490,7 @@ func getOrGenerateKey(keyPath string) (interface{}, interface{}, error) {
 			case *rsa.PrivateKey:
 				return key, &k.PublicKey, nil
 			case ed25519.PrivateKey:
+				fmt.Println("Loaded ed25519 public key")
 				return key, k.Public(), nil
 			default:
 				return nil, nil, fmt.Errorf("unsupported key type: %T", key)

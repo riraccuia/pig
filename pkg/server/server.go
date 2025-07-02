@@ -84,7 +84,7 @@ func (s *Server) Start(ctx context.Context, listenFunc func() (transport.Listene
 
 	go s.acceptClients(ctx)
 	go s.processInbound(ctx)
-	go s.processOutbound(ctx)
+	// go s.processOutbound(ctx)
 	go s.readFromAdapter()
 
 	return nil

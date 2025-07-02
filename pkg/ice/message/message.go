@@ -91,13 +91,13 @@ type ICECredentials struct {
 }
 
 // GenerateICEOffer creates an ICE offer message with host and STUN-derived candidates
-func GenerateICEOffer(candidates []ICECandidate, encryptionKey []byte) (*ICEMessage, error) {
+func GenerateICEOffer(candidates []ICECandidate) (*ICEMessage, error) {
 	// Create the message
 	message := &ICEMessage{
 		Type:        ICEMessageTypeOffer,
 		Timestamp:   time.Now().Unix(),
 		Candidates:  candidates,
-		Credentials: generateCredentials(encryptionKey),
+		Credentials: generateCredentials(),
 	}
 
 	message.GenerateSessionID()
@@ -106,12 +106,12 @@ func GenerateICEOffer(candidates []ICECandidate, encryptionKey []byte) (*ICEMess
 }
 
 // GenerateICEAnswer creates an ICE answer message with host and STUN-derived candidates
-func GenerateICEAnswer(candidates []ICECandidate, encryptionKey []byte) (*ICEMessage, error) {
+func GenerateICEAnswer(candidates []ICECandidate) (*ICEMessage, error) {
 	message := &ICEMessage{
 		Type:        ICEMessageTypeAnswer,
 		Timestamp:   time.Now().Unix(),
 		Candidates:  candidates,
-		Credentials: generateCredentials(encryptionKey),
+		Credentials: generateCredentials(),
 	}
 
 	return message, nil
@@ -231,7 +231,7 @@ func CalculateSrflxPriority() uint32 {
 }
 
 // generateCredentials creates ICE credentials from the encryption key
-func generateCredentials(encryptionKey []byte) ICECredentials {
+func generateCredentials() ICECredentials {
 	// Create a random username
 	username := RandStringFromRunes(12, az09Runes)
 	// Create a random password

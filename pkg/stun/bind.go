@@ -1,57 +1,151 @@
 package stun
 
 import (
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
 )
 
-// BindRequest represents a STUN binding request
-type BindRequest struct {
-	Logger common.Logger
-	Ice    *IceAttributes
-	Auth   *StunAuthConfig
+var ErrParseStunMessage = errors.New("failed to parse STUN message")
+
+type IceBindingAgent struct {
+	Conn         net.Conn
+	Logger       common.Logger
+	Ice          *IceAttributes
+	Auth         *StunAuthConfig
+	UseCandidate *bool
+	started      atomic.Bool
+	requests     *sync.Map
 }
 
-// NewBindRequest creates a new STUN binding request handler
-func NewBindRequest(logger common.Logger) *BindRequest {
-	return &BindRequest{
-		Logger: logger,
-		Ice:    &IceAttributes{},
-		Auth:   &StunAuthConfig{},
+func NewIceBindingAgent(logger common.Logger, conn net.Conn) *IceBindingAgent {
+	return &IceBindingAgent{
+		Conn:     conn,
+		Logger:   logger,
+		requests: &sync.Map{},
 	}
 }
 
-// ReceiveMessage reads a STUN request from the connection
-func (b *BindRequest) ReceiveMessage(co net.Conn) (message []byte, err error) {
-	co.SetReadDeadline(time.Now().Add(stunTimeout))
-	defer co.SetReadDeadline(time.Time{})
+type IceBindingResult struct {
+	TransactionID [12]byte
+	IP            net.IP
+	Port          int
+	Error         error
+}
 
-	message = make([]byte, 1024)
-	var n int
-	n, err = co.Read(message)
+func (b *IceBindingAgent) IsControlling() bool {
+	return b.Ice != nil && b.Ice.IceControlling != 0
+}
+
+func (b *IceBindingAgent) IsNominated() bool {
+	return b.UseCandidate != nil && *b.UseCandidate
+}
+
+func (b *IceBindingAgent) Receive() {
+	go b.receive()
+}
+
+func (b *IceBindingAgent) receive() {
+	if !b.started.CompareAndSwap(false, true) {
+		return
+	}
+	defer b.started.Store(false)
+	for {
+		message, err := ReceiveMessage(b.Conn)
+		if err != nil && err != ErrParseStunMessage {
+			//b.Logger.Errorf("Failed to receive message: %v", err)
+			return
+		}
+		if err == ErrParseStunMessage {
+			continue
+		}
+		// if message is a binding request, handle it
+		if message.Header.Type == stunBindingRequest {
+			b.HandleBindingRequest(message)
+			continue
+		}
+		if message.Header.Type == stunBindingResponse {
+			_, ok := b.requests.Load(message.Header.TransactionID)
+			if !ok {
+				//b.Logger.Errorf("no request found for transaction ID: %x", message.Header.TransactionID)
+				continue
+			}
+			b.HandleBindingResponse(message.Header.TransactionID, message)
+		}
+	}
+}
+
+func (b *IceBindingAgent) StopReceive() {
+	if !b.started.Load() {
+		return
+	}
+	// get the receive routine to stop now without closeing the connection
+	b.Conn.SetReadDeadline(time.Now())
+	defer b.Conn.SetReadDeadline(time.Time{})
+	// wait for the receive routine to stop
+	for b.started.Load() {
+		time.Sleep(time.Millisecond * 100)
+	}
+}
+
+func ReceiveMessage(conn net.Conn) (message *StunMessage, err error) {
+	var (
+		rawMessage = make([]byte, 1024)
+		n          int
+	)
+	if _, ok := conn.(*net.UDPConn); ok {
+		n, err = conn.Read(rawMessage)
+		if err != nil {
+			return nil, err
+		}
+		message, err = ParseStunMessage(rawMessage[:n])
+		if err != nil {
+			return nil, ErrParseStunMessage
+		}
+		return message, nil
+	}
+	n, err = conn.Read(rawMessage[:20])
 	if err != nil {
 		return nil, err
 	}
-	message = message[:n]
-	return
+	if n < 20 {
+		return nil, fmt.Errorf("STUN message too short: %d bytes", n)
+	}
+	//rawMessage = rawMessage[:n]
+	msgLen := binary.BigEndian.Uint16(rawMessage[2:4])
+	if msgLen > 1024 {
+		return nil, fmt.Errorf("STUN message too long: %d bytes", msgLen)
+	}
+	n, err = conn.Read(rawMessage[20 : 20+msgLen])
+	if err != nil {
+		return nil, err
+	}
+	message, err = ParseStunMessage(rawMessage[:20+n])
+	if err != nil {
+		//b.Logger.Errorf("Failed to parse STUN message from %s: %v", conn.RemoteAddr(), err)
+		return nil, ErrParseStunMessage
+	}
+	return message, nil
 }
 
 // SetAuthConfig sets the authentication configuration for the bind request
-func (b *BindRequest) SetAuthConfig(username, peerUsername, password, realm, nonce string) {
+func (b *IceBindingAgent) SetAuthConfig(username, peerUsername, password, peerPassword string) {
 	b.Auth = &StunAuthConfig{
-		SendUsername: peerUsername + ":" + username, // peer_frag:local_frag
-		Username:     username,                      // local_frag
+		Username:     username, // local_frag
 		Password:     password,
-		Realm:        realm,
-		Nonce:        nonce,
+		PeerUsername: peerUsername, // peer_frag
+		PeerPassword: peerPassword,
 	}
 }
 
 // SendBindingRequest sends a STUN binding request and returns the mapped address
-func (b *BindRequest) SendBindingRequest(co net.Conn) (mappedIP net.IP, mappedPort int, err error) {
+func (b *IceBindingAgent) SendBindingRequest(waitForResponse bool) (result *IceBindingResult, err error) {
 	var (
 		attributes  []byte
 		stunRequest *StunMessage
@@ -59,8 +153,8 @@ func (b *BindRequest) SendBindingRequest(co net.Conn) (mappedIP net.IP, mappedPo
 
 	// Add authentication attributes if present
 	if b.Auth != nil {
-		b.Logger.Debugf("Sending auth attributes: username=%s, send_username=%s, realm=%s, nonce=%s",
-			b.Auth.Username, b.Auth.SendUsername, b.Auth.Realm, b.Auth.Nonce)
+		//b.Logger.Debugf("Sending auth attributes: username=%s, peer_username=%s, realm=%s, nonce=%s",
+		//	b.Auth.Username, b.Auth.PeerUsername, b.Auth.Realm, b.Auth.Nonce)
 
 		authAttrs := CreateAuthAttributes(b.Auth)
 		if len(authAttrs) > 0 {
@@ -79,111 +173,140 @@ func (b *BindRequest) SendBindingRequest(co net.Conn) (mappedIP net.IP, mappedPo
 	// Create initial message without MESSAGE-INTEGRITY
 	stunRequest, err = CreateStunMessage(stunBindingRequest, attributes)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create STUN request: %w", err)
+		return nil, fmt.Errorf("failed to create STUN request: %w", err)
 	}
 
 	// Add MESSAGE-INTEGRITY attribute if authentication is configured
-	if b.Auth != nil && b.Auth.Password != "" {
-		stunRequest, err = AddMessageIntegrity(stunRequest, b.Auth.Password)
+	if b.Auth != nil && b.Auth.PeerPassword != "" {
+		stunRequest, err = AddMessageIntegrity(stunRequest, b.Auth.PeerPassword)
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to add message integrity: %w", err)
+			return nil, fmt.Errorf("failed to add message integrity: %w", err)
 		}
 	}
 
+	err = AddFingerprint(stunRequest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to add fingerprint: %w", err)
+	}
+
 	// Send request
-	if _, err = co.Write(stunRequest.Raw); err != nil {
-		return nil, 0, fmt.Errorf("failed to send request: %w", err)
+	if _, err = b.Conn.Write(stunRequest.Raw); err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+
+	if !waitForResponse || b.started.Load() {
+		b.requests.Store(stunRequest.Header.TransactionID, nil)
+		return
 	}
 
 	// Read response
 	var (
 		stunResponse *StunMessage
-		breakLoop    bool
+		stop         bool
 	)
 
-	for {
-		message, err := b.ReceiveMessage(co)
+	for !stop {
+		b.Conn.SetReadDeadline(time.Now().Add(stunTimeout))
+		stunResponse, err = ReceiveMessage(b.Conn)
+		b.Conn.SetReadDeadline(time.Time{})
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to read message: %w", err)
-		}
-		stunResponse, err = ParseStunMessage(message)
-		if err != nil {
-			return nil, 0, fmt.Errorf("failed to parse STUN message: %w", err)
+			return nil, fmt.Errorf("failed to read message: %w", err)
 		}
 		switch stunResponse.Header.Type {
 		case stunBindingErrorResponse:
 			code, reason := ParseStunError(stunResponse.Attributes)
-			return nil, 0, fmt.Errorf("STUN error %d: %s", code, reason)
+			err = fmt.Errorf("STUN error %d: %s", code, reason)
+			result = &IceBindingResult{
+				TransactionID: stunRequest.Header.TransactionID,
+				Error:         err,
+			}
+			return
 		case stunBindingRequest:
 			if stunResponse.Header.TransactionID != stunRequest.Header.TransactionID {
 				// RFC 8445 Section 7.2.2
 				// If the server receives a Binding Request, it MUST respond with a Binding Response
-				b.HandleBindingRequest(co, message)
+				b.HandleBindingRequest(stunResponse)
 				continue
 			}
 		case stunBindingResponse:
-			breakLoop = true
+			stop = true
 		default:
-			return nil, 0, fmt.Errorf("unexpected STUN message type: 0x%x", stunResponse.Header.Type)
-		}
-		if breakLoop {
-			break
+			return nil, fmt.Errorf("unexpected STUN message type: 0x%x", stunResponse.Header.Type)
 		}
 	}
 
-	// Validate response
-	if err = ValidateStunMessage(stunResponse, stunBindingResponse, stunRequest.Header.TransactionID); err != nil {
-		return nil, 0, fmt.Errorf("invalid STUN response: %w", err)
-	}
+	return b.HandleBindingResponse(stunRequest.Header.TransactionID, stunResponse)
+}
 
+func (b *IceBindingAgent) HandleBindingResponse(transactionID [12]byte, response *StunMessage) (*IceBindingResult, error) {
 	var (
-		ip   net.IP
-		port int
+		err    error
+		ip     net.IP
+		port   int
+		result = &IceBindingResult{
+			TransactionID: transactionID,
+		}
 	)
+	// Validate response
+	if err = ValidateStunMessage(response, stunBindingResponse, transactionID); err != nil {
+		return nil, fmt.Errorf("invalid STUN response: %w", err)
+	}
+
+	if !VerifyFingerprint(response) {
+		return nil, fmt.Errorf("invalid STUN response: fingerprint verification failed")
+	}
 
 	// Parse XOR-MAPPED-ADDRESS
-	ip, port, err = ExtractMappedAddress(stunResponse.Attributes)
+	ip, port, err = ExtractMappedAddress(response.Attributes)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to extract mapped address: %w", err)
+		return nil, fmt.Errorf("failed to extract mapped address: %w", err)
 	}
 
 	if ip == nil {
-		return nil, 0, fmt.Errorf("no XOR-MAPPED-ADDRESS in response")
+		return nil, fmt.Errorf("no XOR-MAPPED-ADDRESS in response")
 	}
 
-	return ip, port, nil
+	result.IP = ip
+	result.Port = port
+	return result, nil
 }
 
 // HandleBindingRequest handles an incoming STUN binding request and sends a response
-func (b *BindRequest) HandleBindingRequest(co net.Conn, requestBytes []byte) error {
-	// Parse request
-	request, err := ParseStunMessage(requestBytes)
-	if err != nil {
-		return fmt.Errorf("failed to parse STUN request: %w", err)
-	}
-
+func (b *IceBindingAgent) HandleBindingRequest(request *StunMessage) error {
 	// Validate request type
 	if request.Header.Type != stunBindingRequest {
 		return fmt.Errorf("unexpected STUN message type: 0x%x", request.Header.Type)
 	}
 
+	if !VerifyFingerprint(request) {
+		return fmt.Errorf("invalid STUN request: fingerprint verification failed")
+	}
+
 	// Parse and validate authentication
-	requestAuth, err := b.validateAuthentication(co, request)
+	requestAuth, err := b.validateAuthentication(request)
 	if err != nil {
 		return err
 	}
 
+	var requestAttrs *IceAttributes
 	// Parse ICE attributes if present
 	if len(request.Attributes) > 0 {
-		iceAttrs, err := ParseIceAttributes(request.Attributes)
+		requestAttrs, err = ParseIceAttributes(request.Attributes)
 		if err != nil {
 			return fmt.Errorf("failed to parse ICE attributes: %w", err)
 		}
-		b.Ice = iceAttrs
+	}
+
+	var useCandidate bool
+	if requestAttrs != nil && requestAttrs.UseCandidate {
+		useCandidate = true
+		defer func() {
+			b.UseCandidate = &useCandidate
+		}()
 	}
 
 	// Create response attributes
-	responseAttrs, err := CreateResponseAttributes(co.RemoteAddr(), requestAuth, b.Ice)
+	responseAttrs, err := CreateResponseAttributes(b.Conn.RemoteAddr(), requestAuth)
 	if err != nil {
 		return fmt.Errorf("failed to create response attributes: %w", err)
 	}
@@ -198,15 +321,20 @@ func (b *BindRequest) HandleBindingRequest(co net.Conn, requestBytes []byte) err
 	CopyTransactionID(response, request)
 
 	// Calculate and add message integrity if authentication is required
-	if b.Auth != nil && b.Auth.Password != "" {
-		response, err = AddMessageIntegrity(response, b.Auth.Password)
+	if b.Auth != nil && b.Auth.PeerPassword != "" {
+		response, err = AddMessageIntegrity(response, b.Auth.PeerPassword)
 		if err != nil {
 			return fmt.Errorf("failed to add message integrity: %w", err)
 		}
 	}
 
+	err = AddFingerprint(response)
+	if err != nil {
+		return fmt.Errorf("failed to add fingerprint: %w", err)
+	}
+
 	// Send response
-	if _, err := co.Write(response.Raw); err != nil {
+	if _, err := b.Conn.Write(response.Raw); err != nil {
 		return fmt.Errorf("failed to send STUN response: %w", err)
 	}
 
@@ -214,7 +342,7 @@ func (b *BindRequest) HandleBindingRequest(co net.Conn, requestBytes []byte) err
 }
 
 // validateAuthentication parses and validates authentication attributes from the request
-func (b *BindRequest) validateAuthentication(co net.Conn, request *StunMessage) (*StunAuthConfig, error) {
+func (b *IceBindingAgent) validateAuthentication(request *StunMessage) (*StunAuthConfig, error) {
 	// Parse authentication attributes if present
 	var authAttrs *StunAuthConfig
 	if len(request.Attributes) == 0 {
@@ -227,35 +355,28 @@ func (b *BindRequest) validateAuthentication(co net.Conn, request *StunMessage) 
 		return nil, fmt.Errorf("failed to parse authentication attributes: %w", err)
 	}
 
-	b.Logger.Debugf("Request auth attributes: username=%q, send_username=%q, realm=%q, nonce=%q",
-		authAttrs.Username, authAttrs.SendUsername, authAttrs.Realm, authAttrs.Nonce)
-	b.Logger.Debugf("Server config: username=%q, send_username=%q, realm=%q, nonce=%q",
-		b.Auth.Username, b.Auth.SendUsername, b.Auth.Realm, b.Auth.Nonce)
+	//b.Logger.Debugf("Request auth attributes: username=%q, peer_username=%q, realm=%q, nonce=%q",
+	//	authAttrs.Username, authAttrs.PeerUsername, authAttrs.Realm, authAttrs.Nonce)
+	//b.Logger.Debugf("Server config: username=%q, peer_username=%q, realm=%q, nonce=%q",
+	//	b.Auth.Username, b.Auth.PeerUsername, b.Auth.Realm, b.Auth.Nonce)
 
 	// Validate authentication if required
 	if b.Auth == nil || b.Auth.Password == "" {
 		return nil, nil
 	}
 
-	// Check if all required authentication attributes are present
-	if authAttrs.Username == "" || authAttrs.Realm == "" || authAttrs.Nonce == "" {
-		b.Logger.Debugf("Missing required auth attributes")
-		SendErrorResponse(co, request.Header.TransactionID, 401, "Unauthorized", b.Auth)
-		return nil, fmt.Errorf("missing required auth attributes")
-	}
-
 	// For ICE, username is formed as "peer_frag:local_frag"
 	// See RFC 8445 Section 7.2.2
 	if authAttrs.Username == "" {
 		b.Logger.Debugf("Invalid ICE username format: %q (expected format: peer_frag:local_frag)", authAttrs.Username)
-		SendErrorResponse(co, request.Header.TransactionID, 401, "Unauthorized", b.Auth)
+		SendErrorResponse(b.Conn, request.Header.TransactionID, 401, "Unauthorized", b.Auth)
 		return nil, fmt.Errorf("invalid ICE username format")
 	}
 
 	// Verify username matches
 	if authAttrs.Username != b.Auth.Username {
 		b.Logger.Debugf("Username mismatch: expected=%q, got=%q", b.Auth.Username, authAttrs.Username)
-		SendErrorResponse(co, request.Header.TransactionID, 401, "Unauthorized", b.Auth)
+		SendErrorResponse(b.Conn, request.Header.TransactionID, 401, "Unauthorized", b.Auth)
 		return nil, fmt.Errorf("username mismatch")
 	}
 
@@ -263,7 +384,7 @@ func (b *BindRequest) validateAuthentication(co net.Conn, request *StunMessage) 
 	valid, err := VerifyMessageIntegrity(request, b.Auth.Password)
 	if err != nil || !valid {
 		b.Logger.Debugf("Message integrity verification failed: %v", err)
-		SendErrorResponse(co, request.Header.TransactionID, 401, "Unauthorized", b.Auth)
+		SendErrorResponse(b.Conn, request.Header.TransactionID, 401, "Unauthorized", b.Auth)
 		return nil, fmt.Errorf("message integrity verification failed")
 	}
 

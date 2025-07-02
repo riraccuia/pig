@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/transport"
 )
 
 func (s *Server) acceptClients(ctx context.Context) {
@@ -15,9 +16,18 @@ func (s *Server) acceptClients(ctx context.Context) {
 		case <-s.done:
 			return
 		default:
-			conn, err := s.listener.Accept(ctx)
+			_co, err := s.listener.Accept()
 			if err != nil {
 				return
+			}
+			var (
+				conn transport.Conn
+				ok   bool
+			)
+			if conn, ok = _co.(transport.Conn); !ok {
+				s.logger.Errorf("accepted connection is not a transport.Conn: %v", _co)
+				_co.Close()
+				continue
 			}
 			if err := s.performAuthentication(ctx, conn); err != nil {
 				conn.Close()
@@ -37,6 +47,7 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 	unprocessed := buffer[:0]
 
 	for {
+		// inbound := s.getInboundPktQueue()
 		// Read more data
 		n, err := connOrStream.Read(buffer[len(unprocessed):])
 		if err != nil {
@@ -71,9 +82,16 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 			// Get new packet from pool and copy data
 			newPkt := s.bufferPool.Get().(packet.IPv4Packet)
 			copy(newPkt[:totalLen], unprocessed[processed:processed+totalLen])
-			if newPkt.IsMarked() {
+
+			switch newPkt.GetMark() {
+			case packet.DSCP_MARK_MASQ_SNAT:
 				newPkt.SetSourceIP(client.sourceIP)
+			case packet.DSCP_MARK_MASQ_DNAT:
+				newPkt.SetDestinationIP(client.sourceIP)
+			case packet.DSCP_MARK_ADAPTER_DNAT:
+				newPkt.SetDestinationIP(s.adapter.IP())
 			}
+			newPkt.ClearMark()
 			newPkt.UpdateChecksum()
 
 			select {

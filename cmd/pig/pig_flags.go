@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"reflect"
 	"regexp"
@@ -19,12 +20,12 @@ var (
 	flagConfig      = [2]string{"config", "Path to configuration file"}
 	flagVerbose     = [2]string{"v", "Print more verbose output"}
 	flagLogFile     = [2]string{"log-file", "Enables logging to a file. Optionally specify the path to the log file, otherwise './pig.log' is used"}
-	flagConnect     = [2]string{"c", "Connect address (host:port)"}
-	flagListen      = [2]string{"l", "Listen address (host:port)"}
+	flagConnect     = [2]string{"c", "Connect address host[:port]"}
+	flagListen      = [2]string{"l", "Listen address host[:port]"}
 	flagInterface   = [2]string{"I", "The adapter/interface to bind to, useful for icmp based protos"}
-	flagProto       = [2]string{"proto", "Transport protocol for the tunnel, valid values are: quic, udp, tls, ws, icmp, tls-in-icmp"}
+	flagProto       = [2]string{"proto", "Transport protocol for the tunnel, valid values are: quic, udp, tls, ws, icmp, tls-in-icmp, dtls"}
 	flagPort        = [2]string{"p", "Source port to use for the connection"}
-	flagTunnel      = [2]string{"tunnel", "Tunnel address, defaults to 172.31.254.1/32 for clients and 172.31.255.1/24 for servers"}
+	flagTunnel      = [2]string{"tunnel", "Tunnel address, defaults to 172.31.254.1/29 for clients and 172.31.255.1/24 for servers"}
 	flagCert        = [2]string{"cert", "Path to certificate file"}
 	flagKey         = [2]string{"key", "Path to private key file"}
 	flagInsecure    = [2]string{"k", "Insecure: disable certificate verification"}
@@ -155,7 +156,7 @@ func defineFlags(flagSet *flag.FlagSet) *pigFlags {
 	flagSet.StringVar(&flags.remoteAddr, flagConnect[0], "", flagConnect[1])
 	flagSet.StringVar(&flags.serverAddr, flagListen[0], "", flagListen[1])
 	flagSet.StringVar(&flags.bindAdapter, flagInterface[0], "", flagInterface[1])
-	flagSet.StringVar(&flags.proto, flagProto[0], "quic", flagProto[1])
+	flagSet.StringVar(&flags.proto, flagProto[0], "ws", flagProto[1])
 	flagSet.IntVar(&flags.srcPort, flagPort[0], 0, flagPort[1])
 	flagSet.StringVar(&flags.tunnelAddress, flagTunnel[0], "", flagTunnel[1])
 	flagSet.StringVar(&flags.certFile, flagCert[0], "", flagCert[1])
@@ -228,7 +229,7 @@ func applyCommandLineFlags(cfg *config.Config, flags *pigFlags, mode config.Mode
 	setConfigField(&cfg.TunnelAddress, flags.tunnelAddress)
 
 	if cfg.TunnelAddress == "" {
-		cfg.TunnelAddress = "172.31.254.1/32"
+		cfg.TunnelAddress = "172.31.254.1/29"
 		if cfg.Mode == "server" {
 			cfg.TunnelAddress = "172.31.255.1/24"
 		}
@@ -362,6 +363,9 @@ func applyICESettings(cfg *config.Config, flags *pigFlags, logger common.Logger)
 	}
 
 	if !flags.iceEnabled {
+		cfg.ICE = &config.ICEConfig{
+			Enabled: false,
+		}
 		return
 	}
 
@@ -377,28 +381,41 @@ func applyICESettings(cfg *config.Config, flags *pigFlags, logger common.Logger)
 }
 
 func configureTarget(cfg *config.Config, addr string, addrType string, logger common.Logger) {
-	if cfg.Proto == config.TransportICMP || cfg.Proto == config.TransportTLSICMP {
-		// strip the port if present
-		parts := strings.Split(addr, ":")
-		if len(parts) > 1 {
-			addr = parts[0]
-		}
-		cfg.Target.Address = addr
+	if addr == "." {
+		cfg.Target.Address = "0.0.0.0"
+		cfg.Target.Port = 0
 		return
 	}
-	parts := strings.Split(addr, ":")
-	if len(parts) != 2 {
-		logger.Fatalf("Invalid %s address format. Expected host:port", addrType)
+	address, strPort, err := net.SplitHostPort(addr)
+	if err != nil && strings.Contains(err.Error(), "missing port") {
+		address = addr
+		err = nil
 	}
-	address := parts[0]
+	if err != nil {
+		logger.Fatalf("Failed to parse %s address: %v", addrType, err)
+	}
 	if address == "" {
 		address = "0.0.0.0"
 	}
-	cfg.Target.Address = address
-	port, err := strconv.Atoi(parts[1])
+	if strPort == "" {
+		strPort = "0"
+	}
+	port, err := strconv.Atoi(strPort)
 	if err != nil {
 		logger.Fatalf("Failed to parse %s address port: %v", addrType, err)
 	}
+	// if the address is a domain name, resolve it to an IP address
+	if net.ParseIP(address) == nil {
+		ips, err := net.LookupIP(address)
+		if err != nil {
+			logger.Fatalf("Failed to resolve %s address: %v", addrType, err)
+		}
+		if len(ips) == 0 {
+			logger.Fatalf("No IP addresses found for %s address: %s", addrType, address)
+		}
+		address = ips[0].String()
+	}
+	cfg.Target.Address = address
 	cfg.Target.Port = port
 }
 
@@ -407,9 +424,24 @@ func validateConfig(cfg *config.Config, logger common.Logger) {
 		logger.Fatalf("Invalid pig mode: %s", cfg.Mode)
 	}
 
-	if cfg.Proto == "" {
-		logger.Info("Transport not specified, defaulting to quic")
-		cfg.Proto = config.TransportQUIC
+	if cfg.Target.Address == "" {
+		logger.Fatalf("Target address not specified")
+	}
+
+	if cfg.ICE.Enabled {
+		if len(cfg.ICE.Protos) == 0 {
+			flagProtos := strings.Split(string(cfg.Proto), ",")
+			cfg.ICE.Protos = flagProtos
+		}
+		if cfg.Proto == "." {
+			cfg.ICE.Protos = []string{"ws", "quic", "dtls"}
+		}
+		for _, proto := range cfg.ICE.Protos {
+			if !config.TransportType(proto).IsValid() {
+				logger.Fatalf("Invalid ICE protocol: %s", proto)
+			}
+		}
+		return
 	}
 
 	if !cfg.Proto.IsValid() {
@@ -422,14 +454,7 @@ func validateConfig(cfg *config.Config, logger common.Logger) {
 		}
 	}
 
-	if cfg.Target.Address == "" {
-		if cfg.Mode == "server" && (cfg.Proto == config.TransportICMP || cfg.Proto == config.TransportTLSICMP) {
-			return
-		}
-		logger.Fatalf("Target address not specified")
-	}
-
-	if cfg.Target.Port == 0 && cfg.Proto != config.TransportWS {
+	if cfg.Target.Port == 0 {
 		if cfg.Proto == config.TransportICMP || cfg.Proto == config.TransportTLSICMP {
 			return
 		}

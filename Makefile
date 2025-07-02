@@ -38,6 +38,9 @@ pig-linux:
 pig-linux-arm:
 	GOOS=linux GOARCH=arm $(MAKE) pig
 
+pig-linux-arm64:
+	GOOS=linux GOARCH=arm64 $(MAKE) pig
+
 pig-linux-arm6:
 	GOOS=linux GOARCH=arm GOARM=6 $(MAKE) pig
 

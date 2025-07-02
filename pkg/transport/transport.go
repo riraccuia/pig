@@ -16,7 +16,7 @@ type Stream interface {
 }
 
 type Listener interface {
-	Accept(ctx context.Context) (Conn, error)
+	Accept() (net.Conn, error)
 	Close() error
 }
 

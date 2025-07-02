@@ -19,6 +19,7 @@ type QuicConn struct {
 }
 
 type QuicTransport struct {
+	ctx      context.Context
 	endpoint *quic.Endpoint
 }
 
@@ -30,8 +31,8 @@ func NewQuicConn(conn *quic.Conn) *QuicConn {
 	return &QuicConn{conn: conn}
 }
 
-func NewQuicTransport(endpoint *quic.Endpoint) *QuicTransport {
-	return &QuicTransport{endpoint: endpoint}
+func NewQuicTransport(ctx context.Context, endpoint *quic.Endpoint) *QuicTransport {
+	return &QuicTransport{ctx: ctx, endpoint: endpoint}
 }
 
 func (c *QuicConn) Read(b []byte) (n int, err error) {
@@ -82,8 +83,8 @@ func (c *QuicConn) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
-func (t *QuicTransport) Accept(ctx context.Context) (transport.Conn, error) {
-	conn, err := t.endpoint.Accept(ctx)
+func (t *QuicTransport) Accept() (net.Conn, error) {
+	conn, err := t.endpoint.Accept(t.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +136,6 @@ func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config
 		if err != nil {
 			return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
 		}
-		return NewQuicTransport(endpoint), nil
+		return NewQuicTransport(ctx, endpoint), nil
 	}
 }

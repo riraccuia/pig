@@ -366,7 +366,7 @@ func getServerQUICListenFunc(ctx context.Context, config *config.Config) func() 
 		if err != nil {
 			return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
 		}
-		return qt.NewQuicTransport(endpoint), nil
+		return qt.NewQuicTransport(ctx, endpoint), nil
 	}
 }
 

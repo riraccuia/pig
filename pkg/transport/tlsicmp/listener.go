@@ -1,8 +1,8 @@
 package tlsicmp
 
 import (
-	"context"
 	"crypto/tls"
+	"net"
 
 	"github.com/riraccuia/pig/pkg/transport"
 )
@@ -22,9 +22,9 @@ func newListener(icmpListener transport.Listener, tlsConfig *tls.Config) *listen
 }
 
 // Accept implements transport.Listener
-func (l *listener) Accept(ctx context.Context) (transport.Conn, error) {
+func (l *listener) Accept() (net.Conn, error) {
 	// Accept underlying ICMP connection
-	icmpConn, err := l.icmpListener.Accept(ctx)
+	icmpConn, err := l.icmpListener.Accept()
 	if err != nil {
 		return nil, err
 	}

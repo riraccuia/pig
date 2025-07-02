@@ -59,7 +59,7 @@ func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.C
 				}
 			}
 
-			sharedListener, err = newSharedListener(ctx, logger, bindAddr, iface, false)
+			sharedListener, err = newSharedListener(ctx, logger, bindAddr, iface.MTU, false)
 			if err != nil {
 				initErr = fmt.Errorf("failed to create shared listener: %w", err)
 				return
@@ -111,7 +111,7 @@ func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config
 			return nil, fmt.Errorf("failed to initialize system: %w", err)
 		}
 
-		sharedListener, err := newSharedListener(ctx, logger, bindAddr, iface, true)
+		sharedListener, err := newSharedListener(ctx, logger, bindAddr, iface.MTU, true)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create shared listener: %w", err)
 		}
@@ -121,7 +121,7 @@ func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config
 }
 
 // processICMPPacket handles the processing of a raw ICMP packet
-func (c *connection) processICMPPacket(dataBuf *rawSockBuffer) error {
+func (c *Conn) processICMPPacket(dataBuf *rawSockBuffer) error {
 	payload := dataBuf.b[dataBuf.po:dataBuf.len]
 
 	// read icmp type
@@ -260,7 +260,7 @@ func getSeqAck(payload []byte) (uint32, uint32) {
 	return seq, ack
 }
 
-func (c *connection) serializeDuplicateAck(seq, ack uint32) error {
+func (c *Conn) serializeDuplicateAck(seq, ack uint32) error {
 	data := make([]byte, 8)
 	binary.BigEndian.PutUint32(data[0:4], seq)
 	binary.BigEndian.PutUint32(data[4:8], ack)
@@ -271,7 +271,7 @@ func (c *connection) serializeDuplicateAck(seq, ack uint32) error {
 	return nil
 }
 
-func (c *connection) serializeAck(ack uint32) error {
+func (c *Conn) serializeAck(ack uint32) error {
 	lastSentAck := c.sentAck.Load()
 	if lastSentAck == ack || isUint32SeqHigher(lastSentAck, ack) {
 		return nil
@@ -292,7 +292,7 @@ func (c *connection) serializeAck(ack uint32) error {
 	return nil
 }
 
-func (c *connection) serializeRetransmitData(seq, ack uint32, data []byte) error {
+func (c *Conn) serializeRetransmitData(seq, ack uint32, data []byte) error {
 	// binary.BigEndian.PutUint32(data[0:4], seq)
 	binary.BigEndian.PutUint32(data[4:8], ack)
 
@@ -305,7 +305,7 @@ func (c *connection) serializeRetransmitData(seq, ack uint32, data []byte) error
 // serializeData serializes the application data and sends it.
 // It also updates the sequence number and adds the data to the retransmit queue.
 // This is the only function that should be used to send application data.
-func (c *connection) serializeData() error {
+func (c *Conn) serializeData() error {
 	rawBuf := c.listener.bufPool.Get().(*rawSockBuffer)
 	rawBuf.po = 0
 	rawBuf.len = icmpHeaderSize
@@ -351,7 +351,7 @@ func (c *connection) serializeData() error {
 }
 
 // sendEchoMessage sends an ICMP echo request with the given data
-func (c *connection) sendEchoMessage(data []byte) error {
+func (c *Conn) sendEchoMessage(data []byte) error {
 	seq := c.nextIcmpSeq.Load()
 	c.nextIcmpSeq.Add(1)
 
@@ -375,7 +375,7 @@ func (c *connection) sendEchoMessage(data []byte) error {
 	return c.listener.writePacket(c.remoteAddr.IP.To4(), msg)
 }
 
-func (c *connection) sendCloseMessage() error {
+func (c *Conn) sendCloseMessage() error {
 	c.listener.logger.Infof("Sending close message to %s", c.remoteAddr.IP.To4())
 
 	seq := c.nextIcmpSeq.Load()
