@@ -59,15 +59,20 @@ func (b *IceBindingAgent) receive() {
 	for {
 		message, err := ReceiveMessage(b.Conn)
 		if err != nil && err != ErrParseStunMessage {
-			//b.Logger.Errorf("Failed to receive message: %v", err)
+			b.Logger.Tracef("ICE-BIND: failed to receive message: %v", err)
 			return
 		}
 		if err == ErrParseStunMessage {
+			//b.Logger.Errorf("Failed to parse STUN message: %v", err)
 			continue
 		}
 		// if message is a binding request, handle it
 		if message.Header.Type == stunBindingRequest {
-			b.HandleBindingRequest(message)
+			//b.Logger.Debugf("Received binding request (2), transaction ID: %x", message.Header.TransactionID)
+			err = b.HandleBindingRequest(message)
+			if err != nil {
+				b.Logger.Tracef("ICE-BIND: failed to handle binding request: %v", err)
+			}
 			continue
 		}
 		if message.Header.Type == stunBindingResponse {
@@ -76,6 +81,7 @@ func (b *IceBindingAgent) receive() {
 				//b.Logger.Errorf("no request found for transaction ID: %x", message.Header.TransactionID)
 				continue
 			}
+			//b.Logger.Debugf("Received binding response (2), transaction ID: %x", message.Header.TransactionID)
 			b.HandleBindingResponse(message.Header.TransactionID, message)
 		}
 	}
@@ -235,6 +241,8 @@ func (b *IceBindingAgent) SendBindingRequest(waitForResponse bool) (result *IceB
 		}
 	}
 
+	// b.Logger.Debugf("Received binding response, transaction ID: %x", stunRequest.Header.TransactionID)
+
 	return b.HandleBindingResponse(stunRequest.Header.TransactionID, stunResponse)
 }
 
@@ -297,14 +305,6 @@ func (b *IceBindingAgent) HandleBindingRequest(request *StunMessage) error {
 		}
 	}
 
-	var useCandidate bool
-	if requestAttrs != nil && requestAttrs.UseCandidate {
-		useCandidate = true
-		defer func() {
-			b.UseCandidate = &useCandidate
-		}()
-	}
-
 	// Create response attributes
 	responseAttrs, err := CreateResponseAttributes(b.Conn.RemoteAddr(), requestAuth)
 	if err != nil {
@@ -333,11 +333,17 @@ func (b *IceBindingAgent) HandleBindingRequest(request *StunMessage) error {
 		return fmt.Errorf("failed to add fingerprint: %w", err)
 	}
 
+	//b.Logger.Debugf("Sending binding response, transaction ID: %x", response.Header.TransactionID)
+
 	// Send response
 	if _, err := b.Conn.Write(response.Raw); err != nil {
 		return fmt.Errorf("failed to send STUN response: %w", err)
 	}
 
+	if requestAttrs != nil && requestAttrs.UseCandidate {
+		useCandidate := true
+		b.UseCandidate = &useCandidate
+	}
 	return nil
 }
 
@@ -368,14 +374,14 @@ func (b *IceBindingAgent) validateAuthentication(request *StunMessage) (*StunAut
 	// For ICE, username is formed as "peer_frag:local_frag"
 	// See RFC 8445 Section 7.2.2
 	if authAttrs.Username == "" {
-		b.Logger.Debugf("Invalid ICE username format: %q (expected format: peer_frag:local_frag)", authAttrs.Username)
+		b.Logger.Errorf("ICE-BIND: invalid ICE username format: %q (expected format: peer_frag:local_frag)", authAttrs.Username)
 		SendErrorResponse(b.Conn, request.Header.TransactionID, 401, "Unauthorized", b.Auth)
 		return nil, fmt.Errorf("invalid ICE username format")
 	}
 
 	// Verify username matches
 	if authAttrs.Username != b.Auth.Username {
-		b.Logger.Debugf("Username mismatch: expected=%q, got=%q", b.Auth.Username, authAttrs.Username)
+		b.Logger.Errorf("ICE-BIND: username mismatch: expected=%q, got=%q", b.Auth.Username, authAttrs.Username)
 		SendErrorResponse(b.Conn, request.Header.TransactionID, 401, "Unauthorized", b.Auth)
 		return nil, fmt.Errorf("username mismatch")
 	}
@@ -383,7 +389,7 @@ func (b *IceBindingAgent) validateAuthentication(request *StunMessage) (*StunAut
 	// Verify message integrity
 	valid, err := VerifyMessageIntegrity(request, b.Auth.Password)
 	if err != nil || !valid {
-		b.Logger.Debugf("Message integrity verification failed: %v", err)
+		b.Logger.Errorf("ICE-BIND: message integrity verification failed: %v", err)
 		SendErrorResponse(b.Conn, request.Header.TransactionID, 401, "Unauthorized", b.Auth)
 		return nil, fmt.Errorf("message integrity verification failed")
 	}

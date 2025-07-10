@@ -87,14 +87,16 @@ Automatic NAT traversal using ICE with WebSocket protocol:
 
 ```bash
 # Terminal 1 - Server (no router configuration needed)
-sudo pig -l :443 -proto ws -k -ice ssl://broker.hivemq.com:8883
+# Bind to inbound port 443 to maximize the chances of a successful connection
+sudo pig -l :443 -proto ws -k -ice true
 
 # Terminal 2 - Client
-sudo pig -c my.server.net:443 -proto ws -k -ice ssl://broker.hivemq.com:8883
+# Note that we are not specifying a port, as ICE will discover it automatically
+sudo pig -c my.server.net -proto ws -k -ice true
 ```
 
 ### Scenario 3: Multi-Protocol ICE
-Maximum connectivity using all supported protocols:
+Maximum connectivity using all supported protocols, and custom MQTT broker:
 
 ```bash
 # Terminal 1 - Server (accepts multiple protocol candidates)
@@ -123,6 +125,7 @@ sudo pig -c my.server.net -proto . -k -ice ssl://broker.hivemq.com:8883
 
 ### TLS
 * Direct TLS connection using `crypto/tls`
+* Can be used for ICE candidate generation
 
 ### ICMP
 * Full-featured implementation with packet loss recovery
@@ -135,6 +138,7 @@ sudo pig -c my.server.net -proto . -k -ice ssl://broker.hivemq.com:8883
 * Provides additional layer of obfuscation
 * Currently recommended for Linux servers only due to OS-level ICMP handling on other platforms
 * Requires OS configuration to prevent interference with ICMP handling (except on Linux)
+* Can be used for ICE candidate generation but with caveats
 
 ### UDP
 * Basic UDP implementation
@@ -155,7 +159,7 @@ pig implements WRED (Weighted Random Early Detection) to combat network bufferbl
 | Category | Flag | Description | Default |
 |----------|------|-------------|---------|
 | **Config File** | `-config` | Path to configuration file in toml format | |
-| **Networks** | `-proto` | Transport protocol, one of "quic", "udp", "tls", "ws", "icmp", "tls-in-icmp", "dtls". Multiple values comma-separated (e.g., "ws,quic") can be used in ICE mode | quic |
+| **Networks** | `-proto` | Transport protocol, one of "quic", "udp", "tls", "ws", "icmp", "tls-in-icmp", "dtls". Multiple values comma-separated (e.g., "ws,quic") can be used in ICE mode | ws |
 | | `-l` | Listen address host[:port] | |
 | | `-c` | Connect address host[:port] | |
 | | `-mtu` | MTU size | 1400 |
@@ -190,7 +194,7 @@ The configuration file uses TOML format and provides a more structured approach 
 | Setting | Type | Description | Default |
 |---------|------|-------------|---------|
 | `mode` | string | Operating mode: "client" or "server" | Required |
-| `proto` | string | Transport protocol: "quic", "udp", "tls", "ws", "icmp", or "tls-in-icmp" | quic |
+| `proto` | string | Transport protocol: "quic", "udp", "tls", "ws", "icmp", or "tls-in-icmp" | ws |
 | `tunnel_address` | string | CIDR format for the tunnel interface (e.g., "10.0.0.1/24") | 172.31.254.1/32 (client), 172.31.255.1/24 (server) |
 | `queue_size` | int | Size of packet queues | 256 |
 | `mtu` | int | Maximum Transmission Unit for the tunnel | 1400 |
@@ -263,7 +267,7 @@ type = "jwt"                   # Authentication type: "jwt"
 
 [ice]
 enabled = true                 # Enable automatic hole punching
-protos = ["ws", "quic", "dtls"]        # Protocols to use for ICE candidate generation
+protos = ["ws", "quic", "dtls","tls"]        # Protocols to use for ICE candidate generation
 stun_address = "stun.l.google.com:19302"  # STUN server address
 
   [ice.signaling]
@@ -354,7 +358,7 @@ To function properly, ICE requires:
 - A MQTT broker address for exchanging signaling messages
 - A STUN server address for discovering public endpoints
 
-Fortunately, many public MQTT brokers and STUN servers are available for free. The defaults are `ssl://test.mosquitto.org:8883` for the MQTT broker and `stun.nextcloud.com:443` for the STUN server, but you can use your own services.
+Fortunately, many public MQTT brokers and STUN servers are available for free. The defaults are `ssl://broker.hivemq.com:8883` for the MQTT broker and `stun.nextcloud.com:443` for the STUN server, but you can use your own services.
 
 Due to the public nature of these services, you can optionally provide a passphrase to encrypt all signaling messages.
 
@@ -373,11 +377,11 @@ sudo pig -c my.server.net -ice true -ice-key my-secure-passphrase
 sudo pig -l :443 -proto quic -ice ssl://my.broker.org:8883 -stun-srv stun.example.com:3478
 sudo pig -c my.server.net -proto quic -ice ssl://my.broker.org:8883 -stun-srv stun.example.com:3478
 
-# Multi-protocol ICE for maximum connectivity
+# Multi-protocol ICE for candidate generation
 sudo pig -l :443 -proto ws,quic -k -ice
 sudo pig -c my.server.net -proto ws,quic -k -ice
 
-# All supported protocols for candidate generation
+# All supported protocols for maximum connectivity
 sudo pig -l :443 -proto . -k -ice true
 sudo pig -c my.server.net -proto . -k -ice true
 ```
@@ -401,10 +405,14 @@ The following protocols are currently supported for ICE candidate generation:
 - QUIC
 - WebSocket
 - DTLS
+- TLS
+- TLS-in-ICMP (not recommended, as it currently expects the server to be reachable via ICMP)
 
-Therefore legal values are: `quic`, `ws`, `dtls`.
+Therefore legal values are: `quic`, `ws`, `dtls`, `tls`, `tls-in-icmp`. 
+The special value `.` can also be used to select all supported protocols (note that `tls-in-icmp` will not be used in this case).
 
-These can be specified in the `-proto` flag or in the `ice.protos` block in the configuration file.
+These can be specified in the `-proto` flag, `proto` configuration field as comma-separated values. 
+The `ice.protos` block of the configuration file is used to override other settings.
 
 ### Candidate Pair Negotiation
 
@@ -466,16 +474,22 @@ The following environment variables are available to scripts:
 
 #### Route All Traffic Through Tunnel (Linux)
 
-This example start script configures the system to route all traffic through the tunnel:
+This example client start script configures the system to route all traffic through the tunnel:
 
 ```bash
 #!/bin/bash
-# start.sh - Route all traffic through the tunnel
+# start.sh - Route all traffic through the tunnel (client/linux)
 
 # Log script execution
 echo "Configuring routes for tunnel $PIG_TUN_NAME (index: $PIG_TUN_INDEX)"
 echo "Remote address: $PIG_REMOTE_ADDR, Protocol: $PIG_TUNNEL_PROTO"
 
+# Get the default gateway
+DEF_GW=$(ip route get $PIG_REMOTE_ADDR | grep "via" | tr -s " " | cut -d " " -f 3)
+
+ip route add ${PIG_REMOTE_ADDR}/32 via $DEF_GW
+
+# Add routes for 0.0.0.0/1 and 128.0.0.0/1 via the tunnel
 # Add routes for 0.0.0.0/1 and 128.0.0.0/1 (covering all IPs) via the tunnel
 ip route add 0.0.0.0/1 dev $PIG_TUN_NAME
 ip route add 128.0.0.0/1 dev $PIG_TUN_NAME
@@ -594,9 +608,7 @@ Enable verbose logging with `-v` flag:
 pig -l :8080 -v 2 ...  # Increased verbosity for debugging
 ```
 
-### Command Line Examples
-
-The `-proto` flag is used to specify the transport protocol for the tunnel. Valid values are: `quic`, `udp`, `tls`, `ws`, `icmp`, and `tls-in-icmp`. When using ICE, multiple protocols can be specified as comma-separated values.
+### More command line examples
 
 #### Server mode:
 ```bash
@@ -607,10 +619,11 @@ pig -l :8080 -proto quic
 pig -l :8080 -proto ws
 
 # Start a server using ICMP with WRED settings
-pig -l :8080 -proto icmp -I wlan0 -drop 0.50 -thresh 0.05 -k -v 2
+pig -l :0 -proto icmp -I wlan0 -drop 0.50 -thresh 0.05 -k -v 2
 
-# Start a server with ICE using multiple protocols
-pig -l :8080 -proto ws,quic -k -ice true
+# Start a server with ICE using multiple protocols, 
+# and let pig use random ports for each incoming connection
+pig -l . -proto ws,quic -k -ice true
 ```
 
 #### Client mode:
@@ -621,8 +634,8 @@ pig -c example.com:8080 -proto quic
 # Connect to a server using websocket
 pig -c example.com:8080 -proto ws
 
-# Connect to a server using ICMP with WRED settings
-pig -c 1.2.3.4 -proto tls-in-icmp -I en0 -k
+# Connect to a server using ICMP 
+pig -c 192.168.1.1 -proto tls-in-icmp -I en0 -k
 
 # Connect to a server with ICE using multiple protocols
 pig -c my.server.net -proto ws,quic -k -ice true

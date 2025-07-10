@@ -187,7 +187,20 @@ func ValidateStunMessage(msg *StunMessage, expectedType uint16, expectedTxID [12
 
 // CreateXorMappedAddress creates an XOR-MAPPED-ADDRESS attribute
 func CreateXorMappedAddress(addr net.Addr) ([]byte, error) {
-	host, portStr, err := net.SplitHostPort(addr.String())
+	var (
+		host    string
+		portStr string
+		err     error
+	)
+
+	switch a := addr.(type) {
+	case *net.IPAddr:
+		host = a.IP.String()
+		portStr = "0"
+	default:
+		host, portStr, err = net.SplitHostPort(addr.String())
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse address: %w", err)
 	}

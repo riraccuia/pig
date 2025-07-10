@@ -1,18 +1,22 @@
 package icmp
 
 import (
+	"fmt"
 	"sync"
+	"time"
 )
 
 // buffer provides a thread-safe fixed-size circular buffer
 type buffer struct {
-	mu       sync.Mutex
-	rcond    *sync.Cond
-	wcond    *sync.Cond
-	data     []byte
-	size     int
-	readPos  uint64
-	writePos uint64
+	mu            sync.Mutex
+	rcond         *sync.Cond
+	wcond         *sync.Cond
+	data          []byte
+	size          int
+	readPos       uint64
+	writePos      uint64
+	readDeadline  time.Time
+	writeDeadline time.Time
 }
 
 // newBuffer creates a new buffer with the specified size
@@ -29,6 +33,42 @@ func newBuffer(size int) *buffer {
 	return b
 }
 
+// calculateUsed returns the number of bytes currently used in the buffer
+func (b *buffer) calculateUsed() int {
+	// Check if buffer is empty first
+	if b.writePos == b.readPos {
+		return 0
+	}
+
+	// Handle the simple case first to avoid modulo when possible
+	if b.writePos > b.readPos {
+		diff := b.writePos - b.readPos
+		if diff <= uint64(b.size) {
+			return int(diff)
+		}
+		// If diff > size, buffer is full
+		return b.size
+	}
+
+	// Wraparound case: writePos < readPos due to uint64 overflow
+	// Calculate how much data spans the wraparound
+	readIdx := int(b.readPos % uint64(b.size))
+	writeIdx := int(b.writePos % uint64(b.size))
+
+	// In wraparound case, buffer contains data from readIdx to end + start to writeIdx
+	used := writeIdx + (b.size - readIdx)
+	// Ensure result doesn't exceed buffer size
+	if used > b.size {
+		return b.size
+	}
+	return used
+}
+
+// calculateAvailable returns the number of bytes available for writing
+func (b *buffer) calculateAvailable() int {
+	return b.size - b.calculateUsed()
+}
+
 // Write copies data into the buffer
 func (b *buffer) Write(data []byte) (n int, err error) {
 	if len(data) == 0 {
@@ -37,12 +77,17 @@ func (b *buffer) Write(data []byte) (n int, err error) {
 
 	b.mu.Lock()
 
-	// Calculate available space
-	used := int(b.writePos - b.readPos)
+	// Calculate available space with correct wraparound handling
+	used := b.calculateUsed()
 	available := b.size - used
+	/*if used >= b.size || available < len(data) {
+		b.mu.Unlock()
+		// dropping silently
+		return len(data), nil
+	}*/
 	for used >= b.size || available < len(data) {
 		b.wcond.Wait()
-		used = int(b.writePos - b.readPos)
+		used = b.calculateUsed()
 		available = b.size - used
 	}
 
@@ -73,7 +118,7 @@ func (b *buffer) Write(data []byte) (n int, err error) {
 	}
 
 	b.mu.Unlock()
-	return writeLen, err
+	return writeLen, nil
 }
 
 // Read copies data from the buffer
@@ -84,14 +129,22 @@ func (b *buffer) Read(p []byte) (n int, err error) {
 
 	b.mu.Lock()
 
+	if isDeadlineExceeded(b.readDeadline) {
+		b.mu.Unlock()
+		return 0, fmt.Errorf("read deadline exceeded")
+	}
+
 	// Wait for data
 	for b.writePos == b.readPos {
+		if isDeadlineExceeded(b.readDeadline) {
+			b.mu.Unlock()
+			return 0, fmt.Errorf("read deadline exceeded")
+		}
 		b.rcond.Wait()
 	}
 
-	// Calculate available data
-	available := int(b.writePos - b.readPos)
-
+	// Calculate available data with correct wraparound handling
+	available := b.calculateUsed()
 	if available > len(p) {
 		available = len(p)
 	}
@@ -106,7 +159,10 @@ func (b *buffer) Read(p []byte) (n int, err error) {
 	} else {
 		// Wraparound case - split the copy
 		copy(p[:remaining], b.data[idx:])
-		copy(p[remaining:], b.data[0:available-remaining])
+		wrapLen := available - remaining
+		if wrapLen > 0 {
+			copy(p[remaining:remaining+wrapLen], b.data[0:wrapLen])
+		}
 	}
 
 	b.readPos += uint64(available)
@@ -129,7 +185,42 @@ func (b *buffer) Reset() {
 // Len returns the number of bytes currently in the buffer
 func (b *buffer) Len() int {
 	b.mu.Lock()
-	n := int(b.writePos - b.readPos)
+	n := b.calculateUsed()
 	b.mu.Unlock()
 	return n
+}
+
+func (b *buffer) SetReadDeadline(t time.Time) error {
+	b.mu.Lock()
+	b.readDeadline = t
+	b.mu.Unlock()
+	if t.Equal(time.Time{}) {
+		return nil
+	}
+	now := time.Now()
+	if now.Equal(t) || now.After(t) {
+		b.rcond.Signal()
+		return nil
+	}
+	time.AfterFunc(time.Until(t), func() {
+		b.rcond.Signal()
+	})
+	return nil
+}
+
+func (b *buffer) SetWriteDeadline(t time.Time) error {
+	/*b.mu.Lock()
+	b.writeDeadline = t
+	b.wcond.Signal()
+	b.mu.Unlock()
+	return nil*/
+	return nil
+}
+
+func isDeadlineExceeded(deadline time.Time) bool {
+	//if deadline.IsZero() {
+	if deadline.Equal(time.Time{}) {
+		return false
+	}
+	return time.Now().After(deadline)
 }

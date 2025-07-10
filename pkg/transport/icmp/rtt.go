@@ -10,6 +10,7 @@ const (
 	beta   = float64(0.25)
 	K      = 1
 	minRTO = time.Millisecond * 300
+	maxRTO = time.Second
 )
 
 type measurement struct {
@@ -28,6 +29,10 @@ func (c *Conn) GetRTT() time.Duration {
 	// Enforce minimum RTO
 	if rto < minRTO {
 		rto = minRTO
+	}
+
+	if rto > maxRTO {
+		rto = maxRTO
 	}
 
 	return rto

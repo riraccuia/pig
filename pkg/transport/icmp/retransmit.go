@@ -1,68 +1,73 @@
 package icmp
 
 import (
-	"encoding/binary"
 	"sync"
 )
 
-type packetEntry struct {
-	seq  uint32
-	data *rawSockBuffer
-}
-
+// RetransmitQueue is a queue of packets that need to be retransmitted
+// It is used to store packets that have been sent but not yet acknowledged
+// and retransmit them when necessary.
+// It can also be used to temporarily store packets that have been received
+// out of order, to recover from losses after the lost data has been retransmitted.
 type RetransmitQueue struct {
 	sync.Mutex
-	packets     []packetEntry
-	clearMemory func(m *rawSockBuffer)
+	packets     []*Packet
+	clearMemory func(m []byte)
 }
 
-func NewRetransmitQueue(clearMemory func(m *rawSockBuffer)) *RetransmitQueue {
+func NewRetransmitQueue(clearMemory func(m []byte)) *RetransmitQueue {
 	if clearMemory == nil {
-		clearMemory = func(m *rawSockBuffer) {}
+		clearMemory = func(m []byte) {}
 	}
 	return &RetransmitQueue{
-		packets:     make([]packetEntry, 0),
+		packets:     make([]*Packet, 0),
 		clearMemory: clearMemory,
 	}
 }
 
-func (q *RetransmitQueue) Put(data *rawSockBuffer) {
-	if data.len-(data.po+8) <= 8 {
-		q.clearMemory(data)
+// Put simply appends a packet to the queue, unless that packet
+// has a smaller sequence number than the last packet in the queue.
+// This is the best method to use for retransmit queues.
+func (q *RetransmitQueue) Put(packet *Packet) {
+	if len(packet.Data) == 0 {
+		q.clearMemory(packet.buffer)
 		return // Ignore packets that are too small
 	}
 
 	q.Lock()
 
-	seq := binary.BigEndian.Uint32(data.b[data.po+8 : data.po+8+4])
-
-	// transport.Logger.Infof("Put() packet with seq %d, packets in queue: %d", seq, len(q.packets))
-
-	if len(q.packets) > 0 && q.packets[len(q.packets)-1].seq >= seq {
-		q.clearMemory(data)
+	if len(q.packets) == 0 {
+		q.packets = append(q.packets, packet)
 		q.Unlock()
 		return
 	}
 
-	q.packets = append(q.packets, packetEntry{
-		seq:  seq,
-		data: data,
-	})
+	lastPacket := q.packets[len(q.packets)-1]
+
+	if lastPacket.PacketSeq >= packet.PacketSeq {
+		q.clearMemory(packet.buffer)
+		q.Unlock()
+		return
+	}
+
+	q.packets = append(q.packets, packet)
 	q.Unlock()
 }
 
-func (q *RetransmitQueue) GetPacket(seq uint32) []byte {
+func (q *RetransmitQueue) GetPacket(seq uint32) *Packet {
 	q.Lock()
 	for _, entry := range q.packets {
-		if entry.seq == seq {
+		if entry.PacketSeq == seq {
+			pkt := entry
 			q.Unlock()
-			return entry.data.b[entry.data.po+8 : entry.data.len]
+			return pkt
 		}
 	}
 	q.Unlock()
 	return nil
 }
 
+// DeleteUntil deletes all packets up until the given sequence number.
 func (q *RetransmitQueue) DeleteUntil(seq uint32) uint32 {
 	q.Lock()
 	if len(q.packets) == 0 {
@@ -77,15 +82,18 @@ func (q *RetransmitQueue) DeleteUntil(seq uint32) uint32 {
 
 	// Find target sequence and calculate deleted bytes
 	for i, entry := range q.packets {
-		if entry.seq == seq {
+		if entry.PacketSeq == seq {
 			foundIdx = i
 			break
 		}
-		if entry.seq > seq {
-			foundIdx = i - 1
+		if entry.PacketSeq > seq {
+			//if i-1 >= 0 {
+			//fmt.Printf("DeleteUntil: seq: %d, prev_entry.seq: %d, prev_entry.len: %d, next.seq: %d, foundEntry: %s\n", seq, q.packets[i-1].PacketSeq, len(q.packets[i-1].Data), q.packets[i-1].PacketSeq+uint32(len(q.packets[i-1].Data)), q.packets[i].PigPacket())
+			//}
+			foundIdx = i //- 1
 			break
 		}
-		deletedBytes += uint32(entry.data.len - entry.data.po - eHeaderSize)
+		deletedBytes += uint32(len(entry.Data))
 	}
 
 	if foundIdx == -1 {
@@ -98,7 +106,7 @@ func (q *RetransmitQueue) DeleteUntil(seq uint32) uint32 {
 
 	// Clear memory from the start of packets up until the found index
 	for i := 0; i < foundIdx; i++ {
-		q.clearMemory(q.packets[i].data)
+		q.clearMemory(q.packets[i].buffer)
 	}
 
 	// Update packets slice
@@ -116,7 +124,7 @@ func (q *RetransmitQueue) Len() uint32 {
 	q.Lock()
 	var totalLen uint32
 	for _, entry := range q.packets {
-		totalLen += uint32(entry.data.len - entry.data.po - eHeaderSize)
+		totalLen += uint32(len(entry.Data))
 	}
 	q.Unlock()
 	return totalLen
@@ -124,6 +132,9 @@ func (q *RetransmitQueue) Len() uint32 {
 
 func (q *RetransmitQueue) Clear() {
 	q.Lock()
+	for _, entry := range q.packets {
+		q.clearMemory(entry.buffer)
+	}
 	q.packets = q.packets[:0]
 	q.Unlock()
 }
@@ -133,7 +144,7 @@ func (q *RetransmitQueue) Clear() {
 // The function is called with: current packet sequence number, next packet sequence number
 // (or 0 if there is no next packet), and the current packet data.
 // If the callback returns false, iteration stops.
-func (q *RetransmitQueue) RangeFrom(seq uint32, fn func(seq uint32, nextSeq uint32, data []byte) bool) {
+func (q *RetransmitQueue) RangeFrom(seq uint32, fn func(packet *Packet, nextSeq uint32) bool) {
 	q.Lock()
 	if len(q.packets) == 0 {
 		q.Unlock()
@@ -146,12 +157,12 @@ func (q *RetransmitQueue) RangeFrom(seq uint32, fn func(seq uint32, nextSeq uint
 	)
 	// Find starting position
 	for i, entry := range q.packets {
-		if entry.seq == seq {
+		if entry.PacketSeq == seq {
 			startIdx = i
 			found = true
 			break
 		}
-		if entry.seq > seq {
+		if entry.PacketSeq > seq {
 			break
 		}
 	}
@@ -168,10 +179,10 @@ func (q *RetransmitQueue) RangeFrom(seq uint32, fn func(seq uint32, nextSeq uint
 		// Get next sequence number (0 if this is the last packet)
 		nextSeq := uint32(0)
 		if i+1 < len(q.packets) {
-			nextSeq = q.packets[i+1].seq
+			nextSeq = q.packets[i+1].PacketSeq
 		}
 
-		if !fn(entry.seq, nextSeq, entry.data.b[entry.data.po+8:entry.data.len]) {
+		if !fn(entry, nextSeq) {
 			break
 		}
 	}

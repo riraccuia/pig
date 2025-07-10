@@ -30,7 +30,7 @@ func (l *listener) Accept() (net.Conn, error) {
 	}
 
 	// Wrap with TLS
-	tlsConn, err := newConn(icmpConn, l.tlsConfig, false)
+	tlsConn, err := newConn(icmpConn, l.tlsConfig, true)
 	if err != nil {
 		icmpConn.Close()
 		return nil, err

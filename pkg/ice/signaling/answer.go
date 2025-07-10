@@ -18,7 +18,7 @@ func (s *Signaler) SendICEAnswer(topicBase string, iceMsg *message.ICEMessage, c
 	answer, err = message.GenerateICEAnswer(candidates)
 	if err != nil {
 		if s.opts.Logger != nil {
-			s.opts.Logger.Errorf("Failed to generate ICE answer: %v", err)
+			s.opts.Logger.Errorf("SIG: failed to generate ICE answer: %v", err)
 		}
 		return
 	}
@@ -29,7 +29,7 @@ func (s *Signaler) SendICEAnswer(topicBase string, iceMsg *message.ICEMessage, c
 	payload, err = s.preparePayload(answer)
 	if err != nil {
 		if s.opts.Logger != nil {
-			s.opts.Logger.Errorf("Failed to prepare payload: %v", err)
+			s.opts.Logger.Errorf("SIG: failed to prepare payload: %v", err)
 		}
 		return
 	}
@@ -37,13 +37,13 @@ func (s *Signaler) SendICEAnswer(topicBase string, iceMsg *message.ICEMessage, c
 	// Publish to the answer topic
 	topic := topicBase + iceMsg.SessionID + "/answer/"
 	if s.opts.Logger != nil {
-		s.opts.Logger.Debugf("Publishing ICE answer to topic: %s", topic)
+		s.opts.Logger.Tracef("SIG: publishing ICE answer to topic: %s", topic)
 	}
 
 	err = s.connectAndPublish(topic, payload)
 	if err != nil {
 		if s.opts.Logger != nil {
-			s.opts.Logger.Errorf("Failed to publish ICE answer: %v", err)
+			s.opts.Logger.Errorf("SIG: failed to publish ICE answer: %v", err)
 		}
 	}
 	return
@@ -55,7 +55,7 @@ func (s *Signaler) ReceiveICEOffers(ctx context.Context) (offersChan <-chan *mes
 	mappedIP, _, err = stun.QueryServerUDP(s.opts.Logger, s.opts.STUNServer, 0)
 	if err != nil {
 		if s.opts.Logger != nil {
-			s.opts.Logger.Errorf("STUN query failed: %v", err)
+			s.opts.Logger.Errorf("SIG: STUN query failed: %v", err)
 		}
 		return nil, "", err
 	}
@@ -63,7 +63,7 @@ func (s *Signaler) ReceiveICEOffers(ctx context.Context) (offersChan <-chan *mes
 	topicBase = s.getTopicPrefix(mappedIP.String()) + "/"
 	ch := make(chan *message.ICEMessage)
 
-	s.opts.Logger.Debugf("receiving ICE offers from topic: %s", topicBase+"+/offer")
+	s.opts.Logger.Tracef("SIG: receiving ICE offers from topic: %s", topicBase+"+/offer")
 
 	err = s.connectAndSubscribe(topicBase+"+/offer", s.getICEOfferHandler(ch))
 	if err != nil {
@@ -89,7 +89,7 @@ func (s *Signaler) getICEOfferHandler(ch chan *message.ICEMessage) func(client m
 	return func(client mqtt.Client, msg mqtt.Message) {
 		iceMsg, err := s.handleOfferMessage(msg.Payload())
 		if err != nil {
-			s.opts.Logger.Errorf("failed to handle offer message: %w", err)
+			s.opts.Logger.Errorf("SIG: failed to handle offer message: %w", err)
 			return
 		}
 		ch <- iceMsg
@@ -132,7 +132,7 @@ func (s *Signaler) waitForAnswer(topicBase, sessionID string) (answer *message.I
 	// Subscribe to answer topic
 	answerTopic := topicBase + sessionID + "/answer/#"
 	if s.opts.Logger != nil {
-		s.opts.Logger.Debugf("answer topic: %s", answerTopic)
+		s.opts.Logger.Tracef("SIG: answer topic: %s", answerTopic)
 	}
 
 	if token := s.mqttClient.Subscribe(answerTopic, 0, func(client mqtt.Client, msg mqtt.Message) {
@@ -162,7 +162,7 @@ func (s *Signaler) waitForAnswer(topicBase, sessionID string) (answer *message.I
 // handleAnswerMessage processes an answer message from MQTT
 func (s *Signaler) handleAnswerMessage(msg mqtt.Message, iceMsgChan chan<- *message.ICEMessage) {
 	if s.opts.Logger != nil {
-		s.opts.Logger.Debug("received ICE answer")
+		s.opts.Logger.Tracef("SIG: received ICE answer")
 	}
 
 	var (
@@ -175,13 +175,13 @@ func (s *Signaler) handleAnswerMessage(msg mqtt.Message, iceMsgChan chan<- *mess
 		// Decrypt the message
 		ciphertext, err := base64.StdEncoding.DecodeString(string(payload))
 		if err != nil {
-			s.opts.Logger.Errorf("failed to decode message: %w", err)
+			s.opts.Logger.Errorf("SIG: failed to decode message: %w", err)
 			return
 		}
 
 		decrypted, err := Decrypt(ciphertext, s.opts.EncryptionKey)
 		if err != nil {
-			s.opts.Logger.Errorf("failed to decrypt message: %w", err)
+			s.opts.Logger.Errorf("SIG: failed to decrypt message: %w", err)
 			return
 		}
 		payload = decrypted
@@ -190,7 +190,7 @@ func (s *Signaler) handleAnswerMessage(msg mqtt.Message, iceMsgChan chan<- *mess
 	// Parse the ICE message
 	var iceMsg message.ICEMessage
 	if err = json.Unmarshal(payload, &iceMsg); err != nil {
-		s.opts.Logger.Errorf("failed to unmarshal ICE message: %w", err)
+		s.opts.Logger.Errorf("SIG: failed to unmarshal ICE message: %w", err)
 		return
 	}
 

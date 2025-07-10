@@ -115,7 +115,11 @@ func initPig(mode config.Mode) (*config.Config, *log.Logger) {
 	if err != nil {
 		log.NewBlockingLogger().Fatalf("Failed to load config file: %v", err)
 	}
-	err = applyLogSettings(cfg, flags)
+	if cfg == nil {
+		cfg = &config.Config{}
+		applyCommandLineFlags(cfg, flags, mode, logger)
+	}
+	err = applyLogSettings(cfg)
 	if err != nil {
 		log.NewBlockingLogger().Fatalf("Failed to apply log settings: %v", err)
 	}
@@ -130,16 +134,16 @@ func initPig(mode config.Mode) (*config.Config, *log.Logger) {
 		}
 		logger.SetLevel(cfg.LogConfig.Level)
 	}
-	applyCommandLineFlags(cfg, flags, mode, logger)
-	applyAuthSettings(cfg, flags, logger)
+	applyNetworkSettings(cfg, logger)
 	applyICESettings(cfg, flags, logger)
+	applyAuthSettings(cfg, logger)
 	validateConfig(cfg, logger)
 	return cfg, logger
 }
 
 func loadConfigFile(configPath string) (*config.Config, error) {
 	if configPath == "" {
-		return &config.Config{}, nil
+		return nil, nil
 	}
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
@@ -188,7 +192,7 @@ func defineFlags(flagSet *flag.FlagSet) *pigFlags {
 				s = "true"
 			}
 			flags.iceEnabled = true
-			flags.iceMQTTBroker = "ssl://test.mosquitto.org:8883"
+			flags.iceMQTTBroker = "ssl://broker.hivemq.com:8883"
 			if s == "true" {
 				return nil
 			}
@@ -213,7 +217,7 @@ func applyCommandLineFlags(cfg *config.Config, flags *pigFlags, mode config.Mode
 		cfg.Mode = mode
 	}
 
-	if cfg.Proto == "" {
+	if flags.proto != "" {
 		cfg.Proto = config.TransportType(flags.proto)
 	}
 
@@ -227,13 +231,6 @@ func applyCommandLineFlags(cfg *config.Config, flags *pigFlags, mode config.Mode
 	}
 
 	setConfigField(&cfg.TunnelAddress, flags.tunnelAddress)
-
-	if cfg.TunnelAddress == "" {
-		cfg.TunnelAddress = "172.31.254.1/29"
-		if cfg.Mode == "server" {
-			cfg.TunnelAddress = "172.31.255.1/24"
-		}
-	}
 
 	setConfigField(&cfg.Insecure, flags.insecure)
 	setConfigField(&cfg.CertFile, flags.certFile)
@@ -252,22 +249,22 @@ func applyCommandLineFlags(cfg *config.Config, flags *pigFlags, mode config.Mode
 	setConfigField(&cfg.Wred.Threshold, flags.wredThresh)
 	setConfigField(&cfg.Wred.WeightFactor, flags.wredWF)
 
-}
-
-func applyLogSettings(cfg *config.Config, flags *pigFlags) (err error) {
-	if cfg.LogConfig.Level == "" {
-		switch flags.verbose {
-		case 0:
-			cfg.LogConfig.Level = "info"
-		case 1:
-			cfg.LogConfig.Level = "debug"
-		case 2:
-			cfg.LogConfig.Level = "trace"
-		default:
-			cfg.LogConfig.Level = "info"
-		}
+	switch flags.verbose {
+	case 0:
+		cfg.LogConfig.Level = "info"
+	case 1:
+		cfg.LogConfig.Level = "debug"
+	case 2:
+		cfg.LogConfig.Level = "trace"
+	default:
+		cfg.LogConfig.Level = "info"
 	}
 
+	buildAuthSettingsFromFlags(cfg, flags, logger)
+	buildICESettingsFromFlags(cfg, flags, logger)
+}
+
+func applyLogSettings(cfg *config.Config) (err error) {
 	if cfg.LogConfig.File == "" {
 		return nil
 	}
@@ -314,9 +311,51 @@ func applyLogSettings(cfg *config.Config, flags *pigFlags) (err error) {
 	return
 }
 
-func applyAuthSettings(cfg *config.Config, flags *pigFlags, logger common.Logger) {
+func applyNetworkSettings(cfg *config.Config, logger common.Logger) {
+	if cfg.Mode == "" {
+		cfg.Mode = config.ModeClient
+	}
+
+	if cfg.MTU == 0 {
+		cfg.MTU = 1400
+	}
+
+	if cfg.Target.Address != "" && net.ParseIP(cfg.Target.Address) == nil {
+		logger.Debugf("Resolving %s address: %s", "target", cfg.Target.Address)
+		ips, err := net.LookupIP(cfg.Target.Address)
+		if err != nil {
+			logger.Fatalf("Failed to resolve %s address: %v", "target", err)
+		}
+		if len(ips) == 0 {
+			logger.Fatalf("No IP addresses found for %s address: %s", "target", cfg.Target.Address)
+		}
+		cfg.Target.Address = ips[0].String()
+		logger.Debugf("Resolved %s address: %s", "target", cfg.Target.Address)
+	}
+
+	if cfg.TunnelAddress == "" {
+		cfg.TunnelAddress = "172.31.254.1/29"
+		if cfg.Mode == "server" {
+			cfg.TunnelAddress = "172.31.255.1/24"
+		}
+	}
+
+	if cfg.ReconnectInterval == 0 {
+		cfg.ReconnectInterval = 5
+	}
+	if cfg.Wred.WeightFactor == 0 {
+		cfg.Wred.WeightFactor = 5
+	}
+	if cfg.Wred.DropProbability == 0 {
+		cfg.Wred.DropProbability = 0.25
+	}
+	if cfg.Wred.Threshold == 0 {
+		cfg.Wred.Threshold = 0.30
+	}
+}
+
+func buildAuthSettingsFromFlags(cfg *config.Config, flags *pigFlags, logger common.Logger) {
 	if cfg.Auth != nil {
-		// auth is already set in the config file, do not override it
 		return
 	}
 
@@ -350,18 +389,22 @@ func applyAuthSettings(cfg *config.Config, flags *pigFlags, logger common.Logger
 	}
 }
 
-func applyICESettings(cfg *config.Config, flags *pigFlags, logger common.Logger) {
-	if cfg.ICE != nil && cfg.ICE.Enabled {
-		// ICE is already set in the config file, make sure we have the right settings
-		setConfigField(&cfg.ICE.STUNAddress, flags.stunServerAddr)
-		if cfg.ICE.Signaling == nil {
-			cfg.ICE.Signaling = &config.ICESignalingOpts{}
-			setConfigField(&cfg.ICE.Signaling.EncryptionKey, flags.iceKey)
-		}
-		setConfigField(&cfg.ICE.Signaling.MQTTBrokerAddress, flags.iceMQTTBroker)
+func applyAuthSettings(cfg *config.Config, logger common.Logger) {
+	if cfg.Auth == nil {
 		return
 	}
 
+	if cfg.Auth.Type == config.AuthTypeJWT {
+		if cfg.Mode == "server" && cfg.Auth.JWT.PublicKeySource == "" {
+			logger.Fatalf("JWT public key source not specified")
+		}
+		if cfg.Mode == "client" && cfg.Auth.JWT.Token == "" {
+			logger.Fatalf("JWT token not specified")
+		}
+	}
+}
+
+func buildICESettingsFromFlags(cfg *config.Config, flags *pigFlags, logger common.Logger) {
 	if !flags.iceEnabled {
 		cfg.ICE = &config.ICEConfig{
 			Enabled: false,
@@ -377,6 +420,34 @@ func applyICESettings(cfg *config.Config, flags *pigFlags, logger common.Logger)
 	cfg.ICE.Signaling = &config.ICESignalingOpts{
 		EncryptionKey:     flags.iceKey,
 		MQTTBrokerAddress: flags.iceMQTTBroker,
+	}
+}
+
+func applyICESettings(cfg *config.Config, flags *pigFlags, logger common.Logger) {
+	if !cfg.ICE.Enabled {
+		return
+	}
+	// apply default values if needed for stun and mqtt
+	setConfigField(&cfg.ICE.STUNAddress, flags.stunServerAddr)
+	if cfg.ICE.Signaling == nil {
+		cfg.ICE.Signaling = &config.ICESignalingOpts{}
+	}
+	setConfigField(&cfg.ICE.Signaling.MQTTBrokerAddress, flags.iceMQTTBroker)
+
+	if cfg.Proto == "." && len(cfg.ICE.Protos) == 0 {
+		cfg.ICE.Protos = []string{"ws", "quic", "dtls", "tls"} // keeping tls-in-icmp out for now because it has issues with ice
+	}
+	if len(cfg.ICE.Protos) == 0 {
+		flagProtos := strings.Split(string(cfg.Proto), ",")
+		cfg.ICE.Protos = flagProtos
+	}
+	if len(cfg.ICE.Protos) == 0 {
+		logger.Fatalf("No ICE protocols specified")
+	}
+	for _, proto := range cfg.ICE.Protos {
+		if !config.TransportType(proto).IsICEProtocol() {
+			logger.Fatalf("Invalid ICE protocol: %s", proto)
+		}
 	}
 }
 
@@ -429,18 +500,7 @@ func validateConfig(cfg *config.Config, logger common.Logger) {
 	}
 
 	if cfg.ICE.Enabled {
-		if len(cfg.ICE.Protos) == 0 {
-			flagProtos := strings.Split(string(cfg.Proto), ",")
-			cfg.ICE.Protos = flagProtos
-		}
-		if cfg.Proto == "." {
-			cfg.ICE.Protos = []string{"ws", "quic", "dtls"}
-		}
-		for _, proto := range cfg.ICE.Protos {
-			if !config.TransportType(proto).IsValid() {
-				logger.Fatalf("Invalid ICE protocol: %s", proto)
-			}
-		}
+		// the checks below do not apply when ICE is enabled
 		return
 	}
 

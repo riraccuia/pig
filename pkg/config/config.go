@@ -74,6 +74,10 @@ func (t TransportType) IsValid() bool {
 	return supportedTransports[t]
 }
 
+func (t TransportType) IsICEProtocol() bool {
+	return t == TransportWS || t == TransportQUIC || t == TransportDTLS || t == TransportTLS || t == TransportTLSICMP
+}
+
 // IsValid checks if the ICMP mode is supported
 func (m ICMPMode) IsValid() bool {
 	return supportedICMPModes[m]
@@ -125,6 +129,10 @@ func (c *ICEConfig) UseProtos() (protos []transport.ICEProtocolDefinition) {
 			protos = append(protos, transport.ICEProtocolQUIC)
 		case "dtls":
 			protos = append(protos, transport.ICEProtocolDTLS)
+		case "tls":
+			protos = append(protos, transport.ICEProtocolTLS)
+		case "tls-in-icmp":
+			protos = append(protos, transport.ICEProtocolTLSInICMP)
 		}
 	}
 	return

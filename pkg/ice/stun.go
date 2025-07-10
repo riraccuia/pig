@@ -17,6 +17,8 @@ func PerformSTUNQuery(logger common.Logger, stunServer string, localAddr net.Add
 		mappedIP, mappedPort, err = stun.QueryServerUDP(logger, stunServer, port)
 	case "tcp":
 		mappedIP, mappedPort, err = stun.QueryServerTCP(logger, stunServer, localAddr.(*net.TCPAddr).Port)
+	case "ip": // this is for icmp
+		mappedIP, mappedPort, err = stun.QueryServerUDP(logger, stunServer, 0)
 	default:
 		return nil, 0, fmt.Errorf("unsupported network type: %s", localAddr.Network())
 	}

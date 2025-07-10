@@ -41,7 +41,7 @@ func (s *Signaler) connectMQTTClient() (mqtt.Client, error) {
 
 	mqttOpts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
 		if s.opts.Logger != nil {
-			s.opts.Logger.Errorf("MQTT connection lost: %v", err)
+			s.opts.Logger.Errorf("SIG: MQTT connection lost: %v", err)
 		}
 		close(s.mqttLostConn)
 		s.mqttLostConn = make(chan struct{})

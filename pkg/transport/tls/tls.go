@@ -7,59 +7,22 @@ import (
 	"net"
 
 	"github.com/riraccuia/pig/pkg/config"
+	"github.com/riraccuia/pig/pkg/ice"
 	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-type TLSConn struct {
-	*tls.Conn
-}
-
-type TLSListener struct {
-	listener net.Listener
-}
-
-func NewTLSConn(conn *tls.Conn) *TLSConn {
-	return &TLSConn{Conn: conn}
-}
-
-func NewTLSListener(listener net.Listener) *TLSListener {
-	return &TLSListener{listener: listener}
-}
-
-func (t *TLSConn) IsStreamed() bool {
-	return false
-}
-
-func (t *TLSConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
-	// TLS connections are already streams
-	return nil, transport.ErrNotImplemented
-}
-
-func (t *TLSConn) NewStream(ctx context.Context) (transport.Stream, error) {
-	// TLS connections are already streams
-	return nil, transport.ErrNotImplemented
-}
-
-// Implement Stream interface methods
-func (t *TLSConn) Flush() {
-	// TLS connections don't need explicit flushing
-}
-
-func (t *TLSListener) Accept() (net.Conn, error) {
-	conn, err := t.listener.Accept()
-	if err != nil {
-		return nil, err
-	}
-	tlsConn, ok := conn.(*tls.Conn)
-	if !ok {
-		return nil, fmt.Errorf("accepted connection is not a TLS connection")
+func GetClientFromConn(ctx context.Context, co net.Conn, config *config.Config, tlsConfig *tls.Config) (transport.Conn, error) {
+	tlsConn := tls.Client(co, tlsConfig.Clone())
+	if err := tlsConn.Handshake(); err != nil {
+		return nil, fmt.Errorf("failed to handshake: %w", err)
 	}
 	return NewTLSConn(tlsConn), nil
 }
 
-func (t *TLSListener) Close() error {
-	return t.listener.Close()
+func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Config, tlsConfig *tls.Config) (transport.Listener, error) {
+	tlsConn := tls.Server(co, tlsConfig.Clone())
+	return ice.NewListenerConn(NewTLSConn(tlsConn), nil), nil
 }
 
 func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {

@@ -3,6 +3,7 @@ package ice
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"slices"
 	"time"
@@ -27,7 +28,7 @@ func GetListenPaths(ctx context.Context, opts *signaling.Options, listenPort uin
 		}
 		if errors.Is(err, signaling.ErrMQTTFailure) {
 			if opts.Logger != nil {
-				opts.Logger.Errorf("MQTT connection failed (will retry in 5 seconds): %v", err)
+				opts.Logger.Errorf("ICE: MQTT connection failed (will retry in 5 seconds): %v", err)
 			}
 			time.Sleep(time.Second * 5)
 			continue
@@ -57,14 +58,14 @@ func receiveOffers(ctx context.Context, signaler *signaling.Signaler, listenPort
 			select {
 			case <-ctx.Done():
 				err = ctx.Err()
-				signaler.GetOptions().Logger.Errorf("Stopped waiting for ICE offers: %v", err)
+				signaler.GetOptions().Logger.Errorf("ICE: stopped waiting for ICE offers: %v", err)
 				return
 			case offer, ok := <-offersChan:
 				if !ok {
 					offersChan = nil
 					break
 				}
-				signaler.GetOptions().Logger.Debugf("Received ICE offer. SessionID: %s", offer.SessionID)
+				signaler.GetOptions().Logger.Tracef("ICE: received ICE offer. SessionID: %s", offer.SessionID)
 				processOffer(signaler, topicBase, offer, listenPort, listenPaths, pigProtos)
 			}
 		}
@@ -72,15 +73,21 @@ func receiveOffers(ctx context.Context, signaler *signaling.Signaler, listenPort
 }
 
 func processOffer(signaler *signaling.Signaler, topicBase string, offer *message.ICEMessage, listenPort uint16, listenPaths chan []*ConnectPath, pigProtos []transport.ICEProtocolDefinition) {
-	localNets, localIps, err := getLocalNetworks()
+	localNets, localIps, err := GetLocalNetworks()
 	if err != nil {
 		return
+	}
+
+	type ipPort struct {
+		ip   net.IP
+		port int
 	}
 
 	var (
 		answerCandidates []message.ICECandidate
 		cp               []*ConnectPath
 		opts             = signaler.GetOptions()
+		mappedAddrs      = make(map[string]ipPort)
 	)
 
 	for _, tr := range pigProtos {
@@ -102,11 +109,26 @@ func processOffer(signaler *signaling.Signaler, topicBase string, offer *message
 		}
 		// reflexive candidate
 		localAddr := AddressFrom(tr.Network, net.IPv4zero, int(listenPort))
-		// Get mapped endpoint
-		mappedIP, mappedPort, err := PerformSTUNQuery(opts.Logger, opts.STUNServer, localAddr)
-		if err != nil {
-			opts.Logger.Errorf("STUN query failed: %v", err)
-			continue
+
+		var (
+			mappingKey = fmt.Sprintf("%s:%d", tr.Network, listenPort)
+			mappedIP   net.IP
+			mappedPort int
+		)
+
+		ma, ok := mappedAddrs[mappingKey]
+		switch {
+		case ok:
+			mappedIP = ma.ip
+			mappedPort = ma.port
+		default:
+			var e error
+			mappedIP, mappedPort, e = PerformSTUNQuery(opts.Logger, opts.STUNServer, localAddr)
+			if e != nil {
+				opts.Logger.Errorf("ICE: STUN query failed: %v", e)
+				continue
+			}
+			mappedAddrs[mappingKey] = ipPort{mappedIP, mappedPort}
 		}
 
 		bindAgent := stun.NewIceBindingAgent(opts.Logger, nil)
@@ -123,12 +145,12 @@ func processOffer(signaler *signaling.Signaler, topicBase string, offer *message
 		}
 	}
 
-	opts.Logger.Debugf("Preparing to send ICE answer to client. SessionID: %s", offer.SessionID)
+	opts.Logger.Tracef("ICE: preparing to send ICE answer to client. SessionID: %s", offer.SessionID)
 
 	var answer *message.ICEMessage
 	answer, err = signaler.SendICEAnswer(topicBase, offer, answerCandidates)
 	if err != nil {
-		opts.Logger.Errorf("Failed to send ICE answer: %v", err)
+		opts.Logger.Errorf("ICE: failed to send ICE answer: %v", err)
 		return
 	}
 
@@ -161,9 +183,15 @@ func processOffer(signaler *signaling.Signaler, topicBase string, offer *message
 	cp = slices.DeleteFunc(cp, func(c *ConnectPath) bool {
 		return c.RemoteAddr == nil
 	})
-
+	// send the connect paths to the listener
 	select {
 	case listenPaths <- cp:
 	default:
 	}
+	// free the memory
+	for _, m := range mappedAddrs {
+		m.ip = nil
+		m.port = 0
+	}
+	mappedAddrs = nil
 }

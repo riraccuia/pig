@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net"
 	"time"
-
-	"github.com/riraccuia/pig/pkg/common"
 )
 
 // DialUDP uses a net.Dialer to dial a UDP connection and sets the SO_REUSEADDR option.
@@ -16,7 +14,7 @@ func DialUDP(network string, laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
 // PunchUDP performs UDP hole punching from the specified source port to the target address.
 // This creates a temporary opening in the NAT/firewall to allow direct UDP communication.
 // A source port is required to be provided, either as an int or a *net.UDPConn. Use 0 for a random port.
-func PunchUDP(logger common.Logger, connOrSourcePort any, targetAddr string) (sPort int, err error) {
+func PunchUDP(connOrSourcePort any, targetAddr string) (sPort int, err error) {
 	conn, ok := connOrSourcePort.(*net.UDPConn)
 	if !ok {
 		sourcePort, ok := connOrSourcePort.(int)
@@ -46,16 +44,10 @@ func PunchUDP(logger common.Logger, connOrSourcePort any, targetAddr string) (sP
 	// Perform the hole punch by sending a byte to the target
 	punchData := []byte{0x01}
 
-	// Send the punch packet
-	logger.Debugf("Sending UDP punch packet to %s", targetUDPAddr.String())
-
 	_, err = conn.WriteToUDP(punchData, targetUDPAddr)
 	if err != nil {
 		return 0, fmt.Errorf("failed to send punch packet: %w", err)
 	}
-
-	logger.Infof("UDP hole punch complete to %s (mapped endpoint: %s:%d)",
-		targetAddr, localAddr.IP.String(), sPort)
 
 	return
 }

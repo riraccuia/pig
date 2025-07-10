@@ -9,7 +9,7 @@ func (s *Signaler) publishICEOffer(topicBase string, iceMsg *message.ICEMessage)
 	offerTopic := topicBase + iceMsg.SessionID + "/offer"
 
 	if s.opts.Logger != nil {
-		s.opts.Logger.Debugf("offer topic: %s", offerTopic)
+		s.opts.Logger.Tracef("SIG: offer topic: %s", offerTopic)
 	}
 
 	// Prepare payload

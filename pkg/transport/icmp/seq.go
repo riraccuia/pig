@@ -1,5 +1,7 @@
 package icmp
 
+import "encoding/binary"
+
 // Helper methods for ICMP sequence wraparound handling
 const maxICMPSeq = 65535 // Maximum value for 16-bit sequence number
 
@@ -9,6 +11,12 @@ const (
 	halfUint32Seq = uint32(1) << 31
 	halfUint16Seq = uint16(1) << 15 // 32768: Half of uint16 sequence space
 )
+
+func getSeqAck(payload []byte) (uint32, uint32) {
+	seq := binary.BigEndian.Uint32(payload[0:4])
+	ack := binary.BigEndian.Uint32(payload[4:8])
+	return seq, ack
+}
 
 // isUint16SeqHigher returns true if a is higher than b, accounting for wraparound
 func isUint16SeqHigher(a, b uint32) bool {

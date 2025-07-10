@@ -46,10 +46,10 @@ func NewSignaler(ctx context.Context, opts *Options) (*Signaler, error) {
 // GatherICECandidates performs a STUN query, publishes an offer, and waits for an answer
 func GatherICECandidates(ctx context.Context, opts *Options, targetHost string, offer *message.ICEMessage) (answer *message.ICEMessage, err error) {
 	signaler, err := NewSignaler(ctx, opts)
-	defer signaler.Disconnect()
 	if err != nil {
 		return nil, err
 	}
+	defer signaler.Disconnect()
 	return signaler.GatherICECandidates(targetHost, offer)
 }
 

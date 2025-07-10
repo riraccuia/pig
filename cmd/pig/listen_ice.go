@@ -18,6 +18,8 @@ import (
 	"github.com/riraccuia/pig/pkg/transport"
 	"github.com/riraccuia/pig/pkg/transport/dtls"
 	qt "github.com/riraccuia/pig/pkg/transport/quic-go"
+	trtls "github.com/riraccuia/pig/pkg/transport/tls"
+	"github.com/riraccuia/pig/pkg/transport/tlsicmp"
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
 
@@ -68,12 +70,17 @@ func processICEServerConnectPaths(ctx context.Context, logger *log.Logger, cfg *
 		logger.Debugf("Connecting ICE path | %s", cp.String())
 		go func(cp *ice.ConnectPath) {
 			_, e := cp.Connect()
+			if e == ice.ErrConnectICMP {
+				_, e = cp.ConnectICMP(ctx, logger, cfg.BindAdapter, true)
+			}
 			if e != nil {
-				//logger.Errorf("Failed to connect ICE listen path %s: %v", cp.String(), e)
+				logger.Tracef("Failed to connect ICE path %s: %v", cp.String(), e)
 				return
 			}
-			cp.BindAgent.SendBindingRequest(true) // it's okay for this to fail
-			cp.BindAgent.Receive()                // keep on handling binding requests until ice is completed
+			if cp.Protocol.Network != "icmp" {
+				cp.BindAgent.SendBindingRequest(true) // it's okay for this to fail
+			}
+			cp.BindAgent.Receive() // keep on handling binding requests until ice is completed
 			connectedPaths.Store(cp.String(), cp)
 		}(cp)
 	}
@@ -122,6 +129,10 @@ func processICEServerConnectPaths(ctx context.Context, logger *log.Logger, cfg *
 	case "dtls":
 		co := conn.NewUDPPacketConn(nomination.Conn.(*net.UDPConn))
 		l, err = dtls.GetListenerFromConn(ctx, co, cfg, tlsConfig)
+	case "tls":
+		l, err = trtls.GetListenerFromConn(ctx, nomination.Conn, cfg, tlsConfig)
+	case "tls-in-icmp":
+		l, err = tlsicmp.GetListenerFromConn(ctx, nomination.Conn, cfg, tlsConfig)
 	}
 	if err != nil {
 		logger.Errorf("Failed to get listener for %s: %v", nomination.String(), err)
@@ -129,16 +140,4 @@ func processICEServerConnectPaths(ctx context.Context, logger *log.Logger, cfg *
 	}
 	logger.Infof("ICE completed | %s", nomination.String())
 	pigListener.Load(l)
-}
-
-type pigCloser struct {
-	net.Conn
-	listener transport.Listener
-}
-
-func (p *pigCloser) Close() error {
-	if p.listener != nil {
-		p.listener.Close()
-	}
-	return p.Conn.Close()
 }

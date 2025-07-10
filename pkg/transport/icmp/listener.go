@@ -2,14 +2,14 @@ package icmp
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
+	"hash/maphash"
 	"net"
 	"runtime"
 	"sync"
+	"unsafe"
 
 	"github.com/riraccuia/pig/pkg/log"
-	"github.com/riraccuia/pig/pkg/packet"
 	"github.com/riraccuia/pig/pkg/transport"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
@@ -19,44 +19,46 @@ import (
 type sharedListener struct {
 	isServer   bool
 	ip4Conn    *ipv4.RawConn
-	conn       *net.IPConn
+	conn       *ipConn
 	localAddr  *net.IPAddr
 	ctx        context.Context
 	cancel     context.CancelFunc
 	mss        int
 	clients    sync.Map // map[clientKey]*connection
 	connChan   chan transport.Conn
-	packetChan chan *icmpPacket
+	packetChan chan *Packet
 	bufPool    sync.Pool
 	logger     *log.Logger
 }
 
-// icmpPacket represents a processed ICMP packet ready for dispatch
-type icmpPacket struct {
-	dst    net.IP
-	buffer *rawSockBuffer
+var h maphash.Hash
+
+func getClientKey(ip net.IP, icmpID uint16) uint64 {
+	defer h.Reset()
+	// use internal golang hash function to get a unique key for the client connection
+	h.Write(ip.To4())
+	// get the underlying memory of the icmpID
+	icmpIDBytes := (*[2]byte)(unsafe.Pointer(&icmpID))
+	h.Write(icmpIDBytes[:])
+	return h.Sum64()
 }
 
-// clientKey uniquely identifies a client connection
-type clientKey struct {
-	ip     string
-	icmpID int
+func (l *sharedListener) getBuffer() []byte {
+	return *l.bufPool.Get().(*[]byte)
 }
 
-func (l *sharedListener) clearMemory(m *rawSockBuffer) {
-	m.po = 0
-	m.len = 0
-	l.bufPool.Put(m)
+func (l *sharedListener) clearMemory(m []byte) {
+	l.bufPool.Put(&m)
 }
 
 // newSharedListener creates a new shared ICMP socket listener
-func newSharedListener(ctx context.Context, logger *log.Logger, bindAddr *net.IPAddr, mtu int, isServer bool) (*sharedListener, error) {
-	conn, err := net.ListenIP("ip4:icmp", bindAddr)
+func newSharedListener(ctx context.Context, logger *log.Logger, bindAddr *net.IPAddr, iface *net.Interface, isServer bool) (*sharedListener, error) {
+	conn, err := newIcmpIPConn(bindAddr, iface, isServer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ICMP socket: %w", err)
 	}
 
-	ip4Conn, err := ipv4.NewRawConn(conn)
+	ip4Conn, err := ipv4.NewRawConn(conn.IPConn)
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("failed to create raw connection: %w", err)
@@ -73,10 +75,10 @@ func newSharedListener(ctx context.Context, logger *log.Logger, bindAddr *net.IP
 		localAddr:  conn.LocalAddr().(*net.IPAddr),
 		ctx:        listenerCtx,
 		cancel:     cancel,
-		mss:        mtu - ipHeaderSize - icmpHeaderSize,
+		mss:        iface.MTU - ipHeaderSize - icmpHeaderSize,
 		connChan:   make(chan transport.Conn, 1024),
-		packetChan: make(chan *icmpPacket, 1024),
-		bufPool:    sync.Pool{New: func() any { return &rawSockBuffer{b: make([]byte, mtu)} }},
+		packetChan: make(chan *Packet, 1024),
+		bufPool:    sync.Pool{New: func() any { buffer := make([]byte, iface.MTU); return &buffer }},
 		logger:     logger,
 	}
 
@@ -85,6 +87,7 @@ func newSharedListener(ctx context.Context, logger *log.Logger, bindAddr *net.IP
 	runtime.Gosched()
 	// Start the packet reading loop
 	go l.readPackets()
+	runtime.Gosched()
 
 	return l, nil
 }
@@ -111,12 +114,6 @@ func (l *sharedListener) Close() error {
 	return l.conn.Close()
 }
 
-type rawSockBuffer struct {
-	b   []byte
-	len int // end of data
-	po  int // payload offset
-}
-
 // readPackets continuously reads ICMP packets and processes them for the listener
 func (l *sharedListener) readPackets() {
 	for {
@@ -125,58 +122,29 @@ func (l *sharedListener) readPackets() {
 			return
 		default:
 			// buffer := make([]byte, l.mtu)
-			buffer := l.bufPool.Get().(*rawSockBuffer)
+			buffer := l.getBuffer()
 
-			n, _, _, ipSrc, err := l.conn.ReadMsgIP(buffer.b, nil)
+			n, _, _, ipSrc, err := l.conn.ReadMsgIP(buffer, nil)
 			if err != nil {
 				l.logger.Errorf("Error reading ICMP packet: %v", err)
 				l.clearMemory(buffer)
 				continue
 			}
 
-			pkt := packet.IPv4Packet(buffer.b[:n])
-			payload := buffer.b[pkt.PayloadOffset():n]
-
-			buffer.len = n
-			buffer.po = pkt.PayloadOffset()
-
-			//if lenFromIPHeader+ipHeaderSize != uint16(n) {
-			//transport.Logger.Infof("hex dump (len: %d vs %d): \n%x", n, lenFromIPHeader+ipHeaderSize, buffer[0:20])
-			//}
+			packet, err := NewPacket(buffer, n)
+			if err != nil {
+				l.logger.Errorf("Error parsing ICMP packet: %v", err)
+				l.clearMemory(buffer)
+				continue
+			}
+			packet.IPSrc = ipSrc.IP.To4()
 
 			select {
-			case l.packetChan <- &icmpPacket{
-				dst:    ipSrc.IP.To4(),
-				buffer: buffer,
-			}:
+			case l.packetChan <- packet:
 			default:
 				l.clearMemory(buffer)
-				l.logger.Errorf("packet channel full, dropping packet, icmp type: %d, icmp id: %d, icmp seq: %d", ipv4.ICMPType(payload[0]), binary.BigEndian.Uint16(payload[4:6]), binary.BigEndian.Uint16(payload[6:8]))
+				l.logger.Errorf("packet channel full, dropping packet, %s", packet.IcmpPacket())
 			}
-
-			// buffer := l.bufPool.Get().([]byte)
-
-			// header, payload, _, err := l.ip4Conn.ReadFrom(buffer)
-			// if err != nil {
-			// transport.Logger.Errorf("Error reading ICMP packet: %v", err)
-			// continue
-			// }
-
-			// if header.Protocol != protocolICMP {
-			// transport.Logger.Infof("received non-icmp packet, protocol: %d", header.Protocol)
-			// continue
-			// }
-
-			// // transport.Logger.Infof("received icmp packet, icmp type: %d, icmp id: %d, icmp seq: %d", ipv4.ICMPType(payload[0]), binary.BigEndian.Uint16(payload[4:6]), binary.BigEndian.Uint16(payload[6:8]))
-
-			// select {
-			// case l.packetChan <- &icmpPacket{
-			// header:  header,
-			// payload: payload,
-			// }:
-			// default:
-			// transport.Logger.Errorf("packet channel full, dropping packet, icmp type: %d, icmp id: %d, icmp seq: %d", ipv4.ICMPType(payload[0]), binary.BigEndian.Uint16(payload[4:6]), binary.BigEndian.Uint16(payload[6:8]))
-			// }
 		}
 	}
 }
@@ -190,42 +158,29 @@ func (l *sharedListener) dispatchPackets() {
 		case packet := <-l.packetChan:
 			//transport.Logger.Infof("dispatching packet, icmp type: %d, icmp id: %d, icmp seq: %d", ipv4.ICMPType(packet.payload[0]), binary.BigEndian.Uint16(packet.payload[4:6]), binary.BigEndian.Uint16(packet.payload[6:8]))
 
-			payload := packet.buffer.b[packet.buffer.po:packet.buffer.len]
-
-			// read icmp type from the first byte of the icmp payload
-			icmpType := ipv4.ICMPType(payload[0])
-			icmpCode := payload[1]
-			// read icmp id from icmp payload
-			icmpID := binary.BigEndian.Uint16(payload[4:6])
-
-			if l.isServer && icmpType != ipv4.ICMPTypeEcho {
-				l.logger.Errorf("received non-echo request, icmp type: %d", icmpType)
+			if l.isServer && packet.IcmpType != ipv4.ICMPTypeEcho {
+				l.logger.Errorf("received non-echo request, %s", packet.IcmpPacket())
 				l.clearMemory(packet.buffer)
 				continue
 			}
-			if !l.isServer && icmpType != ipv4.ICMPTypeEchoReply {
-				l.logger.Errorf("received non-echo reply, icmp type: %d", icmpType)
+			if !l.isServer && packet.IcmpType != ipv4.ICMPTypeEchoReply {
+				l.logger.Errorf("received non-echo reply, %s", packet.IcmpPacket())
 				l.clearMemory(packet.buffer)
 				continue
-			}
-
-			key := clientKey{
-				ip:     packet.dst.String(),
-				icmpID: int(icmpID),
 			}
 
 			var conn *Conn
-			conn = l.getClientConn(packet.dst, key, icmpCode)
+			conn = l.getClientConn(packet.IPSrc, packet.IcmpEchoID, packet.IcmpCode)
 
 			if conn == nil {
-				l.logger.Errorf("failed to find packet connection, ip: %s, icmp id: %d", packet.dst.String(), icmpID)
+				l.logger.Errorf("failed to find packet connection, ip: %s, icmp id: %d", packet.IPSrc.String(), packet.IcmpEchoID)
 				l.clearMemory(packet.buffer)
 				continue
 			}
 
 			// Forward packet to the appropriate connection
 			select {
-			case conn.incoming <- packet.buffer:
+			case conn.incoming <- packet:
 				// transport.Logger.Infof("forwarded packet to connection, ip: %s, icmp id: %d, icmp seq: %d", packet.header.Src.String(), icmpID, binary.BigEndian.Uint16(packet.payload[6:8]))
 			default:
 				l.clearMemory(packet.buffer)
@@ -235,7 +190,8 @@ func (l *sharedListener) dispatchPackets() {
 	}
 }
 
-func (l *sharedListener) getClientConn(ip net.IP, key clientKey, echoCode uint8) *Conn {
+func (l *sharedListener) getClientConn(ip net.IP, icmpID uint16, echoCode uint8) *Conn {
+	key := getClientKey(ip, icmpID)
 	_conn, exists := l.clients.Load(key)
 	if exists {
 		return _conn.(*Conn)
@@ -245,13 +201,13 @@ func (l *sharedListener) getClientConn(ip net.IP, key clientKey, echoCode uint8)
 		return nil
 	}
 
-	l.logger.Infof("New client connection, ip: %s, icmp id: %d", key.ip, key.icmpID)
+	l.logger.Infof("New client connection (%d), ip: %s, icmp id: %d", key, ip.String(), icmpID)
 
 	conn := newConnection(
 		l.ctx,
 		l,
 		&net.IPAddr{IP: ip},
-		key.icmpID,
+		icmpID,
 	)
 
 	l.clients.Store(key, conn)
@@ -261,7 +217,7 @@ func (l *sharedListener) getClientConn(ip net.IP, key clientKey, echoCode uint8)
 	default:
 		conn.Close()
 		l.clients.Delete(key)
-		l.logger.Errorf("Accept channel full, dropping client connection, ip: %s, icmp id: %d", ip.String(), key.icmpID)
+		l.logger.Errorf("Accept channel full, dropping client connection, ip: %s, icmp id: %d", ip.String(), icmpID)
 		return nil
 	}
 	return conn
@@ -285,6 +241,5 @@ func (l *sharedListener) writePacket(dst net.IP, msg *icmp.Message) error {
 	if err := l.ip4Conn.WriteTo(header, msgBytes, nil); err != nil {
 		return fmt.Errorf("error writing ICMP packet: %w", err)
 	}
-
 	return nil
 }

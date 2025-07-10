@@ -16,6 +16,8 @@ import (
 	"github.com/riraccuia/pig/pkg/transport"
 	"github.com/riraccuia/pig/pkg/transport/dtls"
 	qt "github.com/riraccuia/pig/pkg/transport/quic-go"
+	trtls "github.com/riraccuia/pig/pkg/transport/tls"
+	"github.com/riraccuia/pig/pkg/transport/tlsicmp"
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
 
@@ -34,7 +36,7 @@ func getICEDialFunc(ctx context.Context, logger *log.Logger, cfg *config.Config)
 			return nil, fmt.Errorf("no ICE candidates found")
 		}
 
-		selectedPath, err := processICEClientConnectPaths(ctx, logger, connectPaths)
+		selectedPath, err := processICEClientConnectPaths(ctx, logger, cfg, connectPaths)
 		if err != nil {
 			return nil, fmt.Errorf("failed to process ICE client connect paths: %w", err)
 		}
@@ -47,7 +49,6 @@ func getICEDialFunc(ctx context.Context, logger *log.Logger, cfg *config.Config)
 		// that we are going to use this candidate
 		_, err = selectedPath.BindAgent.SendBindingRequest(true)
 		if err != nil {
-			//logger.Errorf("Failed to send USE-CANDIDATE attribute to %s: %v", selectedPath.String(), err)
 			return nil, fmt.Errorf("failed to send binding request: %w", err)
 		}
 
@@ -64,12 +65,16 @@ func getICEDialFunc(ctx context.Context, logger *log.Logger, cfg *config.Config)
 			co.SetReadBuffer(1024 * 2048)
 			co.SetWriteBuffer(1024 * 2048)
 			return dtls.GetClientFromConn(ctx, co, cfg, tlsConfig)
+		case "tls":
+			return trtls.GetClientFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
+		case "tls-in-icmp":
+			return tlsicmp.GetClientFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
 		}
 		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 	}, nil
 }
 
-func processICEClientConnectPaths(ctx context.Context, logger *log.Logger, connectPaths []*ice.ConnectPath) (selectedPath *ice.ConnectPath, err error) {
+func processICEClientConnectPaths(ctx context.Context, logger *log.Logger, cfg *config.Config, connectPaths []*ice.ConnectPath) (selectedPath *ice.ConnectPath, err error) {
 	var (
 		selectedPtr = atomic.Pointer[ice.ConnectPath]{}
 		timer       = time.NewTimer(time.Second * 10)
@@ -78,14 +83,17 @@ func processICEClientConnectPaths(ctx context.Context, logger *log.Logger, conne
 		logger.Debugf("Connecting ICE path | %s", cp.String())
 		go func(cp *ice.ConnectPath) {
 			_, e := cp.Connect()
+			if e == ice.ErrConnectICMP {
+				_, e = cp.ConnectICMP(ctx, logger, cfg.BindAdapter, false)
+			}
 			if e != nil {
-				//logger.Errorf("Failed to connect ICE path %s: %v", cp.String(), e)
+				logger.Tracef("Failed to connect ICE path %s: %v", cp.String(), e)
 				return
 			}
 			e = cp.ICESetup()
 			if e != nil {
 				cp.CloseConn()
-				//logger.Errorf("Failed to ICE bind path %s: %v", cp.String(), e)
+				//logger.Tracef("Failed to ICE bind path %s: %v", cp.String(), e)
 				return
 			}
 			if !selectedPtr.CompareAndSwap(nil, cp) {

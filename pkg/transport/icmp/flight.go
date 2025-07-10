@@ -7,13 +7,14 @@ import (
 
 type FlightCounter struct {
 	sync.Mutex
-	cond *sync.Cond
-	cwnd *atomic.Uint32
-	bc   uint32
+	cond           *sync.Cond
+	cwnd           *atomic.Uint32
+	sendWindowSize uint32
+	bc             uint32
 }
 
-func NewFlightCounter(cwnd *atomic.Uint32) *FlightCounter {
-	fc := &FlightCounter{cwnd: cwnd}
+func NewFlightCounter(cwnd *atomic.Uint32, sendWindowSize uint32) *FlightCounter {
+	fc := &FlightCounter{cwnd: cwnd, sendWindowSize: sendWindowSize}
 	fc.cond = sync.NewCond(&fc.Mutex)
 	return fc
 }
@@ -50,9 +51,9 @@ func (fc *FlightCounter) Sub(num uint32) {
 	fc.Unlock()
 }
 
-func (fc *FlightCounter) WaitCwnd() {
+func (fc *FlightCounter) WaitCwnd(emss uint32) {
 	fc.Lock()
-	for fc.bc > 0 && fc.bc >= fc.cwnd.Load() {
+	for fc.bc > 0 && (fc.bc >= (fc.cwnd.Load()-emss) || (fc.bc >= (fc.sendWindowSize - emss))) {
 		fc.cond.Wait()
 	}
 	fc.Unlock()

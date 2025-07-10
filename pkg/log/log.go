@@ -114,6 +114,14 @@ func (l *Logger) Debugf(format string, args ...interface{}) {
 	l.log.Debug().Msg(fmt.Sprintf(format, args...))
 }
 
+func (l *Logger) Trace(args ...interface{}) {
+	l.log.Trace().Msg(fmt.Sprint(args...))
+}
+
+func (l *Logger) Tracef(format string, args ...interface{}) {
+	l.log.Trace().Msg(fmt.Sprintf(format, args...))
+}
+
 func (l *Logger) Fatal(args ...interface{}) {
 	l.log.Fatal().Msg(fmt.Sprint(args...))
 	os.Exit(1)

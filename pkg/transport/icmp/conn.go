@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,7 +18,7 @@ import (
 type Conn struct {
 	emss       uint32
 	wantType   ipv4.ICMPType
-	incoming   chan *rawSockBuffer
+	incoming   chan *Packet
 	listener   *sharedListener
 	localAddr  *net.IPAddr
 	remoteAddr *net.IPAddr
@@ -26,7 +27,7 @@ type Conn struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	// For tracking ICMP identifiers and sequence numbers
-	icmpID      int
+	icmpID      uint16
 	nextIcmpSeq atomic.Uint32
 	recvIcmpSeq atomic.Uint32
 	// For RTT tracking
@@ -38,8 +39,11 @@ type Conn struct {
 	// NewReno algorithm
 	rq, ooq          *RetransmitQueue
 	retransmit       atomic.Bool
-	recovery         bool
+	recovery         atomic.Bool
+	transmitBlocked  bool
+	transmitWg       *sync.Cond
 	peerAck, peerSeq uint32
+	prevPeerAck      uint32
 	ack, seq         atomic.Uint32
 	sentAck          atomic.Uint32
 	ackTimer, rto    *time.Timer
@@ -51,8 +55,8 @@ type Conn struct {
 	ackBytesCount    uint32
 }
 
-func Dial(ctx context.Context, logger *log.Logger, bindAdapter, targetAddr string) (transport.Conn, error) {
-	var (
+func Dial(ctx context.Context, logger *log.Logger, bindAdapter, targetAddr string, icmpID uint16, isServer bool) (transport.Conn, error) {
+	/*var (
 		bindAddr *net.IPAddr
 		iface    *net.Interface
 		err      error
@@ -62,46 +66,55 @@ func Dial(ctx context.Context, logger *log.Logger, bindAdapter, targetAddr strin
 		if err != nil {
 			return nil, fmt.Errorf("failed to get adapter address: %w", err)
 		}
-	}
-	return dial(ctx, logger, bindAddr, iface.MTU, targetAddr, false)
+	}*/
+	return dial(ctx, logger, bindAdapter, targetAddr, icmpID, isServer)
 }
 
 // dial creates a new client connection to a target address
-func dial(ctx context.Context, logger *log.Logger, bindAddr *net.IPAddr, mtu int, targetAddr string, isServer bool) (transport.Conn, error) {
-	var (
+func dial(ctx context.Context, logger *log.Logger, bindAdapter, targetAddr string, icmpID uint16, isServer bool) (transport.Conn, error) {
+	/*var (
 		sharedListener *sharedListener
 		err            error
-	)
+	)*/
 
-	sharedListener, err = newSharedListener(ctx, logger, bindAddr, mtu, isServer)
+	err := setupGlobalListener(ctx, logger, bindAdapter, isServer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to setup icmp listener: %w", err)
+	}
+
+	/*sharedListener, err = newSharedListener(ctx, logger, bindAddr, iface, isServer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create shared listener: %w", err)
-	}
+	}*/
 
 	var (
 		conn *Conn
-		key  clientKey
+		key  uint64
 	)
+
+	icmpID = icmpID & 0xffff
+
+	if icmpID == 0 {
+		icmpID = uint16(os.Getpid() & 0xffff)
+	}
+
 	// Create new connection
 	conn = newConnection(
 		ctx,
-		sharedListener,
+		globalListener,
 		&net.IPAddr{IP: net.ParseIP(targetAddr)},
-		os.Getpid()&0xffff,
+		icmpID,
 	)
 
 	// Register connection with listener
-	key = clientKey{
-		ip:     conn.remoteAddr.IP.String(),
-		icmpID: conn.icmpID,
-	}
-	sharedListener.clients.Store(key, conn)
+	key = getClientKey(conn.remoteAddr.IP, uint16(conn.icmpID))
+	globalListener.clients.Store(key, conn)
 
 	return conn, nil
 }
 
 // newConnection creates a new connection with shared read/write loops
-func newConnection(ctx context.Context, listener *sharedListener, remoteAddr *net.IPAddr, icmpID int) *Conn {
+func newConnection(ctx context.Context, listener *sharedListener, remoteAddr *net.IPAddr, icmpID uint16) *Conn {
 	connCtx, cancel := context.WithCancel(ctx)
 
 	wantType := ipv4.ICMPTypeEchoReply
@@ -112,7 +125,7 @@ func newConnection(ctx context.Context, listener *sharedListener, remoteAddr *ne
 	c := &Conn{
 		emss:       uint32(listener.mss - eHeaderSize),
 		wantType:   wantType,
-		incoming:   make(chan *rawSockBuffer, 1024),
+		incoming:   make(chan *Packet, 1024),
 		listener:   listener,
 		localAddr:  listener.localAddr,
 		remoteAddr: remoteAddr,
@@ -163,15 +176,13 @@ func (c *Conn) Close() error {
 	c.sendCloseMessage()
 
 	c.cancel()
-	c.readBuf = nil
-	c.writeBuf = nil
+	c.readBuf.Reset()
+	c.writeBuf.Reset()
 
 	// Remove from listener's client map
-	key := clientKey{
-		ip:     c.remoteAddr.IP.String(),
-		icmpID: c.icmpID,
-	}
+	key := getClientKey(c.remoteAddr.IP, uint16(c.icmpID))
 	c.listener.clients.Delete(key)
+	c.listener.logger.Infof("connection closed, ip: %s, icmp id: %d", c.remoteAddr.IP.String(), c.icmpID)
 	return nil
 }
 
@@ -198,11 +209,11 @@ func (c *Conn) SetDeadline(t time.Time) error {
 }
 
 func (c *Conn) SetReadDeadline(t time.Time) error {
-	return nil
+	return c.readBuf.SetReadDeadline(t)
 }
 
 func (c *Conn) SetWriteDeadline(t time.Time) error {
-	return nil
+	return c.writeBuf.SetWriteDeadline(t)
 }
 
 // readLoop handles incoming data from the connection's incoming channel
@@ -214,12 +225,14 @@ func (c *Conn) readLoop() {
 		case <-c.rto.C:
 			c.listener.logger.Debugf("RTO expired, retransmitting missing segment, rtt: %v", c.GetRTT())
 			c.rtt.Store(int64(c.GetRTT()) * 2) // double the RTT
-			c.ssthresh = min(c.flightSize.Load()/2, 2*c.emss)
+			c.ssthresh = max(c.flightSize.Load()/2, 2*c.emss)
 			c.cwnd.Store(c.emss)
+			c.rto.Reset(c.GetRTT())
 			c.retransmitMissingSegment(c.peerAck)
-			if c.retransmit.Load() {
-				c.retransmit.Store(false)
-			}
+			c.recover.Store(c.seq.Load())
+			c.retransmit.Store(false)
+			c.unblockTransmit()
+			continue
 		case <-c.ackTimer.C:
 			sentAck := c.sentAck.Load()
 			ack := c.ack.Load()
@@ -243,15 +256,10 @@ func (c *Conn) readLoop() {
 		c.ackTimer.Stop()
 
 		if isUint32SeqHigher(c.seq.Load(), c.peerAck) {
-			if c.peerAck == maxUint32Seq {
-				continue
-			}
-			// transport.Logger.Infof("Current RTT is: %v", c.GetRTT())
 			c.rto.Reset(c.GetRTT())
 		}
-		if isUint32SeqHigher(c.peerSeq, c.sentAck.Load()) {
+		if isUint32SeqHigher(c.ack.Load(), c.sentAck.Load()) {
 			c.ackTimer.Reset(time.Millisecond * 100)
-			continue
 		}
 	}
 }
@@ -283,14 +291,133 @@ func (c *Conn) writeLoop() {
 				}
 			}*/
 
+			// wait for recovery to complete
+			c.waitTransmit()
+
 			// Wait if we've reached the congestion window
-			c.flightSize.WaitCwnd()
+			c.flightSize.WaitCwnd(c.emss)
 
 			// Send application data
-			if err := c.serializeData(); err != nil {
+			if err := c.serializeOutboundData(); err != nil {
 				c.listener.logger.Errorf("Error sending data: %v", err)
 				continue
 			}
 		}
 	}
+}
+
+// processICMPPacket handles the processing of a raw ICMP packet
+func (c *Conn) processICMPPacket(packet *Packet) error {
+	if packet.IcmpType != c.wantType {
+		c.listener.logger.Errorf("received unexpected icmp packet, %s", packet.IcmpPacket())
+		return nil
+	}
+
+	if packet.IcmpCode == 255 {
+		return fmt.Errorf("received close packet")
+	}
+
+	if packet.IcmpEchoID != c.icmpID {
+		c.listener.logger.Errorf("received unexpected icmp packet, icmp id: %d, expected: %d", packet.IcmpEchoID, c.icmpID)
+		return nil
+	}
+
+	// Validate and update ICMP sequence tracking
+	// expectedSeq := c.recvIcmpSeq.Load() + 1
+	c.recvIcmpSeq.Store(uint32(packet.IcmpSeq))
+
+	if len(packet.IcmpPayload) < eHeaderSize {
+		c.listener.clearMemory(packet.buffer)
+		return nil // Ignore packets without seq/ack
+	}
+
+	//c.listener.logger.Infof("Received ICMP packet, seq: %d, len: %d", seq, len(data))
+
+	//c.listener.logger.Infof("Received packet, seq: %d, ack: %d, len: %d", peerSeq, peerAck, len(data))
+
+	if isUint32SeqHigher(c.peerSeq, packet.PacketSeq) {
+		// drop spurious retransmissions
+		return nil
+	}
+
+	// validate this is a valid peer sequence number
+	if isUint32SeqHigher(packet.PacketSeq, c.peerSeq) {
+		c.listener.logger.Tracef("Invalid peer seq: %s, WANT_SEQ: %d", packet.PigPacket(), c.peerSeq)
+		if !c.recovery.Load() {
+			c.listener.logger.Debug("Loss detected, entering recovery")
+			c.recovery.Store(true)
+			c.blockTransmit()
+		}
+	}
+
+	if c.handleDuplicateAck(c.seq.Load(), packet) {
+		return nil
+	}
+
+	// New ACK
+	c.dupCnt = 0
+	// Update RTT
+	c.UpdateRTT(packet.PacketAck)
+	// Update flight size and retransmit queue
+
+	// transport.Logger.Infof("Peer acked %v bytes, flight size: %v", uint32SeqDiff(peerAck, c.peerAck), c.flightSize.Load())
+	if !c.doFastRetransmit(packet.PacketAck) {
+		c.updateCongestionWindow(packet.PacketAck)
+	}
+
+	if isUint32SeqHigher(packet.PacketAck, c.peerAck) {
+		c.rq.DeleteUntil(packet.PacketAck)
+		// deflate flight size
+		c.flightSize.Sub(uint32SeqDiff(packet.PacketAck, c.peerAck))
+		c.prevPeerAck = c.peerAck
+		c.peerAck = packet.PacketAck
+	}
+
+	if len(packet.Data) == 0 {
+		//c.listener.logger.Debugf("Received ACK, seq: %d, ack: %d", peerSeq, peerAck)
+		return nil
+	}
+
+	if c.recovery.Load() {
+		if c.peerSeq != packet.PacketSeq {
+			c.listener.logger.Tracef("Received out of order packet in recovery %s", packet.PigPacket())
+			c.ooq.Put(packet)
+			c.serializeDuplicateAck(c.seq.Load(), c.sentAck.Load())
+			return nil
+		}
+		// c.listener.logger.Debugf("Received packet in recovery %s", packet.PigPacket())
+		// write data to read buffer
+		c.readBuf.Write(packet.Data)
+		// update our next peer sequence number
+		c.peerSeq = packet.PacketSeq + uint32(len(packet.Data))
+		c.listener.clearMemory(packet.buffer)
+		c.recoverFromLoss(c.peerSeq)
+		c.recovery.Store(false)
+		// we can now resume transmitting
+		c.unblockTransmit()
+		return nil
+	}
+
+	// Process data
+	if n, err := c.readBuf.Write(packet.Data); err != nil || n != len(packet.Data) {
+		c.listener.logger.Errorf("error writing to read buffer: %v", err)
+		return nil
+	}
+
+	// update our next peer sequence number
+	c.peerSeq = packet.PacketSeq + uint32(len(packet.Data))
+	// update our ack number
+	c.ack.Store(c.peerSeq)
+
+	c.listener.clearMemory(packet.buffer)
+
+	lastSentAck := c.sentAck.Load()
+
+	if uint32SeqDiff(c.peerSeq, lastSentAck) < 2*c.emss {
+		return nil
+	}
+
+	c.serializeAck(c.peerSeq)
+
+	return nil
 }

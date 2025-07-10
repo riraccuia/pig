@@ -7,71 +7,14 @@ import (
 	"net"
 	"slices"
 
-	"github.com/riraccuia/pig/pkg/ice/conn"
 	"github.com/riraccuia/pig/pkg/ice/message"
 	"github.com/riraccuia/pig/pkg/ice/signaling"
 	"github.com/riraccuia/pig/pkg/stun"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-type ConnectPath struct {
-	ICEID      string
-	LocalNet   *net.IPNet
-	LocalAddr  net.Addr
-	RemoteAddr net.Addr
-	Protocol   transport.ICEProtocolDefinition
-	BindAgent  *stun.IceBindingAgent
-	Conn       net.Conn
-}
-
-func (cp *ConnectPath) Connect() (co net.Conn, err error) {
-	switch cp.Protocol.Network {
-	case "udp":
-		var _co *net.UDPConn
-		_co, err = conn.DialUDP("udp4", cp.LocalAddr.(*net.UDPAddr), cp.RemoteAddr.(*net.UDPAddr))
-		//co = conn.NewUDPPacketConn(_co)
-		co = _co
-	case "tcp":
-		co, err = conn.DialTCP("tcp4", cp.LocalAddr.(*net.TCPAddr), cp.RemoteAddr.(*net.TCPAddr))
-	default:
-		return nil, fmt.Errorf("unsupported protocol: %s", cp.Protocol.Network)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if co == nil {
-		return nil, fmt.Errorf("failed to connect unknown error")
-	}
-	cp.Conn = co
-	cp.BindAgent.Conn = co
-	return
-}
-
-func (cp *ConnectPath) ICESetup() error {
-	// wait for the first binding response
-	_, err := cp.BindAgent.SendBindingRequest(true)
-	if err != nil {
-		return fmt.Errorf("failed to send binding request: %w", err)
-	}
-	// let the binding agent handle requests out of band
-	// this call will not block
-	cp.BindAgent.Receive()
-	return nil
-}
-
-func (cp *ConnectPath) CloseConn() error {
-	if cp.Conn == nil {
-		return nil
-	}
-	return cp.Conn.Close()
-}
-
-func (cp ConnectPath) String() string {
-	return fmt.Sprintf("proto=%s id=%s local=%s remote=%s", cp.Protocol.Protocol, cp.ICEID, cp.LocalAddr.String(), cp.RemoteAddr.String())
-}
-
 func GetConnectPaths(ctx context.Context, opts *signaling.Options, addr string, pigProtos []transport.ICEProtocolDefinition) (cp []*ConnectPath, err error) {
-	localNets, localIps, err := getLocalNetworks()
+	localNets, localIps, err := GetLocalNetworks()
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +75,7 @@ func GetConnectPaths(ctx context.Context, opts *signaling.Options, addr string, 
 		return
 	}
 
-	opts.Logger.Debugf("answerCandidates: %v", answer.Candidates)
+	opts.Logger.Tracef("ICE: raw candidates from answer: %v", answer.Candidates)
 
 	iceAuth := &stun.StunAuthConfig{
 		Username:     offer.Credentials.Username,
@@ -164,7 +107,7 @@ func GetConnectPaths(ctx context.Context, opts *signaling.Options, addr string, 
 		return c.RemoteAddr == nil
 	})
 
-	opts.Logger.Debugf("connectPaths: %v", cp)
+	opts.Logger.Tracef("ICE: connect paths: %v", cp)
 
 	if len(cp) == 0 {
 		err = fmt.Errorf("no valid candidates found")
@@ -172,69 +115,4 @@ func GetConnectPaths(ctx context.Context, opts *signaling.Options, addr string, 
 	}
 
 	return
-}
-
-func CandidateFrom(network string, componentID int, ip net.IP, srcPort int) message.ICECandidate {
-	cType := message.ICECandidateTypeHost
-	cPriority := message.CalculateHostPriority()
-	if !ip.IsPrivate() {
-		cType = message.ICECandidateTypeSrflx
-		cPriority = message.CalculateSrflxPriority()
-	}
-	return message.ICECandidate{
-		Foundation:  message.GenerateFoundation(ip.String()),
-		ComponentID: componentID,
-		Priority:    cPriority,
-		Protocol:    network,
-		Address:     ip.String(),
-		Port:        srcPort,
-		Type:        cType,
-	}
-}
-
-func AddressFrom(network string, ip net.IP, port int) (addr net.Addr) {
-	if port == 0 {
-		port = rand.Intn(65535-1024) + 1024
-	}
-	switch network {
-	case "udp":
-		addr = &net.UDPAddr{IP: ip, Port: port}
-	case "tcp":
-		addr = &net.TCPAddr{IP: ip, Port: port}
-	}
-	return
-}
-
-func getLocalNetworks() (ipNets []*net.IPNet, ips []net.IP, err error) {
-	var interfaces []net.Interface
-	interfaces, err = net.Interfaces()
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get interfaces: %w", err)
-	}
-
-	for _, iface := range interfaces {
-		addresses, err := iface.Addrs()
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to get addresses: %w", err)
-		}
-		for _, address := range addresses {
-			var (
-				ip    net.IP
-				ipNet *net.IPNet
-			)
-			ip, ipNet, err = net.ParseCIDR(address.String())
-			if err != nil {
-				continue
-			}
-			if ipNet.IP.IsLoopback() {
-				continue
-			}
-			if ipNet.IP.To4() == nil {
-				continue
-			}
-			ipNets = append(ipNets, ipNet)
-			ips = append(ips, ip)
-		}
-	}
-	return ipNets, ips, nil
 }

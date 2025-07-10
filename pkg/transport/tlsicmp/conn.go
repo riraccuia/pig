@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
+	"time"
 
 	"github.com/riraccuia/pig/pkg/transport"
 )
@@ -15,15 +16,18 @@ type conn struct {
 }
 
 // newConn creates a new TLS-over-ICMP connection
-func newConn(icmpConn net.Conn, tlsConfig *tls.Config, isClient bool) (*conn, error) {
-	c := &conn{}
+func newConn(icmpConn net.Conn, tlsConfig *tls.Config, isServer bool) (*conn, error) {
+	icmpConn.SetReadDeadline(time.Now().Add(time.Second * 5))
+	defer icmpConn.SetReadDeadline(time.Time{})
 
+	c := &conn{}
 	// Create TLS connection using our conn as the underlying transport
-	switch isClient {
-	case true:
-		c.Conn = tls.Client(icmpConn, tlsConfig)
+	switch isServer {
 	case false:
+		c.Conn = tls.Client(icmpConn, tlsConfig)
+	case true:
 		c.Conn = tls.Server(icmpConn, tlsConfig)
+		// return c, nil
 	}
 
 	// Perform TLS handshake

@@ -110,12 +110,13 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 		c.logger.Infof("Connecting to server...")
 		conn, err := dialFunc()
 		if err != nil {
+			c.logger.Errorf("Failed to connect to server: %v", err)
 			select {
 			case <-ctx.Done():
 				c.logger.Infof("Context done, exiting")
 				return
 			case <-time.After(c.reconnectInterval):
-				c.logger.Errorf("Connection failed, retrying: %v", err)
+				c.logger.Error("Retrying connection...")
 				continue
 			}
 		}

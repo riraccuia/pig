@@ -34,19 +34,17 @@ The implementation is based on the ICE protocol specification defined in [RFC 84
 
 The package provides the following key capabilities:
 
-- **Multi-Protocol Support**: WebSocket (TCP), QUIC (UDP), and DTLS (UDP) transport protocols
 - **STUN Integration**: Uses STUN servers to discover public IP addresses and ports for NAT traversal
 - **MQTT Signaling**: Secure signaling between peers using MQTT broker
 - **ICE Binding**: Full ICE binding protocol implementation with STUN binding requests/responses
 - **Candidate Gathering**: Automatic gathering of host and server reflexive candidates
-- **Connection Multiplexing**: Supports multiple connection paths with automatic selection
+- **Path Discovery**: Supports multiple connection paths with automatic selection
 
 ## Implementation Notes
 
 This package implements a **simplified version** of the ICE protocol with the following characteristics:
 
 1. **ICE Binding Protocol**: Implements full STUN binding requests/responses for connectivity verification as specified in [RFC 8445 Section 7](https://tools.ietf.org/html/rfc8445#section-7)
-2. **Multi-Protocol Support**: Supports WebSocket (TCP), QUIC (UDP), and DTLS (UDP) as transport protocols
 3. **Automatic Candidate Selection**: Uses ICE nomination process to select the best connection path
 4. **Component-Based Architecture**: Each protocol has a unique component ID for proper candidate matching
 5. **Bidirectional Signaling**: Full offer/answer exchange with proper ICE credentials
@@ -112,8 +110,6 @@ Key methods:
 
 ### Protocol Definitions
 
-The package supports three main transport protocols:
-
 ```go
 var (
     ICEProtocolWS = ICEProtocolDefinition{
@@ -130,6 +126,11 @@ var (
         Network:     "udp",
         Protocol:    "dtls", 
         ComponentID: 5,
+    }
+    ICEProtocolTLS = ICEProtocolDefinition{
+        Network:     "tcp",
+        Protocol:    "tls",
+        ComponentID: 6,
     }
 )
 ```

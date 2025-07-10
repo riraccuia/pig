@@ -2,15 +2,17 @@ package icmp
 
 import (
 	"encoding/binary"
+	"sync"
 	"time"
 )
 
 // initNewReno initializes the congestion control variables
 func (c *Conn) initNewReno() {
 	// Initialize congestion control (all values in MSS units)
-	c.cwnd.Store(3 * c.emss) // Start with 3 EMSS
+	c.cwnd.Store(10 * c.emss) // Start with 10 EMSS
 	c.ssthresh = maxUint32Seq
-	c.flightSize = NewFlightCounter(&c.cwnd) // No data in flight initially
+	c.flightSize = NewFlightCounter(&c.cwnd, uint32(c.writeBuf.size)) // No data in flight initially
+	c.transmitWg = sync.NewCond(&sync.Mutex{})
 	c.rto = time.NewTimer(minRTO)
 	c.rto.Stop()
 	// Initialize sequence numbers
@@ -18,10 +20,9 @@ func (c *Conn) initNewReno() {
 	c.ack.Store(0)         // Our acknowledgment number
 	c.peerSeq = 0          // Peer's sequence number
 	c.peerAck = 0xFFFFFFFF // Peer's acknowledgment number
-
 	// Initial RTT estimate
 	c.rtt.Store(int64(500 * time.Millisecond))
-
+	// Initialize retransmit queue and out of order queue
 	c.rq = NewRetransmitQueue(c.listener.clearMemory)
 	c.ooq = NewRetransmitQueue(c.listener.clearMemory)
 }
@@ -45,31 +46,56 @@ func (c *Conn) updateCongestionWindow(peerAck uint32) {
 		return
 	}
 	ackedBytes := uint32SeqDiff(peerAck, c.peerAck)
-	if c.cwnd.Load() < c.ssthresh {
-		// Slow start
-		incr := c.emss
-		if ackedBytes > incr {
-			incr = (ackedBytes / c.emss) * c.emss
+	if c.cwnd.Load() >= c.ssthresh {
+		// Congestion avoidance
+		c.ackBytesCount += ackedBytes
+		if c.ackBytesCount >= c.cwnd.Load() {
+			c.ackBytesCount = 0
+			c.cwnd.Add(c.emss)
 		}
-		c.cwnd.Add(min(ackedBytes, incr))
 		return
 	}
-	// Congestion avoidance
-	c.ackBytesCount += ackedBytes
-	if c.ackBytesCount < c.cwnd.Load() {
-		return
-	}
+	// Slow start
 	c.ackBytesCount = 0
-	c.cwnd.Add(c.emss)
-	// transport.Logger.Infof("Congestion avoidance, cwnd increased by %d to %d", delta, c.getCwnd())
+	if ackedBytes > c.emss {
+		ackedBytes = c.emss
+	}
+	c.cwnd.Add(ackedBytes)
 }
 
-func (c *Conn) handleDuplicateAck(ourSeq, peerSeq, peerAck uint32, data []byte) (isDuplicateAck bool) {
-	isDuplicateAck = len(data) == 0 /*&& (peerSeq == c.peerSeq)*/ && (peerAck == c.peerAck) && (isUint32SeqHigher(ourSeq, peerAck))
+func (c *Conn) blockTransmit() {
+	c.transmitWg.L.Lock()
+	c.transmitBlocked = true
+	c.transmitWg.L.Unlock()
+}
+func (c *Conn) unblockTransmit() {
+	if c.retransmit.Load() || c.recovery.Load() {
+		return
+	}
+	c.transmitWg.L.Lock()
+	if !c.transmitBlocked {
+		c.transmitWg.L.Unlock()
+		return
+	}
+	c.transmitBlocked = false
+	c.transmitWg.Signal()
+	c.transmitWg.L.Unlock()
+}
+
+func (c *Conn) waitTransmit() {
+	c.transmitWg.L.Lock()
+	for c.transmitBlocked {
+		c.transmitWg.Wait()
+	}
+	c.transmitWg.L.Unlock()
+}
+
+func (c *Conn) handleDuplicateAck(ourSeq uint32, packet *Packet) (isDuplicateAck bool) {
+	isDuplicateAck = len(packet.Data) == 0 && (packet.PacketAck == c.peerAck) && (isUint32SeqHigher(ourSeq, packet.PacketAck))
 	if !isDuplicateAck {
 		return
 	}
-	c.listener.logger.Debugf("Duplicate ACK, seq: %d, ack: %d, our_seq: %d, our_ack: %d", peerSeq, peerAck, ourSeq, c.ack.Load())
+	c.listener.logger.Tracef("Duplicate ACK, %s, OUR_SEQ: %d, OUR_ACK: %d, FLIGHT: %d", packet.PigPacket(), ourSeq, c.ack.Load(), uint16SeqDiff(ourSeq, packet.PacketAck))
 	if c.retransmit.Load() {
 		c.cwnd.Add(c.emss)
 		return
@@ -79,78 +105,96 @@ func (c *Conn) handleDuplicateAck(ourSeq, peerSeq, peerAck uint32, data []byte) 
 	if c.dupCnt < 3 {
 		return
 	}
-	c.listener.logger.Debugf("Triple duplicate ACK, seq: %d, ack: %d", peerSeq, peerAck)
-	// Enter fast recovery
-	c.retransmit.Store(true)
+
+	if isUint32SeqHigher(c.recover.Load(), packet.PacketAck) {
+		// rfc6582 section 4.1
+		if c.cwnd.Load() <= c.emss {
+			// the congestion window is too small
+			return
+		}
+		if uint32SeqDiff(c.peerAck, c.prevPeerAck) > (4 * c.emss) {
+			// this is likely the result of unnecessary retransmissions
+			return
+		}
+	}
+	c.listener.logger.Debugf("Triple duplicate ACK, %s", packet.PigPacket())
+
 	c.recover.Store(ourSeq)
-	// Fast retransmit - halve cwnd and set ssthresh
+
+	c.blockTransmit()
+
 	// ssthresh=max(FlightSize/2,2×MSS)
 	c.ssthresh = max(c.flightSize.Load()/2, 2*c.emss)
+	// Retransmit missing segment
+	c.retransmitMissingSegment(packet.PacketAck)
 	// cwnd=ssthresh+3×MSS
 	c.cwnd.Store(c.ssthresh + 3*c.emss)
 	c.listener.logger.Debugf("Fast retransmit triggered, new cwnd: %d", c.cwnd.Load())
-	// Retransmit missing segment
-	c.retransmitMissingSegment(peerAck)
+	// Enter fast recovery
+	c.retransmit.Store(true)
 	return
 }
 
-func (c *Conn) doFastRetransmit(peerAck uint32) {
+func (c *Conn) doFastRetransmit(peerAck uint32) bool {
 	if !c.retransmit.Load() {
-		return
+		return false
 	}
 	if isUint32SeqHigher(c.recover.Load(), peerAck) {
+		c.retransmitMissingSegment(peerAck)
 		ackedBytes := uint32SeqDiff(peerAck, c.peerAck)
-		cwnd := c.cwnd.Load() - ackedBytes
+		if ackedBytes < c.emss {
+			ackedBytes = c.emss
+		}
+		cwnd := c.ssthresh
+		if ackedBytes < cwnd {
+			c.cwnd.Store(cwnd + c.emss)
+		}
+		/*cwnd := c.cwnd.Load() - ackedBytes
 		if ackedBytes >= c.emss {
 			cwnd += c.emss
 		}
 		if cwnd > 0 {
 			c.cwnd.Store(cwnd)
-		}
-		c.retransmitMissingSegment(peerAck)
-		return
+		}*/
+		return true
 	}
-	// Exit recovery
-	c.retransmit.Store(false)
-	c.ackBytesCount = 0
-	// cwnd=ssthresh
-	cwnd := min(c.ssthresh, max(c.flightSize.Load(), c.emss))
+	// c.ackBytesCount = 0
+	cwnd := c.ssthresh
+	// cwnd := min(c.ssthresh, max(c.flightSize.Load(), c.emss))
+	// reset RTO
 	c.cwnd.Store(cwnd)
-	c.listener.logger.Debugf("Exiting fast retransmit")
+	c.rto.Reset(minRTO)
+	// Exit recovery
+	c.retransmit.Store(false) // we can now resume transmitting
+	c.unblockTransmit()
+	c.listener.logger.Debugf("Exiting fast retransmit, cwnd: %d", c.cwnd.Load())
+	return false
 }
 
-func (c *Conn) recoverFromLoss(startSeq uint32) {
-	var (
-		purge       bool
-		prevPeerSeq = c.peerSeq
-		peerAck     = c.peerAck
-	)
-	c.listener.logger.Debugf("Recovering from loss, startSeq: %d", startSeq)
-	c.ooq.RangeFrom(startSeq, func(seq uint32, nextSeq uint32, sData []byte) bool {
-		c.listener.logger.Debugf("Found packet in out of order queue, seq: %d", seq)
-		purge = true
-		prevPeerSeq = seq
-		peerAck = binary.BigEndian.Uint32(sData[4:8])
-		if peerAck > c.peerAck {
-			c.peerAck = peerAck
+func (c *Conn) recoverFromLoss(startSeq uint32) bool {
+	numRecovered := 0
+	c.listener.logger.Tracef("Recovering from loss, startSeq: %d", startSeq)
+	c.ooq.RangeFrom(startSeq, func(packet *Packet, nextSeq uint32) bool {
+		c.listener.logger.Tracef("Found packet in out of order queue: %s", packet.PigPacket())
+		if packet.PacketAck > c.peerAck {
+			c.peerAck = packet.PacketAck
 		}
-		// c.updateCongestionWindow()
-		if _, err := c.readBuf.Write(sData[8:]); err != nil {
+		if _, err := c.readBuf.Write(packet.Data); err != nil {
 			c.listener.logger.Errorf("Error writing to read buffer: %v", err)
 			return false
 		}
-		nextPeerSeq := seq + uint32(len(sData[8:]))
+		numRecovered++
+		nextPeerSeq := packet.PacketSeq + uint32(len(packet.Data))
 		c.peerSeq = nextPeerSeq
 		return nextSeq == nextPeerSeq
 	})
-	if !purge {
-		c.recovery = false
-		return
-	}
-	c.ooq.DeleteUntil(prevPeerSeq)
+	c.listener.logger.Tracef("Recovered %d packets", numRecovered)
+	// delete recovered packets from out of order queue
+	c.ooq.DeleteUntil(c.peerSeq)
+	// send an ack to let the peer know we recovered
 	c.ack.Store(c.peerSeq)
 	c.serializeAck(c.peerSeq)
-	c.recovery = false
+	return numRecovered > 0
 }
 
 func (c *Conn) retransmitMissingSegment(peerAck uint32) {
@@ -159,13 +203,16 @@ func (c *Conn) retransmitMissingSegment(peerAck uint32) {
 		c.listener.logger.Debugf("No data to retransmit, peerAck: %d", peerAck)
 		return
 	}
-	packetSeq := binary.BigEndian.Uint32(packet[0:4])
-	if packetSeq != peerAck {
-		c.listener.logger.Errorf("mismatch in packet seq: %d, peerAck: %d", packetSeq, peerAck)
+	//packetSeq := binary.BigEndian.Uint32(packet[0:4])
+	if packet.PacketSeq != peerAck {
+		c.listener.logger.Errorf("mismatch in packet seq: %d, peerAck: %d", packet.PacketSeq, peerAck)
 	}
-	// transport.Logger.Infof("First retransmit packet seq: %v", c.rq.packets[0].seq)
-	c.listener.logger.Debugf("Retransmitting seq: %d, ack: %d, len: %d", peerAck, c.ack.Load(), len(packet))
-	if err := c.serializeRetransmitData(peerAck, c.ack.Load(), packet); err != nil {
+
+	packet.PacketAck = c.ack.Load()
+	binary.BigEndian.PutUint32(packet.IcmpPayload[4:8], packet.PacketAck)
+
+	c.listener.logger.Tracef("Retransmitting packet: %s", packet.PigPacket())
+	if err := c.serializeData(packet.IcmpPayload); err != nil {
 		c.listener.logger.Errorf("Error retransmitting data: %v", err)
 	}
 }
