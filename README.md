@@ -32,6 +32,7 @@ It works with multiple connection types and doesn't require any special router s
   - [Allowed ICE Protocols](#allowed-ice-protocols)
   - [Candidate Pair Negotiation](#candidate-pair-negotiation)
   - [STUN Binding Authentication](#stun-binding-authentication)
+- [ICE Protocol Flow (Sequence Diagram)](#ice-protocol-flow-sequence-diagram)
 - [Start/Stop Scripts](#startstop-scripts)
   - [Configuration](#configuration)
   - [Environment Variables](#environment-variables)
@@ -349,6 +350,52 @@ The ICE mechanism works by:
 - **RFC 8445 Compliance**: Candidate pair negotiation with authenticated STUN binding checks
 
 For detailed technical information about pig's ICE implementation, see the [ICE Documentation](pkg/ice/README.md).
+
+### Pig's path discovery flow diagram
+
+```mermaid
+sequenceDiagram
+    participant PeerA as Peer A (Client/Controlling)
+    participant STUN as STUN Server
+    participant MQTT as Signal Channel (MQTT Broker)
+    participant PeerB as Peer B (Server/Controlled)
+
+    %% Peer A discovers public address
+    PeerA->>STUN: Who am I?
+    STUN-->>PeerA: Your public IP:Port (A)
+
+    %% Peer A connects to signaling and sends offer
+    PeerA->>MQTT: Connect & subscribe (session)
+    PeerA->>MQTT: Send Offer (SDP, ICE candidates)
+    MQTT-->>PeerB: Deliver Offer
+
+    %% Peer B receives offer, then queries STUN
+    PeerB->>MQTT: Connect & subscribe (session)
+    PeerB->>STUN: Who am I?
+    STUN-->>PeerB: Your public IP:Port (B)
+
+    %% Peer B sends answer
+    PeerB->>MQTT: Send Answer (SDP, ICE candidates)
+    MQTT-->>PeerA: Deliver Answer
+
+    %% ICE candidate exchange (trickle)
+    PeerA->>MQTT: Send ICE candidates (A)
+    MQTT-->>PeerB: Deliver ICE candidates (A)
+    PeerB->>MQTT: Send ICE candidates (B)
+    MQTT-->>PeerA: Deliver ICE candidates (B)
+
+    %% Connectivity checks - testing all candidate pairs
+    PeerA->>PeerB: STUN Binding Request (connectivity check - all candidates)
+    PeerB->>PeerA: STUN Binding Request (connectivity check - all candidates)
+    PeerA->>PeerB: STUN Binding Response (connectivity check - all candidates)
+    PeerB->>PeerA: STUN Binding Response (connectivity check - all candidates)
+
+    %% Nomination of best candidate
+    PeerA->>PeerB: STUN Binding Request (nominated candidate)
+
+    %% Tunnel established
+    PeerA-->>PeerB: Encrypted tunnel established (nominated path)
+```
 
 ### Configuring ICE
 
