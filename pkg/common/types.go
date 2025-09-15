@@ -2,12 +2,14 @@ package common
 
 import (
 	"net"
+	"time"
 
 	"github.com/riraccuia/pig/pkg/packet"
 )
 
 const (
-	DefaultQueueSize = 256
+	DefaultQueueSize     = 256
+	DefaultConnectOffset = time.Millisecond * 500
 )
 
 type PacketQueue chan packet.IPv4Packet

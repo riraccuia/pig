@@ -149,6 +149,12 @@ func loadConfigFile(configPath string) (*config.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config file: %v", err)
 	}
+	if cfg.ICE == nil {
+		cfg.ICE = &config.ICEConfig{Enabled: false}
+	}
+	if cfg.Auth == nil {
+		cfg.Auth = &config.AuthConfig{}
+	}
 	return cfg, nil
 }
 
@@ -222,11 +228,17 @@ func applyCommandLineFlags(cfg *config.Config, flags *pigFlags, mode config.Mode
 	}
 
 	if flags.serverAddr != "" {
-		configureTarget(cfg, flags.serverAddr, "listen", logger)
+		err := configureTarget(cfg, flags.serverAddr, "listen", logger)
+		if err != nil {
+			logger.Fatalf("Failed to configure listen address: %v", err)
+		}
 	}
 
 	if flags.remoteAddr != "" {
-		configureTarget(cfg, flags.remoteAddr, "target", logger)
+		err := configureTarget(cfg, flags.remoteAddr, "target", logger)
+		if err != nil && !flags.iceEnabled {
+			logger.Fatalf("Failed to configure target address: %v", err)
+		}
 		setConfigField(&cfg.Target.SrcPort, flags.srcPort)
 	}
 
@@ -421,10 +433,15 @@ func buildICESettingsFromFlags(cfg *config.Config, flags *pigFlags, logger commo
 		EncryptionKey:     flags.iceKey,
 		MQTTBrokerAddress: flags.iceMQTTBroker,
 	}
+
+	cfg.ICE.Signaling.ServerID = flags.remoteAddr
+	if cfg.Mode == "server" {
+		cfg.ICE.Signaling.ServerID = flags.serverAddr
+	}
 }
 
 func applyICESettings(cfg *config.Config, flags *pigFlags, logger common.Logger) {
-	if !cfg.ICE.Enabled {
+	if cfg.ICE == nil || !cfg.ICE.Enabled {
 		return
 	}
 	// apply default values if needed for stun and mqtt
@@ -451,11 +468,11 @@ func applyICESettings(cfg *config.Config, flags *pigFlags, logger common.Logger)
 	}
 }
 
-func configureTarget(cfg *config.Config, addr string, addrType string, logger common.Logger) {
+func configureTarget(cfg *config.Config, addr string, addrType string, logger common.Logger) error {
 	if addr == "." {
 		cfg.Target.Address = "0.0.0.0"
 		cfg.Target.Port = 0
-		return
+		return nil
 	}
 	address, strPort, err := net.SplitHostPort(addr)
 	if err != nil && strings.Contains(err.Error(), "missing port") {
@@ -463,7 +480,7 @@ func configureTarget(cfg *config.Config, addr string, addrType string, logger co
 		err = nil
 	}
 	if err != nil {
-		logger.Fatalf("Failed to parse %s address: %v", addrType, err)
+		return fmt.Errorf("failed to parse %s address: %v", addrType, err)
 	}
 	if address == "" {
 		address = "0.0.0.0"
@@ -473,21 +490,38 @@ func configureTarget(cfg *config.Config, addr string, addrType string, logger co
 	}
 	port, err := strconv.Atoi(strPort)
 	if err != nil {
-		logger.Fatalf("Failed to parse %s address port: %v", addrType, err)
+		return fmt.Errorf("failed to parse %s address port: %v", addrType, err)
 	}
 	// if the address is a domain name, resolve it to an IP address
 	if net.ParseIP(address) == nil {
 		ips, err := net.LookupIP(address)
 		if err != nil {
-			logger.Fatalf("Failed to resolve %s address: %v", addrType, err)
+			return fmt.Errorf("failed to resolve %s address: %v", addrType, err)
 		}
 		if len(ips) == 0 {
-			logger.Fatalf("No IP addresses found for %s address: %s", addrType, address)
+			return fmt.Errorf("no IP addresses found for %s address: %s", addrType, address)
 		}
 		address = ips[0].String()
 	}
 	cfg.Target.Address = address
 	cfg.Target.Port = port
+	return nil
+}
+
+func needsTarget(cfg *config.Config) bool {
+	if cfg.Target.Address != "" {
+		return false
+	}
+	if !cfg.ICE.Enabled {
+		return true
+	}
+	if cfg.ICE.Signaling == nil {
+		return true
+	}
+	if cfg.ICE.Signaling.ServerID != "" {
+		return false
+	}
+	return true
 }
 
 func validateConfig(cfg *config.Config, logger common.Logger) {
@@ -495,7 +529,7 @@ func validateConfig(cfg *config.Config, logger common.Logger) {
 		logger.Fatalf("Invalid pig mode: %s", cfg.Mode)
 	}
 
-	if cfg.Target.Address == "" {
+	if needsTarget(cfg) {
 		logger.Fatalf("Target address not specified")
 	}
 

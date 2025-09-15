@@ -166,7 +166,7 @@ pig implements WRED (Weighted Random Early Detection) to combat network bufferbl
 | **Config File** | `-config` | Path to configuration file in toml format | |
 | **Networks** | `-proto` | Transport protocol, one of "quic", "udp", "tls", "ws", "icmp", "tls-in-icmp", "dtls". Multiple values comma-separated (e.g., "ws,quic") can be used in ICE mode | ws |
 | | `-l` | Listen address host[:port] | |
-| | `-c` | Connect address host[:port] | |
+| | `-c` | Connect address host[:port] or server identifier for ICE | |
 | | `-mtu` | MTU size | 1400 |
 | | `-streams` | Number of multiplexed streams for supported protocols | CPU cores available |
 | | `-retry` | Reconnection interval in seconds | 5 |
@@ -209,9 +209,11 @@ The configuration file uses TOML format and provides a more structured approach 
 | `insecure` | bool | Skip TLS certificate verification if true | false |
 | `reconnect_interval` | int | Time in seconds to wait before reconnecting | 5 |
 | `bind_adapter` | string | Network interface to bind to (e.g., "eth0", "wlan0"), useful for icmp based protos | Default interface |
-| `log_level` | string | Logging level: "debug", "info", "warn", "error" | info |
 | `start_script` | string | Script to execute when a tunnel connection is established |  |
 | `stop_script` | string | Script to execute when a tunnel connection is terminated |  |
+| `log.file` | string | Path to log file (optional) |  |
+| `log.level` | string | Logging level: "debug", "info", "warn", "error" | info |
+| `log.rotate_size` | string/int | Log rotation size (e.g., "100k", "1m", "1g") |  |
 | `target.address` | string | Target address to bind to (server) or connect to (client) | Required |
 | `target.port` | int | Port to use for the connection | Required |
 | `target.src_port` | int | Source port to use for the connection (if applicable) | 0 (system assigned) |
@@ -226,6 +228,8 @@ The configuration file uses TOML format and provides a more structured approach 
 | `ice.protos` | array of strings | Protocols to use for ICE candidate generation (e.g. ["ws", "quic"] ), see [Allowed ICE Protocols](#allowed-ice-protocols) for more details | ["ws"] |
 | `ice.stun_address` | string | STUN server address for hole punching | stun.l.google.com:19302 |
 | `ice.signaling.encryption_key` | string | Encryption key for signaling messages | no encryption |
+| `ice.signaling.server_id` | string | Server identifier for connection routing (overrides public IP) | |
+| `ice.signaling.connect_offset` | int | Connection timing offset in milliseconds for coordinated connections | 500 |
 | `ice.signaling.mqtt_broker_address` | string | MQTT broker address for signaling | ssl://test.mosquitto.org:8883 |
 | `ice.signaling.mqtt_client_id` | string | Client ID for MQTT connection | |
 | `ice.signaling.mqtt_username` | string | Username for MQTT connection | |
@@ -243,12 +247,16 @@ mtu = 1500                     # Maximum Transmission Unit
 cert_file = "/path/to/cert.pem"
 key_file = "/path/to/key.pem"
 stream_count = 5               # Number of multiplexed streams for supported protocols
-log_level = "info"             # Logging level
 insecure = true                # Skip certificate verification if true
 reconnect_interval = 5         # Reconnection interval in seconds
 bind_adapter = "eth0"          # Network interface to bind to
 start_script = "/path/to/start.sh" # Script to run when a connection is established
 stop_script = "/path/to/stop.sh"   # Script to run when a connection is terminated
+
+[log]
+file = "/var/log/pig.log"          # Path to log file (optional)
+level = "info"                     # Logging level: debug, info, warn, error
+rotate_size = "10m"                # Log rotation size
 
 [target]
 address = "0.0.0.0"            # Target address to bind to (server) or connect to (client)
@@ -277,6 +285,8 @@ stun_address = "stun.l.google.com:19302"  # STUN server address
 
   [ice.signaling]
   encryption_key = "my-secure-passphrase"         # Encryption key for signaling messages
+  server_id = "my-server-identifier"              # Server identifier for connection routing
+  connect_offset = 500                            # Connection timing offset in milliseconds
   mqtt_broker_address = "ssl://mqtt-broker:8883"  # Optional MQTT broker address, defaults to ssl://test.mosquitto.org:8883
   mqtt_client_id = "unique-client-id"             # Optional MQTT client ID
   mqtt_username = "user"                          # Optional MQTT username
@@ -350,6 +360,7 @@ The ICE mechanism works by:
 - **STUN Discovery**: Finding public endpoints through STUN servers
 - **MQTT Signaling**: Secure message exchange between peers using MQTT brokers
 - **Encrypted Communication**: Optional AES-256-GCM encryption for signaling messages
+- **Coordinated Timing**: Synchronized connection attempts using configurable timing offsets
 - **Hole Punching**: UDP and TCP hole punching to establish direct connectivity
 - **RFC 8445 Compliance**: Candidate pair negotiation with authenticated STUN binding checks
 
@@ -413,6 +424,10 @@ Fortunately, many public MQTT brokers and STUN servers are available for free. T
 
 Due to the public nature of these services, you can optionally provide a passphrase to encrypt all signaling messages.
 
+**Advanced Configuration Options:**
+- **Server ID**: Use `ice.signaling.server_id` to identify connections by a custom identifier instead of the server's public IP address
+- **Connection Timing**: Configure `ice.signaling.connect_offset` (in milliseconds) to coordinate connection attempts between peers, improving NAT traversal success rates
+
 In ICE mode, you can [specify multiple protocols](#allowed-ice-protocols) (e.g. `-proto ws,quic`) to generate candidate pairs. This increases the chances of successful connectivity. 
 
 ```bash
@@ -447,6 +462,8 @@ stun_address = "stun.l.google.com:19302"
 
 [ice.signaling]
 encryption_key = "my-secure-passphrase"
+server_id = "my-server-identifier"
+connect_offset = 500
 mqtt_broker_address = "ssl://mqtt-broker:8883"
 ```
 

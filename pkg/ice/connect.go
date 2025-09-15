@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net"
 	"slices"
+	"time"
 
 	"github.com/riraccuia/pig/pkg/ice/message"
 	"github.com/riraccuia/pig/pkg/ice/signaling"
@@ -59,6 +60,9 @@ func GetConnectPaths(ctx context.Context, opts *signaling.Options, addr string, 
 			Priority:       candidate.Priority,
 			IceControlling: 0x12345678,
 		}
+		//if tr.Network == "udp" {
+		//	go conn.PunchUDP(localAddr.(*net.UDPAddr).Port, "78.196.244.170:443")
+		//}
 	}
 
 	var (
@@ -69,6 +73,8 @@ func GetConnectPaths(ctx context.Context, opts *signaling.Options, addr string, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate ICE offer: %w", err)
 	}
+
+	offer.ConnectOffsetDuration = opts.ConnectOffset
 
 	answer, err = signaling.GatherICECandidates(ctx, opts, addr, offer)
 	if err != nil {
@@ -99,6 +105,7 @@ func GetConnectPaths(ctx context.Context, opts *signaling.Options, addr string, 
 			connect.ICEID = answer.SessionID
 			connect.RemoteAddr = AddressFrom(connect.Protocol.Network, targetIP, candidate.Port)
 			connect.BindAgent.Auth = iceAuth
+			connect.ScheduledAt = time.UnixMilli(answer.Timestamp).Add(offer.ConnectOffsetDuration)
 		}
 	}
 

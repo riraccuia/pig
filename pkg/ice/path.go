@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/riraccuia/pig/pkg/ice/conn"
 	"github.com/riraccuia/pig/pkg/log"
@@ -19,13 +20,14 @@ var ErrConnectICMP = fmt.Errorf("call ConnectICMP instead")
 // it is used to store information that will be exchanged
 // between the client and the server using the ICE protocol
 type ConnectPath struct {
-	ICEID      string
-	LocalNet   *net.IPNet
-	LocalAddr  net.Addr
-	RemoteAddr net.Addr
-	Protocol   transport.ICEProtocolDefinition
-	BindAgent  *stun.IceBindingAgent
-	Conn       net.Conn
+	ICEID       string
+	LocalNet    *net.IPNet
+	LocalAddr   net.Addr
+	RemoteAddr  net.Addr
+	Protocol    transport.ICEProtocolDefinition
+	BindAgent   *stun.IceBindingAgent
+	Conn        net.Conn
+	ScheduledAt time.Time // the time at which the connection should be established
 }
 
 // String returns a string representation of the ConnectPath

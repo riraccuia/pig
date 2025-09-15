@@ -81,7 +81,7 @@ func processICEClientConnectPaths(ctx context.Context, logger *log.Logger, cfg *
 	)
 	for _, cp := range connectPaths {
 		logger.Debugf("Connecting ICE path | %s", cp.String())
-		go func(cp *ice.ConnectPath) {
+		time.AfterFunc(time.Until(cp.ScheduledAt), func() {
 			_, e := cp.Connect()
 			if e == ice.ErrConnectICMP {
 				_, e = cp.ConnectICMP(ctx, logger, cfg.BindAdapter, false)
@@ -99,7 +99,7 @@ func processICEClientConnectPaths(ctx context.Context, logger *log.Logger, cfg *
 			if !selectedPtr.CompareAndSwap(nil, cp) {
 				cp.CloseConn()
 			}
-		}(cp)
+		})
 	}
 	var stop bool
 	for !stop {

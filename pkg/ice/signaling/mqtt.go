@@ -73,10 +73,16 @@ func (s *Signaler) connectAndSubscribe(topic string, handler mqtt.MessageHandler
 	return nil
 }
 
-// getTopicPrefix returns the topic prefix for the given string
-func (s *Signaler) getTopicPrefix(str string) string {
+// getTopicPrefix returns the topic prefix, it will use the ID if it is set, or
+// the input string if not. Then the ID or input string is hashed with the encryption key
+// and base64 encoded.
+func (s *Signaler) getTopicPrefix(inputStr string) string {
+	useStr := inputStr
+	if s.opts.ServerID != "" {
+		useStr = s.opts.ServerID
+	}
 	// the topic prefix is the sha256 hash of the target address
-	topicPrefix := sha256.Sum256(append([]byte(str), s.opts.EncryptionKey...))
+	topicPrefix := sha256.Sum256(append([]byte(useStr), s.opts.EncryptionKey...))
 	// base64 encode the topic prefix
 	topicPrefixStr := strings.ToLower(base64.StdEncoding.EncodeToString(topicPrefix[:]))
 	// remove slashes from the topic prefix

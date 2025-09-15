@@ -68,7 +68,7 @@ func processICEServerConnectPaths(ctx context.Context, logger *log.Logger, cfg *
 	)
 	for _, cp := range listenPaths {
 		logger.Debugf("Connecting ICE path | %s", cp.String())
-		go func(cp *ice.ConnectPath) {
+		time.AfterFunc(time.Until(cp.ScheduledAt), func() {
 			_, e := cp.Connect()
 			if e == ice.ErrConnectICMP {
 				_, e = cp.ConnectICMP(ctx, logger, cfg.BindAdapter, true)
@@ -82,7 +82,7 @@ func processICEServerConnectPaths(ctx context.Context, logger *log.Logger, cfg *
 			}
 			cp.BindAgent.Receive() // keep on handling binding requests until ice is completed
 			connectedPaths.Store(cp.String(), cp)
-		}(cp)
+		})
 	}
 	var stop bool
 	for !stop {

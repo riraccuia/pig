@@ -17,9 +17,6 @@ const (
 
 	// ICEMessageTypeAnswer indicates an answer message from the server
 	ICEMessageTypeAnswer ICEMessageType = "answer"
-
-	// ICEMessageTypeCandidate indicates additional candidates
-	ICEMessageTypeCandidate ICEMessageType = "candidate"
 )
 
 // ICECandidateType defines the type of ICE candidate
@@ -43,6 +40,13 @@ type ICEMessage struct {
 
 	// Timestamp of when the message was created
 	Timestamp int64 `json:"timestamp"`
+
+	// ConnectOffsetDuration represents the duration that will be added to the
+	// timestamp of the answer to make it the scheduled time. The value for this
+	// field is elapsed time between two instants as an int64 nanosecond count.
+	// This field is controlled by the offer message and must not be present in
+	// the answer message.
+	ConnectOffsetDuration time.Duration `json:"connect_offset_duration,omitempty"`
 
 	// Candidates for this message
 	Candidates []ICECandidate `json:"candidates"`
@@ -95,7 +99,7 @@ func GenerateICEOffer(candidates []ICECandidate) (*ICEMessage, error) {
 	// Create the message
 	message := &ICEMessage{
 		Type:        ICEMessageTypeOffer,
-		Timestamp:   time.Now().Unix(),
+		Timestamp:   time.Now().UnixMilli(),
 		Candidates:  candidates,
 		Credentials: generateCredentials(),
 	}
@@ -109,97 +113,13 @@ func GenerateICEOffer(candidates []ICECandidate) (*ICEMessage, error) {
 func GenerateICEAnswer(candidates []ICECandidate) (*ICEMessage, error) {
 	message := &ICEMessage{
 		Type:        ICEMessageTypeAnswer,
-		Timestamp:   time.Now().Unix(),
+		Timestamp:   time.Now().UnixMilli(),
 		Candidates:  candidates,
 		Credentials: generateCredentials(),
 	}
 
 	return message, nil
 }
-
-// GenerateICEOffer creates an ICE offer message with host and STUN-derived candidates
-/*func _GenerateICEOffer(mappedIP net.IP, mappedPort int, localAddr net.Addr, encryptionKey []byte) (*ICEMessage, error) {
-	host, port, err := net.SplitHostPort(localAddr.String())
-	if err != nil {
-		return nil, err
-	}
-
-	portInt, err := strconv.Atoi(port)
-	if err != nil {
-		return nil, err
-	}
-
-	proto := localAddr.Network()
-
-	localCandidates, err := GetLocalCandidates(proto, portInt)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create the message
-	message := &ICEMessage{
-		Type:      ICEMessageTypeOffer,
-		Timestamp: time.Now().Unix(),
-		Candidates: append(localCandidates, ICECandidate{
-			// Server reflexive candidate (from STUN)
-			Foundation:  GenerateFoundation(mappedIP.String()),
-			Priority:    CalculateSrflxPriority(),
-			Protocol:    proto,
-			Address:     mappedIP.String(),
-			Port:        mappedPort,
-			Type:        ICECandidateTypeSrflx,
-			RelatedAddr: host,
-			RelatedPort: portInt,
-		}),
-		Credentials: generateCredentials(encryptionKey),
-	}
-
-	message.GenerateSessionID()
-
-	return message, nil
-}
-
-// GenerateICEAnswer creates an ICE answer message with host and STUN-derived candidates
-func _GenerateICEAnswer(mappedIP net.IP, mappedPort int, localAddr net.Addr, encryptionKey []byte) (*ICEMessage, error) {
-	host, port, err := net.SplitHostPort(localAddr.String())
-	if err != nil {
-		return nil, err
-	}
-
-	portInt, err := strconv.Atoi(port)
-	if err != nil {
-		return nil, err
-	}
-
-	proto := localAddr.Network()
-
-	localCandidates, err := GetLocalCandidates(proto, portInt)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create the message, similar to the offer but with different type
-	message := &ICEMessage{
-		Type:      ICEMessageTypeAnswer,
-		Timestamp: time.Now().Unix(),
-		Candidates: append(localCandidates, ICECandidate{
-			// Server reflexive candidate (from STUN)
-			Foundation:  GenerateFoundation(mappedIP.String()),
-			Priority:    CalculateSrflxPriority(),
-			Protocol:    proto,
-			Address:     mappedIP.String(),
-			Port:        mappedPort,
-			Type:        ICECandidateTypeSrflx,
-			RelatedAddr: host,
-			RelatedPort: portInt,
-		}),
-		Credentials: generateCredentials(encryptionKey),
-	}
-
-	// message.GenerateSessionID()
-
-	return message, nil
-}*/
 
 func (msg *ICEMessage) GenerateSessionID() {
 	msg.SessionID = RandStringFromRunes(12, az09Runes)

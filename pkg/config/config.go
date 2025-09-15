@@ -139,7 +139,9 @@ func (c *ICEConfig) UseProtos() (protos []transport.ICEProtocolDefinition) {
 }
 
 type ICESignalingOpts struct {
+	ServerID          string `toml:"server_id"`           // Use a connection ID to identify the connection, instead of the mapped IP
 	EncryptionKey     string `toml:"encryption_key"`      // Encryption key for the ICE signaling
+	ConnectOffset     int    `toml:"connect_offset"`      // Connect offset in milliseconds
 	MQTTBrokerAddress string `toml:"mqtt_broker_address"` // MQTT broker address in the form of mqtt://host:port or ssl://host:port
 	MQTTClientID      string `toml:"mqtt_client_id"`      // MQTT client ID
 	MQTTUsername      string `toml:"mqtt_username"`       // MQTT username

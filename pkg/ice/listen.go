@@ -176,6 +176,7 @@ func processOffer(signaler *signaling.Signaler, topicBase string, offer *message
 			connect.ICEID = answer.SessionID
 			connect.RemoteAddr = AddressFrom(connect.Protocol.Network, targetIP, candidate.Port)
 			connect.BindAgent.Auth = iceAuth
+			connect.ScheduledAt = time.UnixMilli(answer.Timestamp).Add(offer.ConnectOffsetDuration)
 		}
 	}
 
