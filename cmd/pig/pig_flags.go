@@ -281,6 +281,11 @@ func applyLogSettings(cfg *config.Config) (err error) {
 		return nil
 	}
 
+	if cfg.LogConfig.RotateSize == nil {
+		cfg.LogConfig.RotateSize = int64(0)
+		return nil
+	}
+
 	rotateSizeStr, ok := cfg.LogConfig.RotateSize.(string)
 	if !ok {
 		rotateSizeInt, ok := cfg.LogConfig.RotateSize.(int64)
