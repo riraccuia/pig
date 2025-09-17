@@ -43,7 +43,7 @@ type Options struct {
 
 func GetOptions(logger common.Logger, cfg *config.ICEConfig) *Options {
 	connectOffset := common.DefaultConnectOffset
-	if cfg.Signaling.ConnectOffset == 0 {
+	if cfg.Signaling.ConnectOffset > 0 {
 		connectOffset = time.Duration(cfg.Signaling.ConnectOffset) * time.Millisecond
 	}
 	return &Options{
