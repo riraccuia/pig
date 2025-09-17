@@ -84,7 +84,7 @@ func (s *Signaler) getTopicPrefix(inputStr string) string {
 	// the topic prefix is the sha256 hash of the target address
 	topicPrefix := sha256.Sum256(append([]byte(useStr), s.opts.EncryptionKey...))
 	// base64 encode the topic prefix
-	topicPrefixStr := strings.ToLower(base64.StdEncoding.EncodeToString(topicPrefix[:]))
+	topicPrefixStr := strings.ToLower(base64.URLEncoding.EncodeToString(topicPrefix[:]))
 	// remove slashes from the topic prefix
 	topicPrefixStr = strings.ReplaceAll(topicPrefixStr, "/", "")
 	return topicPrefixStr
