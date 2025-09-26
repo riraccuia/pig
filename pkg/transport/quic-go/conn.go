@@ -10,11 +10,11 @@ import (
 )
 
 type QuicConn struct {
-	conn quic.Connection
+	conn *quic.Conn
 }
 
 type QuicStream struct {
-	stream quic.Stream
+	stream *quic.Stream
 }
 
 func (s *QuicStream) Read(p []byte) (n int, err error) {
@@ -29,11 +29,12 @@ func (s *QuicStream) Close() error {
 	return s.stream.Close()
 }
 
-func (s *QuicStream) Flush() {
+func (s *QuicStream) Flush() error {
 	// quic-go handles flushing internally
+	return nil
 }
 
-func NewQuicConn(conn quic.Connection) *QuicConn {
+func NewQuicConn(conn *quic.Conn) *QuicConn {
 	return &QuicConn{conn: conn}
 }
 

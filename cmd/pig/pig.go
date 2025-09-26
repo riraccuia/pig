@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"io"
 
-	"os"
-	"os/signal"
-
 	"github.com/riraccuia/pig/pkg/client"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
@@ -98,10 +95,5 @@ func pig(mo config.Mode) {
 		logger.Fatalf("Failed to create tunnel: %v", err)
 	}
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
-
-	<-sigChan
-	logger.Infof("Received signal: %v", <-sigChan)
-	closer.Close()
+	handleGracefulShutdown(ctx, logger, cancel, closer)
 }

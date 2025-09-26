@@ -62,7 +62,7 @@ func NewFileLogger(path string, rotateSize int64) (*Logger, error) {
 	if rotateSize > 0 {
 		fw = fw.WithRotateSize(rotateSize)
 	}
-	output := zerolog.ConsoleWriter{
+	output := &zerolog.ConsoleWriter{
 		Out:        fw,
 		NoColor:    true,
 		TimeFormat: time.RFC3339,

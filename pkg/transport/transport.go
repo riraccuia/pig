@@ -12,7 +12,7 @@ var ErrNotImplemented = errors.New("not implemented")
 
 type Stream interface {
 	io.ReadWriteCloser
-	Flush()
+	Flush() error
 }
 
 type Listener interface {

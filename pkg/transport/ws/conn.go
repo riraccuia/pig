@@ -36,8 +36,9 @@ func (t *WSConn) IsStreamed() bool {
 	return false
 }
 
-func (t *WSConn) Flush() {
+func (t *WSConn) Flush() error {
 	// WebSocket messages are sent immediately, no need for explicit flushing
+	return nil
 }
 
 func (t *WSConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
