@@ -28,7 +28,7 @@ func getICEDialFunc(ctx context.Context, logger *log.Logger, cfg *config.Config)
 	}
 	return func() (transport.Conn, error) {
 		logger.Infof("Starting ICE | Candidate protocols: %v", strings.Join(cfg.ICE.Protos, ", "))
-		connectPaths, err := ice.GetConnectPaths(ctx, signaling.GetOptions(logger, cfg.ICE), cfg.Target.Address, cfg.ICE.UseProtos())
+		connectPaths, err := ice.GetConnectPaths(ctx, signaling.GetOptions(logger, cfg.ICE), &cfg.Target, cfg.ICE.UseProtos())
 		if err != nil {
 			return nil, fmt.Errorf("failed to get ICE connect paths: %w", err)
 		}
@@ -80,7 +80,7 @@ func processICEClientConnectPaths(ctx context.Context, logger *log.Logger, cfg *
 		timer       = time.NewTimer(time.Second * 10)
 	)
 	for _, cp := range connectPaths {
-		logger.Debugf("Connecting ICE path | %s", cp.String())
+		logger.Debugf("Connecting ICE path | %s | Scheduled at: %s", cp.String(), cp.ScheduledAt.UTC().Format(time.RFC3339))
 		time.AfterFunc(time.Until(cp.ScheduledAt), func() {
 			_, e := cp.Connect()
 			if e == ice.ErrConnectICMP {

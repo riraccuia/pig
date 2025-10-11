@@ -144,11 +144,13 @@ func (s *Signaler) waitForAnswer(topicBase, sessionID string) (answer *message.I
 	// Wait for answer or timeout
 	select {
 	case answer = <-iceMsgChan:
+		s.opts.Logger.Tracef("SIG: received ICE answer for session: %s", answer.SessionID)
 		if answer.SessionID != sessionID {
 			err = fmt.Errorf("received ICE answer for different session: %s", answer.SessionID)
 			break
 		}
 	case <-time.After(3 * time.Second):
+		s.opts.Logger.Errorf("SIG: timeout waiting for ICE answer")
 		err = fmt.Errorf("timeout waiting for ICE answer")
 	case <-s.ctx.Done():
 		err = s.ctx.Err()

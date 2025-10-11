@@ -9,11 +9,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/riraccuia/pig/pkg/log"
+	"github.com/riraccuia/pig/pkg/common"
 )
 
 // handleGracefulShutdown implements idiomatic Go signal handling
-func handleGracefulShutdown(ctx context.Context, logger *log.Logger, cancel context.CancelFunc, closer io.Closer) {
+func handleGracefulShutdown(ctx context.Context, logger common.Logger, cancel context.CancelFunc, closer io.Closer) {
 	// Create signal channel with buffer size 1 to avoid blocking
 	sigChan := make(chan os.Signal, 1)
 
@@ -46,13 +46,11 @@ func handleGracefulShutdown(ctx context.Context, logger *log.Logger, cancel cont
 			return
 		}
 
-		logger.Info("Closing tunnel...")
+		logger.Info("Closing pig...")
 		if err := closer.Close(); err != nil {
-			shutdownCancel(fmt.Errorf("error closing tunnel: %v", err))
+			shutdownCancel(fmt.Errorf("error closing server: %v", err))
 			return
 		}
-
-		logger.Info("Tunnel closed successfully")
 	}()
 
 	// Wait for shutdown to complete or timeout

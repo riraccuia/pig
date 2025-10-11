@@ -8,13 +8,14 @@ import (
 	"slices"
 	"time"
 
+	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice/message"
 	"github.com/riraccuia/pig/pkg/ice/signaling"
 	"github.com/riraccuia/pig/pkg/stun"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-func GetConnectPaths(ctx context.Context, opts *signaling.Options, addr string, pigProtos []transport.ICEProtocolDefinition) (cp []*ConnectPath, err error) {
+func GetConnectPaths(ctx context.Context, opts *signaling.Options, target *config.Target, pigProtos []transport.ICEProtocolDefinition) (cp []*ConnectPath, err error) {
 	localNets, localIps, err := GetLocalNetworks()
 	if err != nil {
 		return nil, err
@@ -26,7 +27,10 @@ func GetConnectPaths(ctx context.Context, opts *signaling.Options, addr string, 
 		// local candidates
 		for i, localIp := range localIps {
 			bindAgent := stun.NewIceBindingAgent(opts.Logger, nil)
-			srcPort := rand.Intn(65535-1024) + 1024
+			srcPort := target.SrcPort
+			if srcPort == 0 {
+				srcPort = rand.Intn(65535-1024) + 1024
+			}
 			localAddr := AddressFrom(tr.Network, localIp, srcPort)
 			cp = append(cp, &ConnectPath{
 				LocalNet:  localNets[i],
@@ -42,7 +46,7 @@ func GetConnectPaths(ctx context.Context, opts *signaling.Options, addr string, 
 			}
 		}
 		// reflexive candidate
-		localAddr := AddressFrom(tr.Network, net.IPv4zero, 0)
+		localAddr := AddressFrom(tr.Network, net.IPv4zero, target.SrcPort)
 		// Get mapped endpoint
 		mappedIP, mappedPort, err := PerformSTUNQuery(opts.Logger, opts.STUNServer, localAddr)
 		if err != nil {
@@ -76,7 +80,7 @@ func GetConnectPaths(ctx context.Context, opts *signaling.Options, addr string, 
 
 	offer.ConnectOffsetDuration = opts.ConnectOffset
 
-	answer, err = signaling.GatherICECandidates(ctx, opts, addr, offer)
+	answer, err = signaling.GatherICECandidates(ctx, opts, target.Address, offer)
 	if err != nil {
 		return
 	}

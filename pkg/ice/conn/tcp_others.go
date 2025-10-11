@@ -18,6 +18,7 @@ func dialTCP(network string, laddr, raddr *net.TCPAddr) (*net.TCPConn, error) {
 			return c.Control(func(fd uintptr) {
 				// Unix-specific socket options
 				unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
+				unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
 				// unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_NODELAY, 1)
 			})
 		},

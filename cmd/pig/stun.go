@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"math/rand"
@@ -17,6 +18,7 @@ import (
 var (
 	stunProto      = [2]string{"proto", "Protocol to use for STUN queries, valid values are: udp, tcp, tls"}
 	stunServerAddr = [2]string{"c", "STUN host:port to query"}
+	stunListenAddr = [2]string{"l", "STUN host:port to listen on (default operating when no flags are provided)"}
 	stunQry        = [2]string{"p", "Source port to query, 'R' for random port"}
 )
 
@@ -24,6 +26,7 @@ type stunFlags struct {
 	stunQry        string
 	stunProto      string
 	stunServerAddr string
+	stunListenAddr string
 }
 
 func parseStunFlags() *stunFlags {
@@ -32,21 +35,31 @@ func parseStunFlags() *stunFlags {
 	flagSet.StringVar(&flags.stunQry, stunQry[0], "", stunQry[1])
 	flagSet.StringVar(&flags.stunProto, stunProto[0], "udp", stunProto[1])
 	flagSet.StringVar(&flags.stunServerAddr, stunServerAddr[0], "stun.nextcloud.com:443", stunServerAddr[1])
+	flagSet.StringVar(&flags.stunListenAddr, stunListenAddr[0], ":3478", stunListenAddr[1])
 	flagSet.Parse(os.Args[2:])
 	return flags
 }
 
 func stunMode() {
-	flags := parseStunFlags()
-	doStunQuery(flags)
-	os.Exit(0)
+	var (
+		flags                = parseStunFlags()
+		logger common.Logger = log.NewBlockingLogger()
+	)
+	if flags.stunQry != "" {
+		doStunQuery(logger, flags)
+		os.Exit(0)
+	}
+	if flags.stunListenAddr == "" {
+		logger.Fatalf("Either -l or -p is required")
+		os.Exit(1)
+	}
+	stunListenMode(logger, flags)
 }
 
 // doStunQuery queries the STUN server to get the public IP and port
 // and prints it to stdout.
-func doStunQuery(flags *stunFlags) {
+func doStunQuery(logger common.Logger, flags *stunFlags) {
 	var (
-		logger     common.Logger = log.NewBlockingLogger()
 		srcPort    int
 		mappedIP   net.IP
 		mappedPort int
@@ -83,4 +96,32 @@ func doStunQuery(flags *stunFlags) {
 	logger.Infof("STUN server returned mapped <ip:port>: %s:%d", mappedIP, mappedPort)
 
 	os.Exit(0)
+}
+
+// stunListenMode listens for STUN requests on the specified protocol, address and port.
+func stunListenMode(logger common.Logger, flags *stunFlags) {
+	var (
+		listenAddr net.Addr
+		err        error
+	)
+	switch flags.stunProto {
+	case "udp":
+		listenAddr, err = net.ResolveUDPAddr("udp", flags.stunListenAddr)
+		if err != nil {
+			logger.Fatalf("Failed to resolve STUN listen address: %v", err)
+		}
+	case "tcp":
+		listenAddr, err = net.ResolveTCPAddr("tcp", flags.stunListenAddr)
+		if err != nil {
+			logger.Fatalf("Failed to resolve STUN listen address: %v", err)
+		}
+	default:
+		logger.Fatalf("Unimplemented STUN protocol for listen: %s", flags.stunProto)
+	}
+	server, err := stun.NewServer(logger, listenAddr)
+	if err != nil {
+		logger.Fatalf("Failed to create STUN server: %v", err)
+	}
+
+	handleGracefulShutdown(context.Background(), logger, func() {}, server)
 }

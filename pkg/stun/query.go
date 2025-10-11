@@ -84,3 +84,41 @@ func (c *StunClient) sendStunRequestConn(serverAddr *net.TCPAddr, conn net.Conn,
 
 	return responseBytes, nil
 }
+
+func processStunRequestBytes(reqBytes []byte, remoteAddr net.Addr) (*StunMessage, error) {
+	request, err := ParseStunMessage(reqBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse STUN request: %w", err)
+	}
+
+	// Validate request type
+	if request.Header.Type != stunBindingRequest {
+		return nil, fmt.Errorf("unexpected STUN message type: 0x%x", request.Header.Type)
+	}
+
+	if !VerifyFingerprint(request) {
+		return nil, fmt.Errorf("invalid STUN request: fingerprint verification failed")
+	}
+
+	// Create response attributes
+	responseAttrs, err := CreateResponseAttributes(remoteAddr, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create response attributes: %w", err)
+	}
+
+	// Create response without MESSAGE-INTEGRITY first
+	response, err := CreateStunMessage(stunBindingResponse, responseAttrs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create STUN response: %w", err)
+	}
+
+	// Copy transaction ID from request
+	CopyTransactionID(response, request)
+
+	err = AddFingerprint(response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to add fingerprint: %w", err)
+	}
+
+	return response, nil
+}

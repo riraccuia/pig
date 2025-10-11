@@ -67,7 +67,7 @@ func processICEServerConnectPaths(ctx context.Context, logger *log.Logger, cfg *
 		nomination     *ice.ConnectPath
 	)
 	for _, cp := range listenPaths {
-		logger.Debugf("Connecting ICE path | %s", cp.String())
+		logger.Debugf("Connecting ICE path | %s | Scheduled at: %s", cp.String(), cp.ScheduledAt.UTC().Format(time.RFC3339))
 		time.AfterFunc(time.Until(cp.ScheduledAt), func() {
 			_, e := cp.Connect()
 			if e == ice.ErrConnectICMP {

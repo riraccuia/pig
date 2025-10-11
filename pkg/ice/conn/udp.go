@@ -11,6 +11,11 @@ func DialUDP(network string, laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
 	return dialUDP(network, laddr, raddr)
 }
 
+// ListenUDP uses a net.ListenConfig to listen on a UDP address and sets the SO_REUSEADDR option.
+func ListenUDP(network string, laddr *net.UDPAddr) (*net.UDPConn, error) {
+	return listenUDP(network, laddr)
+}
+
 // PunchUDP performs UDP hole punching from the specified source port to the target address.
 // This creates a temporary opening in the NAT/firewall to allow direct UDP communication.
 // A source port is required to be provided, either as an int or a *net.UDPConn. Use 0 for a random port.
