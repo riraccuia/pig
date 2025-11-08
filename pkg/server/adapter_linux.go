@@ -114,7 +114,7 @@ func (s *Server) processInboundQueue(ctx context.Context, q io.Writer, pq common
 			return
 		case pkt := <-pq:
 			totalLen := pkt.TotalLength()
-			if totalLen > 0 && totalLen <= len(pkt[:totalLen]) {
+			if totalLen > 0 && totalLen <= len(pkt) {
 				q.Write(pkt[:totalLen])
 			}
 			s.bufferPool.Put(pkt)
