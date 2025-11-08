@@ -26,6 +26,10 @@ func (c *Client) readFromAdapter(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-c.done:
+			// in its current state, this channel will not receive on a reconnect attempt
+			// because the adapter.Read below will likely block until the connection is established
+			// also the current logic will recreate the done channel, rendering this check useless
+			// TODO: improve this
 			return
 		default:
 			pkt := c.bufferPool.Get().(packet.IPv4Packet)
@@ -58,7 +62,10 @@ func (c *Client) writeToAdapter(ctx context.Context) {
 			return
 		case <-c.done:
 			return
-		case pkt := <-c.inbound:
+		case pkt, ok := <-c.inbound:
+			if !ok {
+				return
+			}
 			totalLen := pkt.TotalLength()
 			if pkt.Version() != 4 {
 				c.logger.Errorf("received non-IPv4 packet, dropping")

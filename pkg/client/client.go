@@ -100,7 +100,6 @@ func (c *Client) Start(ctx context.Context, dialFunc func() (transport.Conn, err
 	}).WithBackoff(time.Second, time.Second*15)
 	c.dropLogger.Start(ctx)
 	go c.readFromAdapter(ctx)
-	go c.writeToAdapter(ctx)
 	go c.manageConnection(ctx, dialFunc)
 	return nil
 }
@@ -134,6 +133,7 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 		c.conn = conn
 		c.resetClosed()
 
+		go c.writeToAdapter(ctx)
 		go c.handleInbound(ctx)
 		go c.handleOutbound(ctx)
 
