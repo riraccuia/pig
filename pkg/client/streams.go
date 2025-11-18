@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 
 	"github.com/riraccuia/pig/pkg/transport"
@@ -29,6 +30,13 @@ func (c *Client) openStreams(ctx context.Context) {
 func (c *Client) doStream(ctx context.Context, stream transport.Stream) {
 	defer func() {
 		c.removeStream(stream)
+		if c.streams.Count() == 0 {
+			select {
+			case c.connError <- fmt.Errorf("all streams closed"):
+			default:
+			}
+			return
+		}
 		go c.reconnectStream(ctx)
 		// stream.Close()
 	}()
@@ -51,9 +59,12 @@ func (c *Client) reconnectStream(ctx context.Context) {
 		return
 	}
 
+	c.logger.Infof("reconnecting stream")
+
 	stream, err := c.conn.NewStream(ctx)
 	if err != nil {
 		c.conn.Close()
+		c.logger.Errorf("failed to create stream: %v", err)
 		return
 	}
 

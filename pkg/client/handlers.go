@@ -37,7 +37,6 @@ func (c *Client) processInbound(connOrStream io.ReadWriteCloser) {
 		if err != nil {
 			c.logger.Debugf("failed to read from connection or stream: %v", err)
 			if c.conn.IsStreamed() {
-				c.logger.Infof("stream closed, reconnecting")
 				// streams are reconnected automatically
 				return
 			}

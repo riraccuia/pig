@@ -166,18 +166,18 @@ func defineFlags(flagSet *flag.FlagSet) *pigFlags {
 	flagSet.StringVar(&flags.remoteAddr, flagConnect[0], "", flagConnect[1])
 	flagSet.StringVar(&flags.serverAddr, flagListen[0], "", flagListen[1])
 	flagSet.StringVar(&flags.bindAdapter, flagInterface[0], "", flagInterface[1])
-	flagSet.StringVar(&flags.proto, flagProto[0], "ws", flagProto[1])
+	flagSet.StringVar(&flags.proto, flagProto[0], DefaultICEProtocol, flagProto[1])
 	flagSet.IntVar(&flags.srcPort, flagPort[0], 0, flagPort[1])
 	flagSet.StringVar(&flags.tunnelAddress, flagTunnel[0], "", flagTunnel[1])
 	flagSet.StringVar(&flags.certFile, flagCert[0], "", flagCert[1])
 	flagSet.StringVar(&flags.keyFile, flagKey[0], "", flagKey[1])
 	flagSet.BoolVar(&flags.insecure, flagInsecure[0], false, flagInsecure[1])
-	flagSet.IntVar(&flags.mtu, flagMTU[0], 1400, flagMTU[1])
-	flagSet.IntVar(&flags.streamCount, flagStreams[0], 0, flagStreams[1])
-	flagSet.IntVar(&flags.retryInterval, flagRetry[0], 5, flagRetry[1])
-	flagSet.Float64Var(&flags.wredWF, flagFactor[0], 5, flagFactor[1])
-	flagSet.Float64Var(&flags.wredDP, flagDrop[0], 0.25, flagDrop[1])
-	flagSet.Float64Var(&flags.wredThresh, flagThresh[0], 0.30, flagThresh[1])
+	flagSet.IntVar(&flags.mtu, flagMTU[0], DefaultMTU, flagMTU[1])
+	flagSet.IntVar(&flags.streamCount, flagStreams[0], DefaultStreamCount, flagStreams[1])
+	flagSet.IntVar(&flags.retryInterval, flagRetry[0], DefaultRetryInterval, flagRetry[1])
+	flagSet.Float64Var(&flags.wredWF, flagFactor[0], DefaultWredWF, flagFactor[1])
+	flagSet.Float64Var(&flags.wredDP, flagDrop[0], DefaultWredDP, flagDrop[1])
+	flagSet.Float64Var(&flags.wredThresh, flagThresh[0], DefaultWredThresh, flagThresh[1])
 	flagSet.StringVar(&flags.startScript, flagStartScript[0], "", flagStartScript[1])
 	flagSet.StringVar(&flags.stopScript, flagStopScript[0], "", flagStopScript[1])
 	flagSet.StringVar(&flags.authType, flagAuth[0], "", flagAuth[1])
@@ -185,9 +185,10 @@ func defineFlags(flagSet *flag.FlagSet) *pigFlags {
 	flagSet.StringVar(&flags.jwkSource, flagJWK[0], "", flagJWK[1])
 	flagSet.StringVar(&flags.mtlsCA, flagMTLSCA[0], "", flagMTLSCA[1])
 	flagSet.IntVar(&flags.queueSize, flagQueueSize[0], 256, flagQueueSize[1])
-	flagSet.StringVar(&flags.stunServerAddr, flagSTUN[0], "stun.nextcloud.com:443", flagSTUN[1])
+	flagSet.StringVar(&flags.stunServerAddr, flagSTUN[0], DefaultICESTUNServer, flagSTUN[1])
 	flagSet.StringVar(&flags.iceKey, flagICEKey[0], "", flagICEKey[1])
 
+	flags.iceMQTTBroker = DefaultICEBroker
 	flagSet.Func(flagICE[0], flagICE[1],
 		func(s string) error {
 			if s == "false" {
@@ -198,7 +199,6 @@ func defineFlags(flagSet *flag.FlagSet) *pigFlags {
 				s = "true"
 			}
 			flags.iceEnabled = true
-			flags.iceMQTTBroker = "ssl://broker.hivemq.com:8883"
 			if s == "true" {
 				return nil
 			}
