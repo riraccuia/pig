@@ -17,30 +17,38 @@ func TestEndToEndTunnelWithQUIC(t *testing.T) {
 
 	// Create server config
 	serverConfig := &config.Config{
-		Insecure:      true,
-		Mode:          "server",
-		TunnelAddress: "10.0.0.1/24",
-		MTU:           1300,
-		CertFile:      certPath,
-		KeyFile:       keyPath,
-		StreamCount:   4,
-		Target: config.Target{
-			Address: "127.0.0.1",
-			Port:    12345,
+		Mode: config.ModeServer,
+		TunnelConfig: config.TunnelConfig{
+			TLSConfig: config.TLSConfig{
+				Insecure: true,
+				CertFile: certPath,
+				KeyFile:  keyPath,
+			},
+			TunnelAddress: "10.0.0.1/24",
+			MTU:           1300,
+			StreamCount:   4,
+			Target: config.Target{
+				Address: "127.0.0.1",
+				Port:    12345,
+			},
 		},
 	}
 
 	// Create client config
 	clientConfig := &config.Config{
-		Insecure:      true,
-		Mode:          "client",
-		TunnelAddress: "10.0.0.2/32",
-		MTU:           1300,
-		// CertFile:    certPath,
-		StreamCount: 4,
-		Target: config.Target{
-			Address: "127.0.0.1",
-			Port:    12345,
+		Mode: config.ModeClient,
+		TunnelConfig: config.TunnelConfig{
+			TLSConfig: config.TLSConfig{
+				Insecure: true,
+			},
+			TunnelAddress: "10.0.0.2/32",
+			MTU:           1300,
+			// CertFile:    certPath,
+			StreamCount: 4,
+			Target: config.Target{
+				Address: "127.0.0.1",
+				Port:    12345,
+			},
 		},
 	}
 
@@ -51,13 +59,13 @@ func TestEndToEndTunnelWithQUIC(t *testing.T) {
 	logger.SetLevel("debug")
 
 	// Create and start client with mock adapter
-	cli, err := client.New(logger, clientConfig, nil)
+	cli, err := client.New(logger, &clientConfig.TunnelConfig, nil)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
 	// Create and start server with mock adapter
-	srv, err := server.New(logger, serverConfig, nil)
+	srv, err := server.New(logger, &serverConfig.TunnelConfig, nil)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}

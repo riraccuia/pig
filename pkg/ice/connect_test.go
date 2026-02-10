@@ -123,3 +123,16 @@ func TestTCPConnectPaths(t *testing.T) {
 	}
 	testConnectPaths(t, transport.ICEProtocolWS, laddr, raddr)
 }
+func TestGetLocalNetworks(t *testing.T) {
+	ipNets, ips, err := GetLocalNetworks("")
+	if err != nil {
+		t.Errorf("Failed to get local networks: %v", err)
+		return
+	}
+	for _, ipNet := range ipNets {
+		t.Logf("Local network: %s", ipNet.String())
+	}
+	for _, ip := range ips {
+		t.Logf("Local IP: %s", ip.String())
+	}
+}

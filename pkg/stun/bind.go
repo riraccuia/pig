@@ -39,6 +39,32 @@ type IceBindingResult struct {
 	Error         error
 }
 
+func (b *IceBindingAgent) SetControlling(auth *StunAuthConfig, priority uint32) {
+	if b.Ice == nil {
+		b.Ice = &IceAttributes{
+			IceControlling: 0x12345678,
+		}
+	}
+	b.Ice.Priority = priority
+	if auth == nil {
+		return
+	}
+	b.Auth = auth
+}
+
+func (b *IceBindingAgent) SetControlled(auth *StunAuthConfig, priority uint32) {
+	if b.Ice == nil {
+		b.Ice = &IceAttributes{
+			IceControlled: 0x12345678,
+		}
+	}
+	b.Ice.Priority = priority
+	if auth == nil {
+		return
+	}
+	b.Auth = auth
+}
+
 func (b *IceBindingAgent) IsControlling() bool {
 	return b.Ice != nil && b.Ice.IceControlling != 0
 }
@@ -265,7 +291,7 @@ func (b *IceBindingAgent) HandleBindingResponse(transactionID [12]byte, response
 	}
 
 	// Parse XOR-MAPPED-ADDRESS
-	ip, port, err = ExtractMappedAddress(response.Attributes)
+	ip, port, err = ExtractMappedAddress(response.Attributes, response.Header.TransactionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract mapped address: %w", err)
 	}
@@ -306,7 +332,7 @@ func (b *IceBindingAgent) HandleBindingRequest(request *StunMessage) error {
 	}
 
 	// Create response attributes
-	responseAttrs, err := CreateResponseAttributes(b.Conn.RemoteAddr(), requestAuth)
+	responseAttrs, err := CreateResponseAttributes(b.Conn.RemoteAddr(), request.Header.TransactionID, requestAuth)
 	if err != nil {
 		return fmt.Errorf("failed to create response attributes: %w", err)
 	}

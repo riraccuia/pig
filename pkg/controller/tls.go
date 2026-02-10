@@ -1,4 +1,4 @@
-package main
+package controller
 
 import (
 	"crypto/tls"
@@ -6,12 +6,11 @@ import (
 
 	"github.com/riraccuia/pig/pkg/certificate"
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/log"
 )
 
-func createTLSConfig(logger *log.Logger, cfg *config.Config) (*tls.Config, error) {
+func (c *Controller) createTLSConfig(mode config.Mode, cfg *config.TunnelConfig) (*tls.Config, error) {
 	tlsCfg := &tls.Config{
-		InsecureSkipVerify: cfg.Insecure,
+		InsecureSkipVerify: cfg.TLSConfig.Insecure,
 		MinVersion:         tls.VersionTLS13,
 		CipherSuites: []uint16{
 			tls.TLS_AES_128_GCM_SHA256,
@@ -23,14 +22,17 @@ func createTLSConfig(logger *log.Logger, cfg *config.Config) (*tls.Config, error
 		},
 	}
 
-	configureMTLS(logger, cfg, tlsCfg)
+	err := c.configureMTLS(mode, cfg.Auth, tlsCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to configure MTLS: %w", err)
+	}
 
-	if cfg.Mode == "client" {
+	if mode == config.ModeClient {
 		return tlsCfg, nil
 	}
 
-	if cfg.CertFile != "" {
-		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
+	if cfg.TLSConfig.CertFile != "" {
+		cert, err := tls.LoadX509KeyPair(cfg.TLSConfig.CertFile, cfg.TLSConfig.KeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load TLS certificate: %w", err)
 		}
@@ -38,7 +40,7 @@ func createTLSConfig(logger *log.Logger, cfg *config.Config) (*tls.Config, error
 		return tlsCfg, nil
 	}
 
-	logger.Info("Generating self-signed TLS certificate")
+	c.logger.Info("Generating self-signed TLS certificate")
 	cert, err := certificate.GenerateCertificate()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate TLS certificate: %w", err)

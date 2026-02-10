@@ -9,7 +9,6 @@ import (
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/queue"
 	"github.com/riraccuia/pig/pkg/queue/wred"
-	"github.com/riraccuia/pig/pkg/script"
 	"github.com/riraccuia/pig/pkg/streams"
 	"github.com/riraccuia/pig/pkg/transport"
 )
@@ -84,14 +83,14 @@ func (s *Server) handleNewClient(ctx context.Context, conn transport.Conn) {
 
 	s.logger.Infof("New client connected from %s, allocated IP: %s", client.conn.RemoteAddr(), client.sourceIP.String())
 
-	// Execute start script
+	/* Execute start script
 	s.scriptExecutor.ExecuteStartScript(script.ScriptContext{
 		TunnelName:  s.adapter.Name(),
 		TunnelIndex: s.adapter.Index(),
 		RemoteAddr:  conn.RemoteAddr().String(),
 		NatAddr:     sourceIP.String(),
 		TunnelProto: string(s.config.Proto),
-	})
+	})*/
 
 	go s.manageClient(clientCtx, client)
 
@@ -117,13 +116,13 @@ func (s *Server) manageClient(ctx context.Context, client *ClientTunnel) {
 
 func (s *Server) closeClient(client *ClientTunnel) {
 	// Execute stop script
-	s.scriptExecutor.ExecuteStopScript(script.ScriptContext{
+	/*s.scriptExecutor.ExecuteStopScript(script.ScriptContext{
 		TunnelName:  s.adapter.Name(),
 		TunnelIndex: s.adapter.Index(),
 		RemoteAddr:  client.conn.RemoteAddr().String(),
 		NatAddr:     client.sourceIP.String(),
 		TunnelProto: string(s.config.Proto),
-	})
+	})*/
 
 	client.cancel()
 	client.conn.Close()

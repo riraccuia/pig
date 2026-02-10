@@ -24,14 +24,15 @@ type TunnelAdapter interface {
 }
 
 type Logger interface {
-	Info(args ...interface{})
-	Infof(format string, args ...interface{})
-	Error(args ...interface{})
-	Errorf(format string, args ...interface{})
-	Debug(args ...interface{})
-	Debugf(format string, args ...interface{})
-	Fatal(args ...interface{})
-	Fatalf(format string, args ...interface{})
-	Trace(args ...interface{})
-	Tracef(format string, args ...interface{})
+	SetLevel(level string)
+	Info(args ...any)
+	Infof(format string, args ...any)
+	Error(args ...any)
+	Errorf(format string, args ...any)
+	Debug(args ...any)
+	Debugf(format string, args ...any)
+	Fatal(args ...any)
+	Fatalf(format string, args ...any)
+	Trace(args ...any)
+	Tracef(format string, args ...any)
 }

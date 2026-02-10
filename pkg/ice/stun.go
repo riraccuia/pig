@@ -13,12 +13,12 @@ func PerformSTUNQuery(logger common.Logger, stunServer string, localAddr net.Add
 	// Perform STUN query to get our public endpoint
 	switch localAddr.Network() {
 	case "udp":
-		var port any = localAddr.(*net.UDPAddr).Port
-		mappedIP, mappedPort, err = stun.QueryServerUDP(logger, stunServer, port)
+		//var port any = localAddr.(*net.UDPAddr).Port
+		mappedIP, mappedPort, err = stun.QueryServerUDP(logger, stunServer, localAddr)
 	case "tcp":
-		mappedIP, mappedPort, err = stun.QueryServerTCP(logger, stunServer, localAddr.(*net.TCPAddr).Port)
+		mappedIP, mappedPort, err = stun.QueryServerTCP(logger, stunServer, localAddr)
 	case "ip": // this is for icmp
-		mappedIP, mappedPort, err = stun.QueryServerUDP(logger, stunServer, 0)
+		mappedIP, mappedPort, err = stun.QueryServerUDP(logger, stunServer, &net.UDPAddr{IP: nil, Port: 0})
 	default:
 		return nil, 0, fmt.Errorf("unsupported network type: %s", localAddr.Network())
 	}

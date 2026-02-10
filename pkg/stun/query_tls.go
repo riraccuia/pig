@@ -10,37 +10,51 @@ import (
 
 // QueryServerTLS is a convenience function that queries a STUN server over TLS.
 // It discovers the IP address and port as seen from the public internet.
-func QueryServerTLS(logger common.Logger, stunServerAddr string, connOrSrcPort any, tlsConfig *tls.Config) (mappedIP net.IP, mappedPort int, err error) {
+func QueryServerTLS(logger common.Logger, stunServerAddr string, connOrLocalAddr any, tlsConfig *tls.Config) (mappedIP net.IP, mappedPort int, err error) {
 	client := NewStunClient(logger, stunServerAddr, tlsConfig)
-	return client.QueryStunServerTLS(connOrSrcPort)
+	return client.QueryStunServerTLS(connOrLocalAddr)
 }
 
 // QueryStunServerTLS takes a TLS connection or a source port and queries the STUN server over TLS.
 // This method discovers your public IP address and port as seen from the internet.
-// It accepts either an existing TLS connection (*tls.Conn) or a source port number (int).
+// It accepts either an existing TLS connection (*net.TCPConn) or a local address (*net.TCPAddr).
 // If a source port is provided, a new TLS connection will be established and closed after the query.
-func (c *StunClient) QueryStunServerTLS(connOrSrcPort any) (mappedIP net.IP, mappedPort int, err error) {
-	conn, ok := connOrSrcPort.(*tls.Conn)
+func (c *StunClient) QueryStunServerTLS(connOrLocalAddr any) (mappedIP net.IP, mappedPort int, err error) {
+	conn, ok := connOrLocalAddr.(*net.TCPConn)
 	if ok {
-		c.ServerAddr = conn.RemoteAddr().String()
-		return c.queryStunServerTLS(conn)
+		network := "tcp4"
+		if conn.LocalAddr().(*net.TCPAddr).IP.To4() == nil {
+			network = "tcp6"
+		}
+		serverAddr, err := net.ResolveTCPAddr(network, c.ServerAddr)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to resolve STUN server address %s: %w", c.ServerAddr, err)
+		}
+		return c.queryStunServerTLS(serverAddr, conn)
 	}
-	srcPort, ok := connOrSrcPort.(int)
+	localAddr, ok := connOrLocalAddr.(*net.TCPAddr)
 	if !ok {
-		return nil, 0, fmt.Errorf("invalid source port: %v", connOrSrcPort)
+		return nil, 0, fmt.Errorf("invalid local address: %v", connOrLocalAddr)
 	}
-	return c.queryStunServerTLS(srcPort)
-}
-
-// queryStunServerTLS sends a STUN Binding Request over TLS and returns the mapped IP and port.
-// It uses the client's configured ServerAddr. connOrSrcPort is the TLS connection or the source port to send from.
-func (c *StunClient) queryStunServerTLS(connOrSrcPort any) (mappedIP net.IP, mappedPort int, err error) {
-	// Resolve server address
-	serverAddr, err := net.ResolveTCPAddr("tcp", c.ServerAddr)
+	var network string
+	switch {
+	case localAddr.IP == nil:
+		network = "tcp"
+	case localAddr.IP.To4() == nil:
+		network = "tcp6"
+	default:
+		network = "tcp4"
+	}
+	serverAddr, err := net.ResolveTCPAddr(network, c.ServerAddr)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to resolve STUN server address %s: %w", c.ServerAddr, err)
 	}
+	return c.queryStunServerTLS(serverAddr, localAddr)
+}
 
+// queryStunServerTLS sends a STUN Binding Request over TLS and returns the mapped IP and port.
+// It uses the client's configured ServerAddr. connOrLocalAddr is the TLS connection or the local address to send from.
+func (c *StunClient) queryStunServerTLS(serverAddr *net.TCPAddr, connOrLocalAddr any) (mappedIP net.IP, mappedPort int, err error) {
 	// Create STUN message
 	msg, err := CreateStunMessage(stunBindingRequest, nil)
 	if err != nil {
@@ -53,7 +67,7 @@ func (c *StunClient) queryStunServerTLS(connOrSrcPort any) (mappedIP net.IP, map
 	}
 
 	// Send request and receive response
-	responseBytes, err := c.sendStunRequestTLS(serverAddr, connOrSrcPort, msg.Raw, msg.Header.TransactionID)
+	responseBytes, err := c.sendStunRequestTLS(serverAddr, connOrLocalAddr, msg.Raw, msg.Header.TransactionID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -75,7 +89,7 @@ func (c *StunClient) queryStunServerTLS(connOrSrcPort any) (mappedIP net.IP, map
 	}
 
 	// Extract mapped address
-	mappedIP, mappedPort, err = ExtractMappedAddress(response.Attributes)
+	mappedIP, mappedPort, err = ExtractMappedAddress(response.Attributes, response.Header.TransactionID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to extract mapped address: %w", err)
 	}
@@ -88,18 +102,18 @@ func (c *StunClient) queryStunServerTLS(connOrSrcPort any) (mappedIP net.IP, map
 }
 
 // sendStunRequestTLS sends a STUN TLS request and receives the response.
-// connOrSrcPort is the TLS connection or the source port to send from.
-func (c *StunClient) sendStunRequestTLS(serverAddr *net.TCPAddr, connOrSrcPort any, requestBytes []byte, txID [12]byte) (responseBytes []byte, err error) {
+// connOrLocalAddr is the TLS connection or the local address to send from.
+func (c *StunClient) sendStunRequestTLS(serverAddr *net.TCPAddr, connOrLocalAddr any, requestBytes []byte, txID [12]byte) (responseBytes []byte, err error) {
 	var tlsConn *tls.Conn
 	// Check if we received an existing connection or need to create one
-	tlsConn, ok := connOrSrcPort.(*tls.Conn)
+	tlsConn, ok := connOrLocalAddr.(*tls.Conn)
 	if !ok {
-		srcPort, ok := connOrSrcPort.(int)
+		laddr, ok := connOrLocalAddr.(*net.TCPAddr)
 		if !ok {
-			return nil, fmt.Errorf("invalid source port: %v", connOrSrcPort)
+			return nil, fmt.Errorf("invalid source port: %v", connOrLocalAddr)
 		}
 		// Create a new TLS connection
-		tlsConn, err = createTLSConnection(serverAddr, srcPort, c.TLSConfig)
+		tlsConn, err = createTLSConnection(serverAddr, laddr, c.TLSConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -110,8 +124,8 @@ func (c *StunClient) sendStunRequestTLS(serverAddr *net.TCPAddr, connOrSrcPort a
 }
 
 // createTLSConnection creates a TLS connection to the STUN server from the specified local port.
-func createTLSConnection(serverAddr *net.TCPAddr, srcPort int, tlsConfig *tls.Config) (*tls.Conn, error) {
-	tcpConn, err := createTCPConnection(serverAddr, srcPort)
+func createTLSConnection(serverAddr *net.TCPAddr, laddr *net.TCPAddr, tlsConfig *tls.Config) (*tls.Conn, error) {
+	tcpConn, err := createTCPConnection(serverAddr, laddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create TLS connection: %w", err)
 	}

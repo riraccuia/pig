@@ -9,24 +9,24 @@ import (
 	"runtime"
 
 	"github.com/quic-go/quic-go"
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice/conn"
-	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
+func GetClientDialFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Conn, error) {
 	return dialFuncWithSrcPort(ctx, logger, config.Target.Address, config.Target.SrcPort, config.Target.Port, tlsConfig)
 }
 
-func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
+func GetServerListenFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Listener, error) {
 	return func() (transport.Listener, error) {
 		var (
 			udpConn      *net.UDPConn
-			listenerAddr = &net.UDPAddr{IP: net.IPv4zero, Port: config.Target.Port}
+			listenerAddr = &net.UDPAddr{IP: nil, Port: config.Target.Port}
 			err          error
 		)
-		udpConn, err = conn.ListenUDP("udp4", listenerAddr)
+		udpConn, err = conn.ListenUDP("udp", listenerAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
 		}
@@ -49,7 +49,7 @@ func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config
 	}
 }
 
-func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Config, tlsConfig *tls.Config) (transport.Conn, error) {
+func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config) (transport.Conn, error) {
 	if tlsConfig == nil {
 		return nil, errors.New("quic: tls.Config not set")
 	}
@@ -70,7 +70,7 @@ func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Config
 	return NewQuicConn(qConn), nil
 }
 
-func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Config, tlsConfig *tls.Config) (transport.Listener, error) {
+func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config) (transport.Listener, error) {
 	if tlsConfig == nil {
 		return nil, errors.New("quic: tls.Config not set")
 	}
@@ -103,7 +103,7 @@ func dialFuncDefault(ctx context.Context, address string, dstPort int, tlsConfig
 	}
 }
 
-func dialFuncWithSrcPort(ctx context.Context, logger *log.Logger, address string, srcPort, dstPort int, tlsConfig *tls.Config) func() (transport.Conn, error) {
+func dialFuncWithSrcPort(ctx context.Context, logger common.Logger, address string, srcPort, dstPort int, tlsConfig *tls.Config) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
 		var (
 			udpConn *net.UDPConn

@@ -7,11 +7,13 @@ import (
 	"net"
 	"time"
 
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/ice/conn"
-	"github.com/riraccuia/pig/pkg/log"
+	"github.com/riraccuia/pig/pkg/ice/signaling"
 	"github.com/riraccuia/pig/pkg/stun"
 	"github.com/riraccuia/pig/pkg/transport"
 	"github.com/riraccuia/pig/pkg/transport/icmp"
+	"golang.org/x/sys/unix"
 )
 
 var ErrConnectICMP = fmt.Errorf("call ConnectICMP instead")
@@ -21,6 +23,7 @@ var ErrConnectICMP = fmt.Errorf("call ConnectICMP instead")
 // between the client and the server using the ICE protocol
 type ConnectPath struct {
 	ICEID       string
+	Family      int // AF_INET or AF_INET6
 	LocalNet    *net.IPNet
 	LocalAddr   net.Addr
 	RemoteAddr  net.Addr
@@ -42,11 +45,11 @@ func (cp *ConnectPath) Connect() (co net.Conn, err error) {
 	switch cp.Protocol.Network {
 	case "udp":
 		var _co *net.UDPConn
-		_co, err = conn.DialUDP("udp4", cp.LocalAddr.(*net.UDPAddr), cp.RemoteAddr.(*net.UDPAddr))
+		_co, err = conn.DialUDP("udp", cp.LocalAddr.(*net.UDPAddr), cp.RemoteAddr.(*net.UDPAddr))
 		//co = conn.NewUDPPacketConn(_co)
 		co = _co
 	case "tcp":
-		co, err = conn.DialTCP("tcp4", cp.LocalAddr.(*net.TCPAddr), cp.RemoteAddr.(*net.TCPAddr))
+		co, err = conn.DialTCP("tcp", cp.LocalAddr.(*net.TCPAddr), cp.RemoteAddr.(*net.TCPAddr))
 	case "icmp":
 		return nil, ErrConnectICMP
 	default:
@@ -64,7 +67,7 @@ func (cp *ConnectPath) Connect() (co net.Conn, err error) {
 }
 
 // ConnectICMP is the same as Connect but for ICMP.
-func (cp *ConnectPath) ConnectICMP(ctx context.Context, logger *log.Logger, bindAdapter string, isServer bool) (co net.Conn, err error) {
+func (cp *ConnectPath) ConnectICMP(ctx context.Context, logger common.Logger, bindAdapter string, isServer bool) (co net.Conn, err error) {
 	if cp.Protocol.Network != "icmp" {
 		return nil, fmt.Errorf("protocol is not icmp: %s", cp.Protocol.Network)
 	}
@@ -102,4 +105,33 @@ func (cp *ConnectPath) CloseConn() error {
 		return nil
 	}
 	return cp.Conn.Close()
+}
+
+func getPathForProto(tr transport.ICEProtocolDefinition, localNet *net.IPNet, localIp, remoteIp net.IP, listenPort uint16, opts *signaling.Options) (cp *ConnectPath) {
+	var (
+		localAddr  net.Addr
+		remoteAddr net.Addr
+	)
+	if localIp != nil {
+		localAddr = AddressFrom(tr.Network, localIp, int(listenPort))
+	}
+	if remoteIp != nil {
+		remoteAddr = AddressFrom(tr.Network, remoteIp, int(listenPort))
+	}
+	cp = &ConnectPath{
+		Family:     getFamilyForIP(localIp),
+		LocalNet:   localNet,
+		LocalAddr:  localAddr,
+		RemoteAddr: remoteAddr,
+		Protocol:   tr,
+		BindAgent:  stun.NewIceBindingAgent(opts.Logger, nil),
+	}
+	return cp
+}
+
+func getFamilyForIP(ip net.IP) int {
+	if ip.To4() != nil {
+		return unix.AF_INET
+	}
+	return unix.AF_INET6
 }

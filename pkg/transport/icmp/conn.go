@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/riraccuia/pig/pkg/log"
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/transport"
 	"golang.org/x/net/ipv4"
 )
@@ -55,7 +55,7 @@ type Conn struct {
 	ackBytesCount    uint32
 }
 
-func Dial(ctx context.Context, logger *log.Logger, bindAdapter, targetAddr string, icmpID uint16, isServer bool) (transport.Conn, error) {
+func Dial(ctx context.Context, logger common.Logger, bindAdapter, targetAddr string, icmpID uint16, isServer bool) (transport.Conn, error) {
 	/*var (
 		bindAddr *net.IPAddr
 		iface    *net.Interface
@@ -71,7 +71,7 @@ func Dial(ctx context.Context, logger *log.Logger, bindAdapter, targetAddr strin
 }
 
 // dial creates a new client connection to a target address
-func dial(ctx context.Context, logger *log.Logger, bindAdapter, targetAddr string, icmpID uint16, isServer bool) (transport.Conn, error) {
+func dial(ctx context.Context, logger common.Logger, bindAdapter, targetAddr string, icmpID uint16, isServer bool) (transport.Conn, error) {
 	/*var (
 		sharedListener *sharedListener
 		err            error

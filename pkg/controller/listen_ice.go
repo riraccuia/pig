@@ -1,4 +1,4 @@
-package main
+package controller
 
 import (
 	"context"
@@ -6,15 +6,16 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice"
 	"github.com/riraccuia/pig/pkg/ice/conn"
 	"github.com/riraccuia/pig/pkg/ice/signaling"
-	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 	"github.com/riraccuia/pig/pkg/transport/dtls"
 	qt "github.com/riraccuia/pig/pkg/transport/quic-go"
@@ -23,30 +24,30 @@ import (
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
 
-func getICEListenFunc(ctx context.Context, logger *log.Logger, cfg *config.Config) (func() (transport.Listener, error), error) {
+func (c *Controller) getICEListenFunc(ctx context.Context, cfg *config.TunnelConfig) (func() (transport.Listener, error), error) {
 	listenPort := uint16(cfg.Target.Port)
 	if listenPort == 0 {
 		// use a random port
 		listenPort = uint16(rand.Intn(65535-1024) + 1024)
 	}
-	logger.Infof("Starting ICE | Candidate protocols: %v | Listen port: %d", strings.Join(cfg.ICE.Protos, ", "), listenPort)
+	c.logger.Infof("Starting ICE | Candidate protocols: %v | Listen port: %d", strings.Join(cfg.ICE.Protos, ", "), listenPort)
 	return func() (transport.Listener, error) {
-		listenPathsChan, err := ice.GetListenPaths(ctx, signaling.GetOptions(logger, cfg.ICE), listenPort, cfg.ICE.UseProtos())
+		listenPathsChan, err := ice.GetListenPaths(ctx, signaling.GetOptions(c.logger, cfg.ICE), listenPort, cfg.ICE.UseProtos())
 		if err != nil {
 			return nil, fmt.Errorf("failed to get listen paths: %w", err)
 		}
-		tlsConfig, err := createTLSConfig(logger, cfg)
+		tlsConfig, err := c.createTLSConfig(config.ModeServer, cfg)
 		if err != nil {
-			logger.Errorf("failed to create TLS config: %v", err)
+			c.logger.Errorf("failed to create TLS config: %v", err)
 			return nil, err
 		}
 		iceListener := ice.NewListener(ctx, nil)
-		go receiveICEServerConnectPaths(ctx, logger, cfg, tlsConfig, listenPathsChan, iceListener)
+		go receiveICEServerConnectPaths(ctx, c.logger, cfg, tlsConfig, listenPathsChan, iceListener)
 		return iceListener, nil
 	}, nil
 }
 
-func receiveICEServerConnectPaths(ctx context.Context, logger *log.Logger, cfg *config.Config, tlsConfig *tls.Config, listenPathsChan <-chan []*ice.ConnectPath, pigListener *ice.Listener) {
+func receiveICEServerConnectPaths(ctx context.Context, logger common.Logger, cfg *config.TunnelConfig, tlsConfig *tls.Config, listenPathsChan <-chan []*ice.ConnectPath, pigListener *ice.Listener) {
 	for {
 		//logger.Debugf("Waiting for listen paths")
 		select {
@@ -59,13 +60,16 @@ func receiveICEServerConnectPaths(ctx context.Context, logger *log.Logger, cfg *
 	}
 }
 
-func processICEServerConnectPaths(ctx context.Context, logger *log.Logger, cfg *config.Config, tlsConfig *tls.Config, listenPaths []*ice.ConnectPath, pigListener *ice.Listener) {
+func processICEServerConnectPaths(ctx context.Context, logger common.Logger, cfg *config.TunnelConfig, tlsConfig *tls.Config, listenPaths []*ice.ConnectPath, pigListener *ice.Listener) {
 	var (
 		err            error
 		connectedPaths = &sync.Map{}
 		timer          = time.NewTimer(time.Second * 10)
 		nomination     *ice.ConnectPath
 	)
+	sort.SliceStable(listenPaths, func(i, j int) bool {
+		return connectPathPriority(listenPaths[i]) > connectPathPriority(listenPaths[j])
+	})
 	for _, cp := range listenPaths {
 		logger.Debugf("Connecting ICE path | %s | Scheduled at: %s", cp.String(), cp.ScheduledAt.UTC().Format(time.RFC3339))
 		time.AfterFunc(time.Until(cp.ScheduledAt), func() {

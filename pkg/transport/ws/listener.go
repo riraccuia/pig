@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"time"
 
 	"crypto/tls"
 
@@ -14,34 +15,45 @@ import (
 type WSListener struct {
 	server   *http.Server
 	ctx      context.Context
+	cancel   context.CancelCauseFunc
 	connChan chan *WSConn
 }
 
 // NewWSListener creates a new WebSocket transport
 func NewWSListener(ctx context.Context) *WSListener {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithCancelCause(ctx)
+
 	return &WSListener{
 		ctx:      ctx,
+		cancel:   cancel,
 		connChan: make(chan *WSConn),
 	}
 }
 
 func (t *WSListener) Accept() (net.Conn, error) {
+	if t.ctx.Err() != nil {
+		return nil, net.ErrClosed
+	}
 	select {
 	case <-t.ctx.Done():
 		return nil, t.ctx.Err()
-	case conn, ok := <-t.connChan:
-		if !ok {
-			return nil, net.ErrClosed
-		}
+	case conn := <-t.connChan:
+		conn.SetReadDeadline(time.Time{})
 		return conn, nil
 	}
 }
 
 func (t *WSListener) Close() error {
-	if t.server != nil {
-		t.server.Close()
+	if t.ctx.Err() != nil {
+		return nil
 	}
-	close(t.connChan)
+	t.cancel(net.ErrClosed)
+	if t.server != nil {
+		t.server.Close() // this will close the listener but not the websocket connection
+	}
 	return nil
 }
 
@@ -66,6 +78,14 @@ func (t *WSListener) ListenWithListener(l net.Listener, tlsConfig *tls.Config) e
 	t.server = &http.Server{
 		Handler:   t,
 		TLSConfig: tlsConfig,
+		ConnState: func(conn net.Conn, newState http.ConnState) {
+			if newState != http.StateClosed {
+				return
+			}
+			// This was a half-open connection, because it never got hijacked
+			// so we need to close the listener to free the resources
+			t.Close()
+		},
 	}
 
 	return t.server.Serve(tls.NewListener(l, tlsConfig))

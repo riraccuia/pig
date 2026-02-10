@@ -6,8 +6,8 @@ import (
 	"net"
 	"strings"
 
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -16,7 +16,7 @@ import (
 var defaultBufferSize = 64 * 1024
 
 // GetClientDialFunc returns a function that creates client connections based on config
-func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config) func() (transport.Conn, error) {
+func GetClientDialFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig) func() (transport.Conn, error) {
 	initUDP(logger)
 	return func() (transport.Conn, error) {
 		addr := fmt.Sprintf("%s:%d", config.Target.Address, config.Target.Port)
@@ -71,7 +71,7 @@ func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.C
 }
 
 // GetServerListenFunc returns a function that creates server listeners based on config
-func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.Config) func() (transport.Listener, error) {
+func GetServerListenFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig) func() (transport.Listener, error) {
 	initUDP(logger)
 	return func() (transport.Listener, error) {
 		addr := fmt.Sprintf("%s:%d", config.Target.Address, config.Target.Port)

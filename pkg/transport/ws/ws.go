@@ -8,13 +8,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice"
-	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Config, tlsConfig *tls.Config) (transport.Conn, error) {
+func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config) (transport.Conn, error) {
 	wsConn, err := DialConn(ctx, conn, conn.RemoteAddr().String(), tlsConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to establish WebSocket connection: %w", err)
@@ -22,14 +22,15 @@ func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Config
 	return wsConn, nil
 }
 
-func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Config, tlsConfig *tls.Config) (transport.Listener, error) {
+func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config) (transport.Listener, error) {
+	co.SetReadDeadline(time.Now().Add(time.Second * 10))
 	tr := NewWSListener(ctx)
 	l := ice.NewListenerConn(co, nil)
 	go tr.ListenWithListener(l, tlsConfig)
 	return tr, nil
 }
 
-func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
+func GetClientDialFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
 		conn, err := Dial(
 			ctx,
@@ -43,7 +44,7 @@ func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.C
 	}
 }
 
-func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
+func GetServerListenFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Listener, error) {
 	return func() (transport.Listener, error) {
 		tr := NewWSListener(ctx)
 		go func() {
@@ -53,7 +54,7 @@ func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config
 				tlsConfig.Clone(),
 			)
 			if err != nil && err != http.ErrServerClosed {
-				fmt.Printf("WebSocket server error: %v\n", err)
+				logger.Errorf("WebSocket server error: %v", err)
 			}
 		}()
 		return tr, nil

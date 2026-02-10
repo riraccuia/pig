@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/transport"
 )
 
 // handleInbound starts the appropriate packet handling based on connection type
@@ -22,7 +23,7 @@ func (c *Client) handleOutbound(ctx context.Context) {
 		go c.processOutboundStream(ctx)
 		return
 	}
-	go c.processOutboundConn(ctx)
+	go c.processOutboundConn(ctx, c.conn)
 }
 
 // processInbound processes incoming IPv4 packets from the connection or stream
@@ -36,7 +37,7 @@ func (c *Client) processInbound(connOrStream io.ReadWriteCloser) {
 		n, err := connOrStream.Read(buffer[len(unprocessed):])
 		if err != nil {
 			c.logger.Debugf("failed to read from connection or stream: %v", err)
-			if c.conn.IsStreamed() {
+			if _, ok := connOrStream.(transport.Stream); ok {
 				// streams are reconnected automatically
 				return
 			}
@@ -150,7 +151,7 @@ func (c *Client) processOutboundStream(ctx context.Context) {
 }
 
 // processOutboundConn processes outbound packets for non-streamed connections
-func (c *Client) processOutboundConn(ctx context.Context) {
+func (c *Client) processOutboundConn(ctx context.Context, conn transport.Conn) {
 	// Create a buffer to hold multiple packets
 	const maxBatchSize = 64 * 1024 // 64KB batch size
 	buffer := make([]byte, 0, maxBatchSize)
@@ -159,7 +160,7 @@ func (c *Client) processOutboundConn(ctx context.Context) {
 	// Helper function to write and reset batch
 	writeBatch := func() error {
 		for len(batch) > 0 {
-			n, err := c.conn.Write(batch)
+			n, err := conn.Write(batch)
 			batch = batch[n:]
 			if err != nil && err != io.ErrShortWrite {
 				return err

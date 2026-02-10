@@ -26,8 +26,8 @@ func PunchUDP(connOrSourcePort any, targetAddr string) (sPort int, err error) {
 		if !ok {
 			return 0, fmt.Errorf("invalid source port: %v", connOrSourcePort)
 		}
-		conn, err = net.ListenUDP("udp4", &net.UDPAddr{
-			IP:   net.IPv4zero, // Listen on all interfaces
+		conn, err = net.ListenUDP("udp", &net.UDPAddr{
+			IP:   nil, // Listen on all interfaces
 			Port: sourcePort,
 		})
 		if err != nil {

@@ -14,7 +14,7 @@ import (
 	"github.com/riraccuia/pig/pkg/packet"
 )
 
-func getAdapter(cfg *config.Config) (common.TunnelAdapter, error) {
+func getAdapter(cfg *config.TunnelConfig) (common.TunnelAdapter, error) {
 	return adapter.NewAdapter(adapter.AdapterConfig{
 		Address: cfg.TunnelAddress,
 		MTU:     cfg.MTU,

@@ -186,33 +186,37 @@ func ValidateStunMessage(msg *StunMessage, expectedType uint16, expectedTxID [12
 }
 
 // CreateXorMappedAddress creates an XOR-MAPPED-ADDRESS attribute
-func CreateXorMappedAddress(addr net.Addr) ([]byte, error) {
+func CreateXorMappedAddress(addr net.Addr, txID [12]byte) ([]byte, error) {
 	var (
-		host    string
-		portStr string
-		err     error
+		//host    string
+		ip   net.IP
+		port int
+		err  error
 	)
 
 	switch a := addr.(type) {
 	case *net.IPAddr:
-		host = a.IP.String()
-		portStr = "0"
+		ip = a.IP
+		port = 0
+	case *net.TCPAddr:
+		ip = a.IP
+		port = a.Port
+	case *net.UDPAddr:
+		ip = a.IP
+		port = a.Port
 	default:
+		var host, portStr string
 		host, portStr, err = net.SplitHostPort(addr.String())
+		ip = net.ParseIP(host)
+		port, err = strconv.Atoi(portStr)
 	}
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse address: %w", err)
 	}
 
-	ip := net.ParseIP(host)
 	if ip == nil {
-		return nil, fmt.Errorf("invalid IP address: %s", host)
-	}
-
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid port: %s", portStr)
+		return nil, fmt.Errorf("invalid IP address: %s", addr.String())
 	}
 
 	var (
@@ -259,7 +263,7 @@ func CreateXorMappedAddress(addr net.Addr) ([]byte, error) {
 			xorMappedAddr[4+i] = addrBytes[i] ^ magicCookieBytes[i]
 		}
 		for i := 4; i < 16; i++ {
-			xorMappedAddr[4+i] = addrBytes[i] ^ xorMappedAddr[i-4]
+			xorMappedAddr[4+i] = addrBytes[i] ^ txID[i-4]
 		}
 	}
 
@@ -350,7 +354,7 @@ func ParseStunError(attributes []byte) (code int, reason string) {
 }
 
 // ExtractMappedAddress extracts the mapped address from a STUN response
-func ExtractMappedAddress(attributes []byte) (net.IP, int, error) {
+func ExtractMappedAddress(attributes []byte, txID [12]byte) (net.IP, int, error) {
 	offset := 0
 	for offset < len(attributes) {
 		if offset+4 > len(attributes) {
@@ -393,7 +397,7 @@ func ExtractMappedAddress(attributes []byte) (net.IP, int, error) {
 				ip[i] = attributes[offset+4+i] ^ byte(stunMagicCookie>>((3-i)*8))
 			}
 			for i := 4; i < 16; i++ {
-				ip[i] = attributes[offset+4+i] ^ attributes[offset-16+i]
+				ip[i] = attributes[offset+4+i] ^ txID[i-4]
 			}
 		default:
 			return nil, 0, fmt.Errorf("unsupported address family: %d", family)
@@ -816,13 +820,13 @@ func SendErrorResponse(conn net.Conn, transactionID [12]byte, code int, reason s
 
 // CreateResponseAttributes creates a combined set of attributes for a STUN response
 // including XOR-MAPPED-ADDRESS, authentication attributes, and ICE attributes if provided
-func CreateResponseAttributes(remoteAddr net.Addr, auth *StunAuthConfig) ([]byte, error) {
+func CreateResponseAttributes(remoteAddr net.Addr, txID [12]byte, auth *StunAuthConfig) ([]byte, error) {
 	if remoteAddr == nil {
 		return nil, fmt.Errorf("invalid input: remote address is required")
 	}
 
 	// Create XOR-MAPPED-ADDRESS attribute
-	xorMappedAddr, err := CreateXorMappedAddress(remoteAddr)
+	xorMappedAddr, err := CreateXorMappedAddress(remoteAddr, txID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create XOR-MAPPED-ADDRESS: %w", err)
 	}

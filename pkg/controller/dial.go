@@ -1,11 +1,10 @@
-package main
+package controller
 
 import (
 	"context"
 	"fmt"
 
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 	"github.com/riraccuia/pig/pkg/transport/dtls"
 	icmp "github.com/riraccuia/pig/pkg/transport/icmp"
@@ -16,52 +15,52 @@ import (
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
 
-func getDialFunc(ctx context.Context, logger *log.Logger, cfg *config.Config) (func() (transport.Conn, error), error) {
+func (c *Controller) getDialFunc(ctx context.Context, cfg *config.TunnelConfig) (func() (transport.Conn, error), error) {
 	switch {
 	case cfg.ICE == nil || !cfg.ICE.Enabled:
-		return getClientDialFunc(ctx, logger, cfg)
+		return c.getClientDialFunc(ctx, cfg)
 	case cfg.ICE != nil && cfg.ICE.Enabled:
-		return getICEDialFunc(ctx, logger, cfg)
+		return c.getICEDialFunc(ctx, cfg)
 	}
 	return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 }
 
-func getClientDialFunc(ctx context.Context, logger *log.Logger, cfg *config.Config) (func() (transport.Conn, error), error) {
+func (c *Controller) getClientDialFunc(ctx context.Context, cfg *config.TunnelConfig) (func() (transport.Conn, error), error) {
 	switch cfg.Proto {
 	case config.TransportQUIC:
-		tlsConfig, err := createTLSConfig(logger, cfg)
+		tlsConfig, err := c.createTLSConfig(config.ModeClient, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return qt.GetClientDialFunc(ctx, logger, cfg, tlsConfig), nil
+		return qt.GetClientDialFunc(ctx, c.logger, cfg, tlsConfig), nil
 	case config.TransportUDP:
-		return udp.GetClientDialFunc(ctx, logger, cfg), nil
+		return udp.GetClientDialFunc(ctx, c.logger, cfg), nil
 	case config.TransportTLS:
-		tlsConfig, err := createTLSConfig(logger, cfg)
+		tlsConfig, err := c.createTLSConfig(config.ModeClient, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return trtls.GetClientDialFunc(ctx, logger, cfg, tlsConfig), nil
+		return trtls.GetClientDialFunc(ctx, c.logger, cfg, tlsConfig), nil
 	case config.TransportWS:
-		tlsConfig, err := createTLSConfig(logger, cfg)
+		tlsConfig, err := c.createTLSConfig(config.ModeClient, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return ws.GetClientDialFunc(ctx, logger, cfg, tlsConfig), nil
+		return ws.GetClientDialFunc(ctx, c.logger, cfg, tlsConfig), nil
 	case config.TransportICMP:
-		return icmp.GetClientDialFunc(ctx, logger, cfg), nil
+		return icmp.GetClientDialFunc(ctx, c.logger, cfg), nil
 	case config.TransportTLSICMP:
-		tlsConfig, err := createTLSConfig(logger, cfg)
+		tlsConfig, err := c.createTLSConfig(config.ModeClient, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return tlsicmp.GetClientDialFunc(ctx, logger, cfg, tlsConfig), nil
+		return tlsicmp.GetClientDialFunc(ctx, c.logger, cfg, tlsConfig), nil
 	case config.TransportDTLS:
-		tlsConfig, err := createTLSConfig(logger, cfg)
+		tlsConfig, err := c.createTLSConfig(config.ModeClient, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return dtls.GetClientDialFunc(ctx, logger, cfg, tlsConfig), nil
+		return dtls.GetClientDialFunc(ctx, c.logger, cfg, tlsConfig), nil
 	default:
 		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 	}

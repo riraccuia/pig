@@ -163,7 +163,7 @@ pig implements WRED (Weighted Random Early Detection) to combat network bufferbl
 
 | Category | Flag | Description | Default |
 |----------|------|-------------|---------|
-| **Config File** | `-config` | Path to configuration file in toml format | |
+| **Config File** | `-config` | Path to configuration file in TOML or JSON format | |
 | **Networks** | `-proto` | Transport protocol, one of "quic", "udp", "tls", "ws", "icmp", "tls-in-icmp", "dtls". Multiple values comma-separated (e.g., "ws,quic") can be used in ICE mode | ws |
 | | `-l` | Listen address host[:port] | |
 | | `-c` | Connect address host[:port] or server identifier for ICE | |
@@ -194,62 +194,57 @@ pig implements WRED (Weighted Random Early Detection) to combat network bufferbl
 
 ### Configuration File
 
-The configuration file uses TOML format and provides a more structured approach to configuration:
+The configuration file supports TOML or JSON. The top-level config now groups most tunnel-related settings under `tunnel`, with dedicated `log` and `route` sections:
 
 | Setting | Type | Description | Default |
 |---------|------|-------------|---------|
 | `mode` | string | Operating mode: "client" or "server" | Required |
-| `proto` | string | Transport protocol: "quic", "udp", "tls", "ws", "icmp", or "tls-in-icmp" | ws |
-| `tunnel_address` | string | CIDR format for the tunnel interface (e.g., "10.0.0.1/24") | 172.31.254.1/32 (client), 172.31.255.1/24 (server) |
-| `queue_size` | int | Size of packet queues | 256 |
-| `mtu` | int | Maximum Transmission Unit for the tunnel | 1400 |
-| `cert_file` | string | Path to TLS certificate file | Auto-generated if empty |
-| `key_file` | string | Path to TLS private key file | Auto-generated if empty |
-| `stream_count` | int | Number of multiplexed streams for protocols that support it | CPU cores available |
-| `insecure` | bool | Skip TLS certificate verification if true | false |
-| `reconnect_interval` | int | Time in seconds to wait before reconnecting | 5 |
-| `bind_adapter` | string | Network interface to bind to (e.g., "eth0", "wlan0"), useful for icmp based protos | Default interface |
 | `start_script` | string | Script to execute when a tunnel connection is established |  |
 | `stop_script` | string | Script to execute when a tunnel connection is terminated |  |
 | `log.file` | string | Path to log file (optional) |  |
 | `log.level` | string | Logging level: "debug", "info", "warn", "error" | info |
 | `log.rotate_size` | string/int | Log rotation size (e.g., "100k", "1m", "1g") |  |
-| `target.address` | string | Target address to bind to (server) or connect to (client) | Required |
-| `target.port` | int | Port to use for the connection | Required |
-| `target.src_port` | int | Source port to use for the connection (if applicable) | 0 (system assigned) |
-| `wred.weight_factor` | float | Weight factor for WRED algorithm | 5.0 |
-| `wred.drop_probability` | float | Probability of packet drop in WRED | 0.25 |
-| `wred.threshold` | float | Queue threshold for WRED | 0.1 |
-| `auth.type` | string | Authentication type: "jwt" | None |
-| `auth.jwt.public_key_source` | string | Path to public key file, JWKS url, or JSON file with JWK set|  |
-| `auth.jwt.token` | string | JWT token for client authentication |  |
-| `auth.mtls.trust_pem` | string | Path to trust bundle for mTLS | System CA |
-| `ice.enabled` | bool | Enable automatic hole punching | false |
-| `ice.protos` | array of strings | Protocols to use for ICE candidate generation (e.g. ["ws", "quic"] ), see [Allowed ICE Protocols](#allowed-ice-protocols) for more details | ["ws"] |
-| `ice.stun_address` | string | STUN server address for hole punching | stun.l.google.com:19302 |
-| `ice.signaling.encryption_key` | string | Encryption key for signaling messages | no encryption |
-| `ice.signaling.server_id` | string | Server identifier for connection routing (overrides public IP) | |
-| `ice.signaling.connect_offset` | int | Connection timing offset in milliseconds for coordinated connections | 500 |
-| `ice.signaling.mqtt_broker_address` | string | MQTT broker address for signaling | ssl://test.mosquitto.org:8883 |
-| `ice.signaling.mqtt_client_id` | string | Client ID for MQTT connection | |
-| `ice.signaling.mqtt_username` | string | Username for MQTT connection | |
-| `ice.signaling.mqtt_password` | string | Password for MQTT connection | |
+| `tunnel.tunnel_address` | string | CIDR format for the tunnel interface (e.g., "10.0.0.1/24") | 172.31.254.1/32 (client), 172.31.255.1/24 (server) |
+| `tunnel.proto` | string | Transport protocol: "quic", "udp", "tls", "ws", "icmp", "tls-in-icmp", or "dtls" | ws |
+| `tunnel.mtu` | int | Maximum Transmission Unit for the tunnel | 1400 |
+| `tunnel.stream_count` | int | Number of multiplexed streams for protocols that support it | CPU cores available |
+| `tunnel.queue_size` | int | Size of packet queues | 256 |
+| `tunnel.reconnect_interval` | int | Time in seconds to wait before reconnecting | 5 |
+| `tunnel.bind_adapter` | string | Network interface to bind to (e.g., "eth0", "wlan0"), useful for icmp based protos | Default interface |
+| `tunnel.tls.insecure` | bool | Skip TLS certificate verification if true | false |
+| `tunnel.tls.cert_file` | string | Path to TLS certificate file | Auto-generated if empty |
+| `tunnel.tls.key_file` | string | Path to TLS private key file | Auto-generated if empty |
+| `tunnel.target.address` | string | Target address to bind to (server) or connect to (client) | Required |
+| `tunnel.target.port` | int | Port to use for the connection | Required |
+| `tunnel.target.src_port` | int | Source port to use for the connection (if applicable) | 0 (system assigned) |
+| `tunnel.wred.weight_factor` | float | Weight factor for WRED algorithm | 5.0 |
+| `tunnel.wred.drop_probability` | float | Probability of packet drop in WRED | 0.25 |
+| `tunnel.wred.threshold` | float | Queue threshold for WRED | 0.1 |
+| `tunnel.auth.type` | string | Authentication type: "jwt" | None |
+| `tunnel.auth.jwt.public_key_source` | string | Path to public key file, JWKS url, or JSON file with JWK set |  |
+| `tunnel.auth.jwt.token` | string | JWT token for client authentication |  |
+| `tunnel.auth.mtls.trust_pem` | string | Path to trust bundle for mTLS | System CA |
+| `tunnel.auth.mtls.cert_file` | string | Client cert file for mTLS (client only) |  |
+| `tunnel.auth.mtls.key_file` | string | Client key file for mTLS (client only) |  |
+| `tunnel.ice.enabled` | bool | Enable automatic hole punching | false |
+| `tunnel.ice.protos` | array of strings | Protocols to use for ICE candidate generation (e.g. ["ws", "quic"] ), see [Allowed ICE Protocols](#allowed-ice-protocols) for more details | ["ws"] |
+| `tunnel.ice.stun_address` | string | STUN server address for hole punching | stun.l.google.com:19302 |
+| `tunnel.ice.signaling.encryption_key` | string | Encryption key for signaling messages | no encryption |
+| `tunnel.ice.signaling.server_id` | string | Server identifier for connection routing (overrides public IP) | |
+| `tunnel.ice.signaling.connect_offset` | int | Connection timing offset in milliseconds for coordinated connections | 500 |
+| `tunnel.ice.signaling.mqtt_broker_address` | string | MQTT broker address for signaling | ssl://test.mosquitto.org:8883 |
+| `tunnel.ice.signaling.mqtt_client_id` | string | Client ID for MQTT connection | |
+| `tunnel.ice.signaling.mqtt_username` | string | Username for MQTT connection | |
+| `tunnel.ice.signaling.mqtt_password` | string | Password for MQTT connection | |
+| `route.enabled` | bool | Enable custom route management | false |
+| `route.tunnel_routes` | array of strings | Routes that will be sent via the tunnel |  |
+| `route.bypass_routes` | array of strings | Routes that will be sent via the default gateway |  |
 
 Here's a comprehensive example `config.toml`:
 
 ```toml
 # Server configuration
 mode = "server"                # "server" or "client"
-proto = "quic"                 # "quic", "udp", "tls", "ws", "icmp", or "tls-in-icmp"
-tunnel_address = "10.0.0.1/24" # CIDR format for tunnel interface
-queue_size = 128               # Size of packet queues for the transport layer
-mtu = 1500                     # Maximum Transmission Unit
-cert_file = "/path/to/cert.pem"
-key_file = "/path/to/key.pem"
-stream_count = 5               # Number of multiplexed streams for supported protocols
-insecure = true                # Skip certificate verification if true
-reconnect_interval = 5         # Reconnection interval in seconds
-bind_adapter = "eth0"          # Network interface to bind to
 start_script = "/path/to/start.sh" # Script to run when a connection is established
 stop_script = "/path/to/stop.sh"   # Script to run when a connection is terminated
 
@@ -258,39 +253,60 @@ file = "/var/log/pig.log"          # Path to log file (optional)
 level = "info"                     # Logging level: debug, info, warn, error
 rotate_size = "10m"                # Log rotation size
 
-[target]
-address = "0.0.0.0"            # Target address to bind to (server) or connect to (client)
-port = 8080                    # Port to use
-src_port = 0                   # Source port (0 for system assigned)
+[tunnel]
+tunnel_address = "10.0.0.1/24" # CIDR format for tunnel interface
+proto = "quic"                 # "quic", "udp", "tls", "ws", "icmp", "tls-in-icmp", or "dtls"
+queue_size = 128               # Size of packet queues for the transport layer
+mtu = 1500                     # Maximum Transmission Unit
+stream_count = 5               # Number of multiplexed streams for supported protocols
+reconnect_interval = 5         # Reconnection interval in seconds
+bind_adapter = "eth0"          # Network interface to bind to
 
-[wred]
-weight_factor = 5.0            # Weight factor for WRED algorithm
-drop_probability = 0.25        # Probability of packet drop
-threshold = 0.1                # Queue threshold for WRED
+  [tunnel.tls]
+  insecure = true                # Skip certificate verification if true
+  cert_file = "/path/to/cert.pem"
+  key_file = "/path/to/key.pem"
 
-[auth]
-type = "jwt"                   # Authentication type: "jwt"
+  [tunnel.target]
+  address = "0.0.0.0"            # Target address to bind to (server) or connect to (client)
+  port = 8080                    # Port to use
+  src_port = 0                   # Source port (0 for system assigned)
 
-  [auth.jwt]
-  public_key_source = "/path/to/keys.pem" # Path to public key file, URL to JWKS, or JSON file with JWKS
-  token = "your.jwt.token"     # JWT token (client only)
+  [tunnel.wred]
+  weight_factor = 5.0            # Weight factor for WRED algorithm
+  drop_probability = 0.25        # Probability of packet drop
+  threshold = 0.1                # Queue threshold for WRED
 
-  [auth.mtls]
-  trust_pem = "/path/to/ca.pem" # Path to trust bundle for mTLS
+  [tunnel.auth]
+  type = "jwt"                   # Authentication type: "jwt"
 
-[ice]
-enabled = true                 # Enable automatic hole punching
-protos = ["ws", "quic", "dtls","tls"]        # Protocols to use for ICE candidate generation
-stun_address = "stun.l.google.com:19302"  # STUN server address
+    [tunnel.auth.jwt]
+    public_key_source = "/path/to/keys.pem" # Path to public key file, URL to JWKS, or JSON file with JWKS
+    token = "your.jwt.token"     # JWT token (client only)
 
-  [ice.signaling]
-  encryption_key = "my-secure-passphrase"         # Encryption key for signaling messages
-  server_id = "my-server-identifier"              # Server identifier for connection routing
-  connect_offset = 500                            # Connection timing offset in milliseconds
-  mqtt_broker_address = "ssl://mqtt-broker:8883"  # Optional MQTT broker address, defaults to ssl://test.mosquitto.org:8883
-  mqtt_client_id = "unique-client-id"             # Optional MQTT client ID
-  mqtt_username = "user"                          # Optional MQTT username
-  mqtt_password = "password"                      # Optional MQTT password
+    [tunnel.auth.mtls]
+    trust_pem = "/path/to/ca.pem" # Path to trust bundle for mTLS
+    cert_file = "/path/to/client.pem"
+    key_file = "/path/to/client.key"
+
+  [tunnel.ice]
+  enabled = true                 # Enable automatic hole punching
+  protos = ["ws", "quic", "dtls", "tls"]       # Protocols to use for ICE candidate generation
+  stun_address = "stun.l.google.com:19302"  # STUN server address
+
+    [tunnel.ice.signaling]
+    encryption_key = "my-secure-passphrase"         # Encryption key for signaling messages
+    server_id = "my-server-identifier"              # Server identifier for connection routing
+    connect_offset = 500                            # Connection timing offset in milliseconds
+    mqtt_broker_address = "ssl://mqtt-broker:8883"  # Optional MQTT broker address, defaults to ssl://test.mosquitto.org:8883
+    mqtt_client_id = "unique-client-id"             # Optional MQTT client ID
+    mqtt_username = "user"                          # Optional MQTT username
+    mqtt_password = "password"                      # Optional MQTT password
+
+[route]
+enabled = true
+tunnel_routes = ["0.0.0.0/1", "128.0.0.0/1"]
+bypass_routes = ["203.0.113.10/32"]
 ```
 
 Run with config file:
@@ -425,8 +441,8 @@ Fortunately, many public MQTT brokers and STUN servers are available for free. T
 Due to the public nature of these services, you can optionally provide a passphrase to encrypt all signaling messages.
 
 **Advanced Configuration Options:**
-- **Server ID**: Use `ice.signaling.server_id` to identify connections by a custom identifier instead of the server's public IP address
-- **Connection Timing**: Configure `ice.signaling.connect_offset` (in milliseconds) to coordinate connection attempts between peers, improving NAT traversal success rates
+- **Server ID**: Use `tunnel.ice.signaling.server_id` to identify connections by a custom identifier instead of the server's public IP address
+- **Connection Timing**: Configure `tunnel.ice.signaling.connect_offset` (in milliseconds) to coordinate connection attempts between peers, improving NAT traversal success rates
 
 In ICE mode, you can [specify multiple protocols](#allowed-ice-protocols) (e.g. `-proto ws,quic`) to generate candidate pairs. This increases the chances of successful connectivity. 
 
@@ -455,12 +471,12 @@ sudo pig -c my.server.net -proto . -k -ice true
 The same settings can be configured in the TOML configuration file:
 
 ```toml
-[ice]
+[tunnel.ice]
 enabled = true
 protos = ["ws", "quic"]        # Multiple protocols for candidate generation
 stun_address = "stun.l.google.com:19302"
 
-[ice.signaling]
+[tunnel.ice.signaling]
 encryption_key = "my-secure-passphrase"
 server_id = "my-server-identifier"
 connect_offset = 500
@@ -479,8 +495,8 @@ The following protocols are currently supported for ICE candidate generation:
 Therefore legal values are: `quic`, `ws`, `dtls`, `tls`, `tls-in-icmp`. 
 The special value `.` can also be used to select all supported protocols (note that `tls-in-icmp` will not be used in this case).
 
-These can be specified in the `-proto` flag, `proto` configuration field as comma-separated values. 
-The `ice.protos` block of the configuration file is used to override other settings.
+These can be specified in the `-proto` flag, `tunnel.proto` configuration field as comma-separated values. 
+The `tunnel.ice.protos` block of the configuration file is used to override other settings.
 
 ### Candidate Pair Negotiation
 

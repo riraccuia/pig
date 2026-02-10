@@ -1,6 +1,12 @@
 package config
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
 	"github.com/BurntSushi/toml"
 	"github.com/riraccuia/pig/pkg/transport"
 )
@@ -84,21 +90,36 @@ func (m ICMPMode) IsValid() bool {
 }
 
 type Config struct {
-	Mode              Mode          `toml:"mode" json:"mode"`                     // "client" or "server"
-	LogConfig         LogConfig     `toml:"log" json:"log"`                       // Log configuration
+	Mode         Mode         `toml:"mode" json:"mode"` // "client" or "server"
+	LogConfig    LogConfig    `toml:"log" json:"log"`   // Log configuration
+	TunnelConfig TunnelConfig `toml:"tunnel" json:"tunnel"`
+	RouteConfig  RouteConfig  `toml:"route" json:"route"`
+	//TunnelAddress     string        `toml:"tunnel_address" json:"tunnel_address"` // CIDR format
+	//TLSConfig         TLSConfig     `toml:"tls_config" json:"tls_config"`
+	//MTU               int           `toml:"mtu" json:"mtu"`
+	//StreamCount       int           `toml:"stream_count" json:"stream_count"`
+	//Proto             TransportType `toml:"proto" json:"proto"`
+	//Target            Target        `toml:"target" json:"target"`
+	//ReconnectInterval int           `toml:"reconnect_interval" json:"reconnect_interval"` // in seconds
+	//BindAdapter       string        `toml:"bind_adapter" json:"bind_adapter"`             // The adapter to bind to
+	//Wred              WredConfig    `toml:"wred" json:"wred"`
+	StartScript string `toml:"start_script" json:"start_script"` // Script to execute when a tunnel connection is established
+	StopScript  string `toml:"stop_script" json:"stop_script"`   // Script to execute when a tunnel connection is disconnected
+	//Auth              *AuthConfig   `toml:"auth" json:"auth"`
+	//QueueSize         int           `toml:"queue_size" json:"queue_size"` // Size of packet queues (default: 256)
+	//ICE               *ICEConfig    `toml:"ice" json:"ice"`
+}
+
+type TunnelConfig struct {
 	TunnelAddress     string        `toml:"tunnel_address" json:"tunnel_address"` // CIDR format
+	TLSConfig         TLSConfig     `toml:"tls" json:"tls"`
 	MTU               int           `toml:"mtu" json:"mtu"`
-	CertFile          string        `toml:"cert_file" json:"cert_file"`
-	KeyFile           string        `toml:"key_file" json:"key_file"`
 	StreamCount       int           `toml:"stream_count" json:"stream_count"`
-	Insecure          bool          `toml:"insecure" json:"insecure"` // Skip TLS certificate verification if true
 	Proto             TransportType `toml:"proto" json:"proto"`
 	Target            Target        `toml:"target" json:"target"`
 	ReconnectInterval int           `toml:"reconnect_interval" json:"reconnect_interval"` // in seconds
 	BindAdapter       string        `toml:"bind_adapter" json:"bind_adapter"`             // The adapter to bind to
 	Wred              WredConfig    `toml:"wred" json:"wred"`
-	StartScript       string        `toml:"start_script" json:"start_script"` // Script to execute when a tunnel connection is established
-	StopScript        string        `toml:"stop_script" json:"stop_script"`   // Script to execute when a tunnel connection is disconnected
 	Auth              *AuthConfig   `toml:"auth" json:"auth"`
 	QueueSize         int           `toml:"queue_size" json:"queue_size"` // Size of packet queues (default: 256)
 	ICE               *ICEConfig    `toml:"ice" json:"ice"`
@@ -160,6 +181,17 @@ type WredConfig struct {
 	Threshold       float64 `toml:"threshold" json:"threshold"`
 }
 
+type TLSConfig struct {
+	// Insecure is the flag to skip TLS certificate verification
+	Insecure bool `toml:"insecure" json:"insecure"`
+	// CertFile is the path to the certificate file for server TLS
+	// It will be ignored in client mode
+	CertFile string `toml:"cert_file" json:"cert_file"`
+	// KeyFile is the path to the key file for server TLS
+	// It will be ignored in client mode
+	KeyFile string `toml:"key_file" json:"key_file"`
+}
+
 type AuthConfig struct {
 	Type AuthType    `toml:"type" json:"type"`
 	JWT  *JWTAuth    `toml:"jwt" json:"jwt"`
@@ -171,6 +203,10 @@ type MTLSConfig struct {
 	// in client mode, this is used to validate the server certificate
 	// in server mode, this is used to validate client certificates
 	TrustPEM string `toml:"trust_pem" json:"trust_pem"`
+	// CertFile will be ignored in server mode
+	CertFile string `toml:"cert_file" json:"cert_file"`
+	// KeyFile will be ignored in server mode
+	KeyFile string `toml:"key_file" json:"key_file"`
 }
 
 type JWTAuth struct {
@@ -180,10 +216,46 @@ type JWTAuth struct {
 	Token string `toml:"token" json:"token"`
 }
 
-func LoadConfig(path string) (*Config, error) {
+type RouteConfig struct {
+	Enabled bool `toml:"enabled" json:"enabled"`
+	// TunnelRoutes are the routes that will be used for the tunnel
+	TunnelRoutes []string `toml:"tunnel_routes" json:"tunnel_routes"`
+	// BypassRoutes are the routes that will be sent via the default gateway
+	BypassRoutes []string `toml:"bypass_routes" json:"bypass_routes"`
+}
+
+func LoadConfigFromFile(path string) (*Config, error) {
+	// determine the config type based on the file extension
+	// if the extension is .toml, decode as toml
+	// if the extension is .json, decode as json
+	extension := strings.ToLower(filepath.Ext(path))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %v", err)
+	}
+	switch extension {
+	case ".toml":
+		return LoadConfigFromBytes(data, "toml")
+	case ".json":
+		return LoadConfigFromBytes(data, "json")
+	default:
+		return nil, fmt.Errorf("unsupported config format: %s", extension)
+	}
+}
+
+func LoadConfigFromBytes(data []byte, decodeAs string) (*Config, error) {
 	var config Config
-	if _, err := toml.DecodeFile(path, &config); err != nil {
-		return nil, err
+	switch decodeAs {
+	case "toml":
+		if _, err := toml.Decode(string(data), &config); err != nil {
+			return nil, err
+		}
+	case "json":
+		if err := json.Unmarshal(data, &config); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported config format: %s", decodeAs)
 	}
 	return &config, nil
 }

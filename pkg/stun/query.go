@@ -13,14 +13,14 @@ import (
 func QueryServer(logger common.Logger, stunServer string, sourcePort int, protocol string, tlsConfig *tls.Config) (mappedIP net.IP, mappedPort int, err error) {
 	switch protocol {
 	case "udp":
-		return QueryServerUDP(logger, stunServer, sourcePort)
+		return QueryServerUDP(logger, stunServer, &net.UDPAddr{IP: nil, Port: sourcePort})
 	case "tcp":
-		return QueryServerTCP(logger, stunServer, sourcePort)
+		return QueryServerTCP(logger, stunServer, &net.TCPAddr{IP: nil, Port: sourcePort})
 	case "tls":
 		if tlsConfig == nil {
 			return nil, 0, fmt.Errorf("TLS config is required for TLS queries")
 		}
-		return QueryServerTLS(logger, stunServer, sourcePort, tlsConfig)
+		return QueryServerTLS(logger, stunServer, &net.TCPAddr{IP: nil, Port: sourcePort}, tlsConfig)
 	default:
 		return nil, 0, fmt.Errorf("invalid protocol: %s", protocol)
 	}
@@ -101,7 +101,7 @@ func processStunRequestBytes(reqBytes []byte, remoteAddr net.Addr) (*StunMessage
 	}
 
 	// Create response attributes
-	responseAttrs, err := CreateResponseAttributes(remoteAddr, nil)
+	responseAttrs, err := CreateResponseAttributes(remoteAddr, request.Header.TransactionID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create response attributes: %w", err)
 	}

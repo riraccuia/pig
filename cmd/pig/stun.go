@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/riraccuia/pig/pkg/common"
+	"github.com/riraccuia/pig/pkg/controller"
 	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/stun"
 )
@@ -44,6 +45,7 @@ func stunMode() {
 	var (
 		flags                = parseStunFlags()
 		logger common.Logger = log.NewBlockingLogger()
+		ctx                  = context.Background()
 	)
 	if flags.stunQry != "" {
 		doStunQuery(logger, flags)
@@ -53,7 +55,7 @@ func stunMode() {
 		logger.Fatalf("Either -l or -p is required")
 		os.Exit(1)
 	}
-	stunListenMode(logger, flags)
+	stunListenMode(ctx, logger, flags)
 }
 
 // doStunQuery queries the STUN server to get the public IP and port
@@ -99,7 +101,7 @@ func doStunQuery(logger common.Logger, flags *stunFlags) {
 }
 
 // stunListenMode listens for STUN requests on the specified protocol, address and port.
-func stunListenMode(logger common.Logger, flags *stunFlags) {
+func stunListenMode(ctx context.Context, logger common.Logger, flags *stunFlags) {
 	var (
 		listenAddr net.Addr
 		err        error
@@ -118,10 +120,14 @@ func stunListenMode(logger common.Logger, flags *stunFlags) {
 	default:
 		logger.Fatalf("Unimplemented STUN protocol for listen: %s", flags.stunProto)
 	}
-	server, err := stun.NewServer(logger, listenAddr)
-	if err != nil {
-		logger.Fatalf("Failed to create STUN server: %v", err)
-	}
+	ctrl := controller.New(ctx).WithLogger(logger)
 
-	handleGracefulShutdown(context.Background(), logger, func() {}, server)
+	ctrl.StartCallback(func(ctx context.Context) {
+		_, err := stun.NewServerWithContext(ctx, logger, listenAddr)
+		if err != nil {
+			logger.Fatalf("Failed to create STUN server: %v", err)
+		}
+	})
+
+	ctrl.HandleGracefulShutdown(nil)
 }

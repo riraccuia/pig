@@ -3,9 +3,7 @@ package ice
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
-	"slices"
 	"time"
 
 	"github.com/riraccuia/pig/pkg/ice/message"
@@ -73,77 +71,21 @@ func receiveOffers(ctx context.Context, signaler *signaling.Signaler, listenPort
 }
 
 func processOffer(signaler *signaling.Signaler, topicBase string, offer *message.ICEMessage, listenPort uint16, listenPaths chan []*ConnectPath, pigProtos []transport.ICEProtocolDefinition) {
-	localNets, localIps, err := GetLocalNetworks()
+	localNets, localIps, err := GetLocalNetworks("")
 	if err != nil {
 		return
 	}
 
-	type ipPort struct {
-		ip   net.IP
-		port int
-	}
-
 	var (
 		answerCandidates []message.ICECandidate
-		cp               []*ConnectPath
+		connectPaths     []*ConnectPath
 		opts             = signaler.GetOptions()
-		mappedAddrs      = make(map[string]ipPort)
 	)
 
-	for _, tr := range pigProtos {
-		// local candidates
-		for i, localIp := range localIps {
-			bindAgent := stun.NewIceBindingAgent(opts.Logger, nil)
-			cp = append(cp, &ConnectPath{
-				LocalNet:  localNets[i],
-				LocalAddr: AddressFrom(tr.Network, localIp, int(listenPort)),
-				Protocol:  tr,
-				BindAgent: bindAgent,
-			})
-			candidate := CandidateFrom(tr.Network, tr.ComponentID, localIp, int(listenPort))
-			answerCandidates = append(answerCandidates, candidate)
-			bindAgent.Ice = &stun.IceAttributes{
-				Priority:      candidate.Priority,
-				IceControlled: 0x12345678,
-			}
-		}
-		// reflexive candidate
-		localAddr := AddressFrom(tr.Network, net.IPv4zero, int(listenPort))
-
-		var (
-			mappingKey = fmt.Sprintf("%s:%d", tr.Network, listenPort)
-			mappedIP   net.IP
-			mappedPort int
-		)
-
-		ma, ok := mappedAddrs[mappingKey]
-		switch {
-		case ok:
-			mappedIP = ma.ip
-			mappedPort = ma.port
-		default:
-			var e error
-			mappedIP, mappedPort, e = PerformSTUNQuery(opts.Logger, opts.STUNServer, localAddr)
-			if e != nil {
-				opts.Logger.Errorf("ICE: STUN query failed: %v", e)
-				continue
-			}
-			mappedAddrs[mappingKey] = ipPort{mappedIP, mappedPort}
-		}
-
-		bindAgent := stun.NewIceBindingAgent(opts.Logger, nil)
-		cp = append(cp, &ConnectPath{
-			LocalAddr: localAddr,
-			Protocol:  tr,
-			BindAgent: bindAgent,
-		})
-		candidate := CandidateFrom(tr.Network, tr.ComponentID, mappedIP, mappedPort)
-		answerCandidates = append(answerCandidates, candidate)
-		bindAgent.Ice = &stun.IceAttributes{
-			Priority:      candidate.Priority,
-			IceControlled: 0x12345678,
-		}
-	}
+	var localInfo map[localCandidateKey]localCandidateInfo
+	answerCandidates, localInfo = buildLocalCandidates(pigProtos, localIps, listenPort)
+	answerCandidates = append(answerCandidates, buildReflexiveCandidates(pigProtos, localIps, localInfo, opts)...)
+	answerCandidates = dedupCandidates(answerCandidates)
 
 	opts.Logger.Tracef("ICE: preparing to send ICE answer to client. SessionID: %s", offer.SessionID)
 
@@ -161,38 +103,42 @@ func processOffer(signaler *signaling.Signaler, topicBase string, offer *message
 		PeerPassword: offer.Credentials.Password,
 	}
 
+	opts.Logger.Tracef("ICE: raw candidates from offer: %v", offer.Candidates)
+
 	for _, candidate := range offer.Candidates {
 		targetIP := net.ParseIP(candidate.Address)
-		for _, connect := range cp {
-			if connect.Protocol.Network != candidate.Protocol {
+		for _, tr := range pigProtos {
+			if tr.Network != candidate.Protocol {
 				continue
 			}
-			if connect.Protocol.ComponentID != candidate.ComponentID {
+			if tr.ComponentID != candidate.ComponentID {
 				continue
 			}
-			if connect.LocalNet != nil && !connect.LocalNet.Contains(targetIP) {
-				continue
+			for i, localIP := range localIps {
+				localNet := localNets[i]
+				if getFamilyForIP(localIP) != getFamilyForIP(targetIP) {
+					continue
+				}
+				if candidate.Type == message.ICECandidateTypeHost && localNet != nil && localNet.IP.IsPrivate() && !localNet.Contains(targetIP) {
+					continue
+				}
+				info, ok := localInfo[makeLocalCandidateKey(tr, localIP)]
+				if !ok {
+					continue
+				}
+				cPath := getPathForProto(tr, localNet, localIP, nil, uint16(info.port), opts)
+				cPath.BindAgent.SetControlled(iceAuth, info.priority)
+				cPath.ICEID = answer.SessionID
+				cPath.RemoteAddr = AddressFrom(cPath.Protocol.Network, targetIP, candidate.Port)
+				cPath.ScheduledAt = time.UnixMilli(answer.Timestamp).Add(offer.ConnectOffsetDuration)
+				connectPaths = append(connectPaths, cPath)
 			}
-			connect.ICEID = answer.SessionID
-			connect.RemoteAddr = AddressFrom(connect.Protocol.Network, targetIP, candidate.Port)
-			connect.BindAgent.Auth = iceAuth
-			connect.ScheduledAt = time.UnixMilli(answer.Timestamp).Add(offer.ConnectOffsetDuration)
 		}
 	}
-
-	// remove from the connectMap the ones that do not have a remote address
-	cp = slices.DeleteFunc(cp, func(c *ConnectPath) bool {
-		return c.RemoteAddr == nil
-	})
+	connectPaths = dedupConnectPaths(connectPaths)
 	// send the connect paths to the listener
 	select {
-	case listenPaths <- cp:
+	case listenPaths <- connectPaths:
 	default:
 	}
-	// free the memory
-	for _, m := range mappedAddrs {
-		m.ip = nil
-		m.port = 0
-	}
-	mappedAddrs = nil
 }

@@ -2,6 +2,6 @@
 
 package udp
 
-import "github.com/riraccuia/pig/pkg/log"
+import "github.com/riraccuia/pig/pkg/common"
 
-func initUDP(logger *log.Logger) {}
+func initUDP(logger common.Logger) {}

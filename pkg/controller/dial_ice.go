@@ -1,18 +1,19 @@
-package main
+package controller
 
 import (
 	"context"
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice"
 	"github.com/riraccuia/pig/pkg/ice/conn"
 	"github.com/riraccuia/pig/pkg/ice/signaling"
-	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 	"github.com/riraccuia/pig/pkg/transport/dtls"
 	qt "github.com/riraccuia/pig/pkg/transport/quic-go"
@@ -21,14 +22,14 @@ import (
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
 
-func getICEDialFunc(ctx context.Context, logger *log.Logger, cfg *config.Config) (func() (transport.Conn, error), error) {
-	tlsConfig, err := createTLSConfig(logger, cfg)
+func (c *Controller) getICEDialFunc(ctx context.Context, cfg *config.TunnelConfig) (func() (transport.Conn, error), error) {
+	tlsConfig, err := c.createTLSConfig(config.ModeClient, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create TLS config: %w", err)
 	}
 	return func() (transport.Conn, error) {
-		logger.Infof("Starting ICE | Candidate protocols: %v", strings.Join(cfg.ICE.Protos, ", "))
-		connectPaths, err := ice.GetConnectPaths(ctx, signaling.GetOptions(logger, cfg.ICE), &cfg.Target, cfg.ICE.UseProtos())
+		c.logger.Infof("Starting ICE | Candidate protocols: %v", strings.Join(cfg.ICE.Protos, ", "))
+		connectPaths, err := ice.GetConnectPaths(ctx, signaling.GetOptions(c.logger, cfg.ICE), &cfg.Target, cfg.ICE.UseProtos())
 		if err != nil {
 			return nil, fmt.Errorf("failed to get ICE connect paths: %w", err)
 		}
@@ -36,12 +37,12 @@ func getICEDialFunc(ctx context.Context, logger *log.Logger, cfg *config.Config)
 			return nil, fmt.Errorf("no ICE candidates found")
 		}
 
-		selectedPath, err := processICEClientConnectPaths(ctx, logger, cfg, connectPaths)
+		selectedPath, err := processICEClientConnectPaths(ctx, c.logger, cfg, connectPaths)
 		if err != nil {
 			return nil, fmt.Errorf("failed to process ICE client connect paths: %w", err)
 		}
 
-		logger.Debugf("ICE connect path nominated: %s", selectedPath.String())
+		c.logger.Debugf("ICE connect path nominated: %s", selectedPath.String())
 
 		selectedPath.BindAgent.StopReceive()
 		selectedPath.BindAgent.Ice.UseCandidate = true
@@ -52,7 +53,10 @@ func getICEDialFunc(ctx context.Context, logger *log.Logger, cfg *config.Config)
 			return nil, fmt.Errorf("failed to send binding request: %w", err)
 		}
 
-		logger.Infof("ICE completed | %s", selectedPath.String())
+		c.logger.Infof("ICE completed | %s", selectedPath.String())
+
+		// Allow the server to set up the listening side of the connection
+		time.Sleep(time.Millisecond * 50)
 
 		switch selectedPath.Protocol.Protocol {
 		case "ws":
@@ -74,11 +78,14 @@ func getICEDialFunc(ctx context.Context, logger *log.Logger, cfg *config.Config)
 	}, nil
 }
 
-func processICEClientConnectPaths(ctx context.Context, logger *log.Logger, cfg *config.Config, connectPaths []*ice.ConnectPath) (selectedPath *ice.ConnectPath, err error) {
+func processICEClientConnectPaths(ctx context.Context, logger common.Logger, cfg *config.TunnelConfig, connectPaths []*ice.ConnectPath) (selectedPath *ice.ConnectPath, err error) {
 	var (
 		selectedPtr = atomic.Pointer[ice.ConnectPath]{}
 		timer       = time.NewTimer(time.Second * 10)
 	)
+	sort.SliceStable(connectPaths, func(i, j int) bool {
+		return connectPathPriority(connectPaths[i]) > connectPathPriority(connectPaths[j])
+	})
 	for _, cp := range connectPaths {
 		logger.Debugf("Connecting ICE path | %s | Scheduled at: %s", cp.String(), cp.ScheduledAt.UTC().Format(time.RFC3339))
 		time.AfterFunc(time.Until(cp.ScheduledAt), func() {
@@ -126,4 +133,17 @@ func processICEClientConnectPaths(ctx context.Context, logger *log.Logger, cfg *
 		}
 	}
 	return
+}
+
+func connectPathPriority(cp *ice.ConnectPath) uint32 {
+	if cp == nil {
+		return 0
+	}
+	if cp.BindAgent == nil {
+		return 0
+	}
+	if cp.BindAgent.Ice == nil {
+		return 0
+	}
+	return cp.BindAgent.Ice.Priority
 }

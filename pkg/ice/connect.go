@@ -3,9 +3,7 @@ package ice
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"net"
-	"slices"
 	"time"
 
 	"github.com/riraccuia/pig/pkg/config"
@@ -16,58 +14,17 @@ import (
 )
 
 func GetConnectPaths(ctx context.Context, opts *signaling.Options, target *config.Target, pigProtos []transport.ICEProtocolDefinition) (cp []*ConnectPath, err error) {
-	localNets, localIps, err := GetLocalNetworks()
+	localNets, localIps, err := GetLocalNetworks("")
 	if err != nil {
 		return nil, err
 	}
 
 	var offerCandidates []message.ICECandidate
+	var localInfo map[localCandidateKey]localCandidateInfo
 
-	for _, tr := range pigProtos {
-		// local candidates
-		for i, localIp := range localIps {
-			bindAgent := stun.NewIceBindingAgent(opts.Logger, nil)
-			srcPort := target.SrcPort
-			if srcPort == 0 {
-				srcPort = rand.Intn(65535-1024) + 1024
-			}
-			localAddr := AddressFrom(tr.Network, localIp, srcPort)
-			cp = append(cp, &ConnectPath{
-				LocalNet:  localNets[i],
-				LocalAddr: localAddr,
-				Protocol:  tr,
-				BindAgent: bindAgent,
-			})
-			candidate := CandidateFrom(tr.Network, tr.ComponentID, localIp, srcPort)
-			offerCandidates = append(offerCandidates, candidate)
-			bindAgent.Ice = &stun.IceAttributes{
-				Priority:       candidate.Priority,
-				IceControlling: 0x12345678,
-			}
-		}
-		// reflexive candidate
-		localAddr := AddressFrom(tr.Network, net.IPv4zero, target.SrcPort)
-		// Get mapped endpoint
-		mappedIP, mappedPort, err := PerformSTUNQuery(opts.Logger, opts.STUNServer, localAddr)
-		if err != nil {
-			return nil, fmt.Errorf("STUN query failed: %w", err)
-		}
-		bindAgent := stun.NewIceBindingAgent(opts.Logger, nil)
-		cp = append(cp, &ConnectPath{
-			LocalAddr: localAddr,
-			Protocol:  tr,
-			BindAgent: bindAgent,
-		})
-		candidate := CandidateFrom(tr.Network, tr.ComponentID, mappedIP, mappedPort)
-		offerCandidates = append(offerCandidates, candidate)
-		bindAgent.Ice = &stun.IceAttributes{
-			Priority:       candidate.Priority,
-			IceControlling: 0x12345678,
-		}
-		//if tr.Network == "udp" {
-		//	go conn.PunchUDP(localAddr.(*net.UDPAddr).Port, "78.196.244.170:443")
-		//}
-	}
+	offerCandidates, localInfo = buildLocalCandidates(pigProtos, localIps, uint16(target.SrcPort))
+	offerCandidates = append(offerCandidates, buildReflexiveCandidates(pigProtos, localIps, localInfo, opts)...)
+	offerCandidates = dedupCandidates(offerCandidates)
 
 	var (
 		offer, answer *message.ICEMessage
@@ -96,27 +53,35 @@ func GetConnectPaths(ctx context.Context, opts *signaling.Options, target *confi
 
 	for _, candidate := range answer.Candidates {
 		targetIP := net.ParseIP(candidate.Address)
-		for _, connect := range cp {
-			if connect.Protocol.Network != candidate.Protocol {
+		for _, tr := range pigProtos {
+			if tr.Network != candidate.Protocol {
 				continue
 			}
-			if connect.Protocol.ComponentID != candidate.ComponentID {
+			if tr.ComponentID != candidate.ComponentID {
 				continue
 			}
-			if connect.LocalNet != nil && !connect.LocalNet.Contains(targetIP) {
-				continue
+			for i, localIP := range localIps {
+				localNet := localNets[i]
+				if getFamilyForIP(localIP) != getFamilyForIP(targetIP) {
+					continue
+				}
+				if candidate.Type == message.ICECandidateTypeHost && localNet != nil && localNet.IP.IsPrivate() && !localNet.Contains(targetIP) {
+					continue
+				}
+				info, ok := localInfo[makeLocalCandidateKey(tr, localIP)]
+				if !ok {
+					continue
+				}
+				connect := getPathForProto(tr, localNet, localIP, nil, uint16(info.port), opts)
+				connect.BindAgent.SetControlling(iceAuth, info.priority)
+				connect.ICEID = answer.SessionID
+				connect.RemoteAddr = AddressFrom(connect.Protocol.Network, targetIP, candidate.Port)
+				connect.ScheduledAt = time.UnixMilli(answer.Timestamp).Add(offer.ConnectOffsetDuration)
+				cp = append(cp, connect)
 			}
-			connect.ICEID = answer.SessionID
-			connect.RemoteAddr = AddressFrom(connect.Protocol.Network, targetIP, candidate.Port)
-			connect.BindAgent.Auth = iceAuth
-			connect.ScheduledAt = time.UnixMilli(answer.Timestamp).Add(offer.ConnectOffsetDuration)
 		}
 	}
-
-	// remove from the connectMap the ones that do not have a remote address
-	cp = slices.DeleteFunc(cp, func(c *ConnectPath) bool {
-		return c.RemoteAddr == nil
-	})
+	cp = dedupConnectPaths(cp)
 
 	opts.Logger.Tracef("ICE: connect paths: %v", cp)
 

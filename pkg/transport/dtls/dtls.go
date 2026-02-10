@@ -7,14 +7,14 @@ import (
 	"net"
 
 	"github.com/pion/dtls/v3"
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice"
-	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
 // GetClientFromConn creates a DTLS client connection from an existing connection
-func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Config, tlsConfig *tls.Config) (transport.Conn, error) {
+func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config) (transport.Conn, error) {
 	// Convert TLS config to DTLS config
 	dtlsConfig := &dtls.Config{
 		InsecureSkipVerify: tlsConfig.InsecureSkipVerify,
@@ -38,7 +38,7 @@ func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Config
 }
 
 // GetListenerFromConn creates a DTLS listener from an existing connection
-func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Config, tlsConfig *tls.Config) (transport.Listener, error) {
+func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config) (transport.Listener, error) {
 	// Convert TLS config to DTLS config
 	dtlsConfig := &dtls.Config{
 		InsecureSkipVerify: tlsConfig.InsecureSkipVerify,
@@ -63,7 +63,7 @@ func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Config
 }
 
 // GetClientDialFunc returns a function that creates DTLS client connections
-func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
+func GetClientDialFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
 		// Convert TLS config to DTLS config
 		dtlsConfig := &dtls.Config{
@@ -93,7 +93,7 @@ func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.C
 }
 
 // GetServerListenFunc returns a function that creates DTLS server listeners
-func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
+func GetServerListenFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Listener, error) {
 	return func() (transport.Listener, error) {
 		// Convert TLS config to DTLS config
 		dtlsConfig := &dtls.Config{

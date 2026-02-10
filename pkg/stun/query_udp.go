@@ -10,33 +10,48 @@ import (
 )
 
 // QueryServerUDP is a convenience function that uses a StunClient under the hood.
-func QueryServerUDP(logger common.Logger, stunServerAddr string, connOrSrcPort any) (mappedIP net.IP, mappedPort int, err error) {
+func QueryServerUDP(logger common.Logger, stunServerAddr string, connOrLocalAddr any) (mappedIP net.IP, mappedPort int, err error) {
 	client := NewStunClient(logger, stunServerAddr, nil)
-	return client.QueryStunServerUDP(connOrSrcPort)
+	return client.QueryStunServerUDP(connOrLocalAddr)
 }
 
 // QueryStunServerUDP takes a UDP connection or a source port and queries the STUN server.
-func (c *StunClient) QueryStunServerUDP(connOrSrcPort any) (mappedIP net.IP, mappedPort int, err error) {
-	conn, ok := connOrSrcPort.(*net.UDPConn)
+func (c *StunClient) QueryStunServerUDP(connOrLocalAddr any) (mappedIP net.IP, mappedPort int, err error) {
+	conn, ok := connOrLocalAddr.(*net.UDPConn)
 	if ok {
-		return c.queryStunServerUDP(conn)
+		network := "udp4"
+		if conn.LocalAddr().(*net.UDPAddr).IP.To4() == nil {
+			network = "udp6"
+		}
+		serverAddr, err := net.ResolveUDPAddr(network, c.ServerAddr)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to resolve STUN server address %s: %w", c.ServerAddr, err)
+		}
+		return c.queryStunServerUDP(serverAddr, conn)
 	}
-	srcPort, ok := connOrSrcPort.(int)
+	localAddr, ok := connOrLocalAddr.(*net.UDPAddr)
 	if !ok {
-		return nil, 0, fmt.Errorf("invalid source port: %v", connOrSrcPort)
+		return nil, 0, fmt.Errorf("invalid local address: %v", connOrLocalAddr)
 	}
-	return c.queryStunServerUDP(srcPort)
-}
-
-// QueryStunServerUDP sends a STUN Binding Request and returns the mapped IP and port.
-// It uses the client's configured ServerAddr. connOrSrcPort is the UDP connection or the source port to send from.
-func (c *StunClient) queryStunServerUDP(connOrSrcPort any) (mappedIP net.IP, mappedPort int, err error) {
-	// Resolve server address
-	serverAddr, err := net.ResolveUDPAddr("udp", c.ServerAddr)
+	var network string
+	switch {
+	case localAddr.IP == nil:
+		network = "udp"
+	case localAddr.IP.To4() == nil:
+		network = "udp6"
+	default:
+		network = "udp4"
+	}
+	serverAddr, err := net.ResolveUDPAddr(network, c.ServerAddr)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to resolve STUN server address %s: %w", c.ServerAddr, err)
 	}
+	return c.queryStunServerUDP(serverAddr, localAddr)
+}
 
+// QueryStunServerUDP sends a STUN Binding Request and returns the mapped IP and port.
+// It uses the client's configured ServerAddr. connOrLocalAddr is the UDP connection or the local address to send from.
+func (c *StunClient) queryStunServerUDP(serverAddr *net.UDPAddr, connOrLocalAddr any) (mappedIP net.IP, mappedPort int, err error) {
 	// Create STUN message
 	msg, err := CreateStunMessage(stunBindingRequest, nil)
 	if err != nil {
@@ -49,7 +64,7 @@ func (c *StunClient) queryStunServerUDP(connOrSrcPort any) (mappedIP net.IP, map
 	}
 
 	// Send request and receive response
-	responseBytes, err := c.sendStunRequestUDP(serverAddr, connOrSrcPort, msg.Raw, msg.Header.TransactionID)
+	responseBytes, err := c.sendStunRequestUDP(serverAddr, connOrLocalAddr, msg.Raw, msg.Header.TransactionID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -76,7 +91,7 @@ func (c *StunClient) queryStunServerUDP(connOrSrcPort any) (mappedIP net.IP, map
 	}*/
 
 	// Extract mapped address
-	mappedIP, mappedPort, err = ExtractMappedAddress(response.Attributes)
+	mappedIP, mappedPort, err = ExtractMappedAddress(response.Attributes, response.Header.TransactionID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to extract mapped address: %w", err)
 	}
@@ -90,23 +105,15 @@ func (c *StunClient) queryStunServerUDP(connOrSrcPort any) (mappedIP net.IP, map
 
 // sendStunRequestUDP sends a STUN UDP request and receives the response.
 // connOrSrcPort is the UDP connection or the source port to send from.
-func (c *StunClient) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrSrcPort any, requestBytes []byte, txID [12]byte) (responseBytes []byte, err error) {
-	udpConn, ok := connOrSrcPort.(net.Conn)
+func (c *StunClient) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrLocalAddr any, requestBytes []byte, txID [12]byte) (responseBytes []byte, err error) {
+	udpConn, ok := connOrLocalAddr.(net.Conn)
 	if !ok {
-		srcPort, ok := connOrSrcPort.(int)
+		laddr, ok := connOrLocalAddr.(*net.UDPAddr)
 		if !ok {
-			return nil, fmt.Errorf("invalid source port: %v", connOrSrcPort)
+			return nil, fmt.Errorf("invalid local address: %v", connOrLocalAddr)
 		}
-		laddr := &net.UDPAddr{
-			IP:   net.IPv4zero, // Listen on all available IPs
-			Port: srcPort,
-		}
-		/*udpConn, err = net.ListenUDP("udp4", laddr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to listen on UDP port %d: %w", srcPort, err)
-		}*/
 		var _udpConn *net.UDPConn
-		_udpConn, err = conn.DialUDP("udp4", laddr, serverAddr)
+		_udpConn, err = conn.DialUDP("udp", laddr, serverAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to dial UDP: %w", err)
 		}

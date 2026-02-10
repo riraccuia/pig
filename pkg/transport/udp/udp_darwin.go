@@ -4,11 +4,11 @@
 package udp
 
 import (
-	"github.com/riraccuia/pig/pkg/log"
+	"github.com/riraccuia/pig/pkg/common"
 	"golang.org/x/sys/unix"
 )
 
-func initUDP(logger *log.Logger) {
+func initUDP(logger common.Logger) {
 	// Get UDP max datagram size using Sysctl
 	value, err := unix.Sysctl("net.inet.udp.maxdgram")
 	if err != nil {

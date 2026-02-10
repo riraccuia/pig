@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/riraccuia/pig/pkg/log"
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -21,10 +21,10 @@ type listener struct {
 	readBuffer []byte
 	ctx        context.Context
 	cancel     context.CancelFunc
-	logger     *log.Logger
+	logger     common.Logger
 }
 
-func newListener(logger *log.Logger, conn net.PacketConn, addr net.Addr) *listener {
+func newListener(logger common.Logger, conn net.PacketConn, addr net.Addr) *listener {
 	ctx, cancel := context.WithCancel(context.Background())
 	l := &listener{
 		conn:       conn,

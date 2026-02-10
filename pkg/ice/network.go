@@ -27,7 +27,7 @@ func AddressFrom(network string, ip net.IP, port int) (addr net.Addr) {
 // It returns a list of IPNet and IP addresses for each interface, each slice
 // index corresponds to the same interface index. The two slices are guaranteed
 // to have the same length.
-func GetLocalNetworks() (ipNets []*net.IPNet, ips []net.IP, err error) {
+func GetLocalNetworks(bindAdapter string) (ipNets []*net.IPNet, ips []net.IP, err error) {
 	var interfaces []net.Interface
 	interfaces, err = net.Interfaces()
 	if err != nil {
@@ -35,6 +35,9 @@ func GetLocalNetworks() (ipNets []*net.IPNet, ips []net.IP, err error) {
 	}
 
 	for _, iface := range interfaces {
+		if bindAdapter != "" && iface.Name != bindAdapter {
+			continue
+		}
 		addresses, err := iface.Addrs()
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to get addresses: %w", err)
@@ -51,9 +54,12 @@ func GetLocalNetworks() (ipNets []*net.IPNet, ips []net.IP, err error) {
 			if ipNet.IP.IsLoopback() {
 				continue
 			}
-			if ipNet.IP.To4() == nil {
+			if ipNet.IP.IsLinkLocalUnicast() {
 				continue
 			}
+			/*if ip.To4() != nil {
+				continue
+			}*/
 			if ip == nil {
 				continue
 			}

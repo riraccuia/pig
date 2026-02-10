@@ -19,8 +19,16 @@ type Server struct {
 	bufPool    *sync.Pool
 }
 
-// stunListenMode listens for STUN requests on the specified protocol, address and port.
 func NewServer(logger common.Logger, listenAddr net.Addr) (*Server, error) {
+	return newServer(context.Background(), logger, listenAddr)
+}
+
+func NewServerWithContext(ctx context.Context, logger common.Logger, listenAddr net.Addr) (*Server, error) {
+	return newServer(ctx, logger, listenAddr)
+}
+
+// stunListenMode listens for STUN requests on the specified protocol, address and port.
+func newServer(ctx context.Context, logger common.Logger, listenAddr net.Addr) (*Server, error) {
 	var (
 		workerPool *serverWorkerPool
 		listener   io.Closer
@@ -33,7 +41,7 @@ func NewServer(logger common.Logger, listenAddr net.Addr) (*Server, error) {
 
 	// Create and start worker pool (defaults to number of CPU cores)
 	workerPool = newServerWorkerPool(0, logger)
-	workerPool.Start()
+	workerPool.Start(ctx)
 
 	s := &Server{
 		logger:     logger,
@@ -86,6 +94,10 @@ func (s *Server) Close() error {
 		return s.listener.Close()
 	}
 	return nil
+}
+
+func (s *Server) WaitClose() {
+	s.workerPool.workerWg.Wait()
 }
 
 func (s *Server) stunListenUDP(listenAddr *net.UDPAddr) (*net.UDPConn, error) {
@@ -185,7 +197,6 @@ type serverWorkerPoolItem struct {
 type serverWorkerPool struct {
 	workChan   chan serverWorkerPoolItem
 	workerWg   sync.WaitGroup
-	ctx        context.Context
 	cancel     context.CancelFunc
 	logger     common.Logger
 	numWorkers int
@@ -197,24 +208,23 @@ func newServerWorkerPool(numWorkers int, logger common.Logger) *serverWorkerPool
 		numWorkers = runtime.NumCPU()
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
 	return &serverWorkerPool{
 		workChan:   make(chan serverWorkerPoolItem, numWorkers*2), // Buffer for better throughput
-		ctx:        ctx,
-		cancel:     cancel,
 		logger:     logger,
 		numWorkers: numWorkers,
 	}
 }
 
 // Start begins processing work items with the configured number of workers
-func (wp *serverWorkerPool) Start() {
+func (wp *serverWorkerPool) Start(ctx context.Context) {
 	wp.logger.Infof("STUN: Starting worker pool with %d workers", wp.numWorkers)
+
+	_, cancel := context.WithCancel(ctx)
+	wp.cancel = cancel
 
 	for i := 0; i < wp.numWorkers; i++ {
 		wp.workerWg.Add(1)
-		go wp.worker(i)
+		go wp.worker(ctx, i)
 	}
 }
 
@@ -222,7 +232,7 @@ func (wp *serverWorkerPool) Start() {
 func (wp *serverWorkerPool) Stop() {
 	wp.logger.Info("STUN: Stopping worker pool...")
 	wp.cancel()
-	close(wp.workChan)
+	//close(wp.workChan)
 	wp.workerWg.Wait()
 	wp.logger.Info("STUN: Worker pool stopped")
 }
@@ -232,9 +242,6 @@ func (wp *serverWorkerPool) Submit(item serverWorkerPoolItem) {
 	select {
 	case wp.workChan <- item:
 		// Work submitted successfully
-	case <-wp.ctx.Done():
-		// Worker pool is shutting down
-		wp.logger.Error("STUN: Dropping work item, worker pool shutting down")
 	default:
 		// Channel is full, log and drop
 		wp.logger.Error("STUN: Worker queue full, dropping work item")
@@ -242,12 +249,12 @@ func (wp *serverWorkerPool) Submit(item serverWorkerPoolItem) {
 }
 
 // worker processes work items from the channel
-func (wp *serverWorkerPool) worker(id int) {
+func (wp *serverWorkerPool) worker(ctx context.Context, id int) {
 	defer wp.workerWg.Done()
 
 	for {
 		select {
-		case <-wp.ctx.Done():
+		case <-ctx.Done():
 			wp.logger.Debugf("STUN: Worker %d shutting down", id)
 			return
 		case item, ok := <-wp.workChan:

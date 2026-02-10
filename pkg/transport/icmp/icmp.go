@@ -7,8 +7,8 @@ import (
 	"os"
 	"sync"
 
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -38,7 +38,7 @@ var (
 )
 
 // GetClientDialFunc returns a function that creates client connections based on config
-func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config) func() (transport.Conn, error) {
+func GetClientDialFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
 		err := setupGlobalListener(ctx, logger, config.BindAdapter, false)
 		if err != nil {
@@ -66,7 +66,7 @@ func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.C
 }
 
 // GetServerListenFunc returns a function that creates server listeners based on config
-func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.Config) func() (transport.Listener, error) {
+func GetServerListenFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig) func() (transport.Listener, error) {
 	return func() (transport.Listener, error) {
 		if err := initSystem(); err != nil {
 			return nil, fmt.Errorf("failed to initialize system: %w", err)
@@ -81,7 +81,7 @@ func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config
 	}
 }
 
-func setupGlobalListener(ctx context.Context, logger *log.Logger, bindAdapter string, isServer bool) (err error) {
+func setupGlobalListener(ctx context.Context, logger common.Logger, bindAdapter string, isServer bool) (err error) {
 	globalListenerDoOnce.Do(func() {
 		var (
 			bindAddr *net.IPAddr

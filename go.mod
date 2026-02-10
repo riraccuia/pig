@@ -4,7 +4,7 @@ go 1.24.3
 
 require (
 	github.com/BurntSushi/toml v1.3.2
-	github.com/coder/websocket v1.8.12
+	github.com/coder/websocket v1.8.14
 	github.com/eclipse/paho.mqtt.golang v1.5.0
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/lestrrat-go/jwx/v3 v3.0.0
@@ -12,7 +12,7 @@ require (
 	github.com/quic-go/quic-go v0.54.1
 	github.com/rs/zerolog v1.34.0
 	golang.org/x/net v0.44.0
-	golang.org/x/sys v0.36.0
+	golang.org/x/sys v0.40.0
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2
 )
 

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/riraccuia/pig/pkg/log"
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/transport"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
@@ -28,7 +28,7 @@ type sharedListener struct {
 	connChan   chan transport.Conn
 	packetChan chan *Packet
 	bufPool    sync.Pool
-	logger     *log.Logger
+	logger     common.Logger
 }
 
 var h maphash.Hash
@@ -52,7 +52,7 @@ func (l *sharedListener) clearMemory(m []byte) {
 }
 
 // newSharedListener creates a new shared ICMP socket listener
-func newSharedListener(ctx context.Context, logger *log.Logger, bindAddr *net.IPAddr, iface *net.Interface, isServer bool) (*sharedListener, error) {
+func newSharedListener(ctx context.Context, logger common.Logger, bindAddr *net.IPAddr, iface *net.Interface, isServer bool) (*sharedListener, error) {
 	conn, err := newIcmpIPConn(bindAddr, iface, isServer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ICMP socket: %w", err)

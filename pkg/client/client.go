@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,7 +13,6 @@ import (
 	"github.com/riraccuia/pig/pkg/packet"
 	"github.com/riraccuia/pig/pkg/queue"
 	"github.com/riraccuia/pig/pkg/queue/wred"
-	"github.com/riraccuia/pig/pkg/script"
 	"github.com/riraccuia/pig/pkg/streams"
 	"github.com/riraccuia/pig/pkg/transport"
 )
@@ -24,7 +22,7 @@ import (
 type Client struct {
 	logger            common.Logger
 	dropLogger        *common.DelayedCounterProcessor
-	config            *config.Config
+	config            *config.TunnelConfig
 	conn              transport.Conn
 	streams           *streams.StreamManager
 	adapter           common.TunnelAdapter
@@ -32,17 +30,16 @@ type Client struct {
 	inbound           common.PacketQueue
 	outbound          *queue.ChanQueue //common.PacketQueue
 	bufferPool        *sync.Pool
-	stopFunc          func()
 	done              chan struct{}
 	closed            atomic.Bool
 	reconnectInterval time.Duration
 	connError         chan error
-	scriptExecutor    *script.Executor
 	authenticator     common.Authenticator
+	events            chan *EventContext
 }
 
 // New creates a new Client instance with the default network adapter.
-func New(logger common.Logger, cfg *config.Config, authenticator common.Authenticator) (*Client, error) {
+func New(logger common.Logger, cfg *config.TunnelConfig, authenticator common.Authenticator) (*Client, error) {
 	adapter, err := getAdapter(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adapter: %w", err)
@@ -51,7 +48,7 @@ func New(logger common.Logger, cfg *config.Config, authenticator common.Authenti
 }
 
 // NewWithAdapter creates a new Client instance with a custom network adapter.
-func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Client, error) {
+func NewWithAdapter(logger common.Logger, cfg *config.TunnelConfig, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Client, error) {
 	logger.Infof("Creating client with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), cfg.MTU)
 
 	if cfg.QueueSize <= 0 {
@@ -86,21 +83,35 @@ func NewWithAdapter(logger common.Logger, cfg *config.Config, adapter common.Tun
 		done:              make(chan struct{}),
 		reconnectInterval: time.Duration(cfg.ReconnectInterval) * time.Second,
 		connError:         make(chan error, 1),
-		scriptExecutor:    script.New(logger, cfg.StartScript, cfg.StopScript),
 		authenticator:     authenticator,
+		events:            make(chan *EventContext, 10),
 	}, nil
 }
 
 // Start initializes the client connection and starts all necessary goroutines
 // for handling traffic. The dialFunc parameter provides the connection to the server.
 func (c *Client) Start(ctx context.Context, dialFunc func() (transport.Conn, error)) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		// continue with the logic
+	}
+
 	c.logger.Infof("Starting client with reconnect interval %d seconds", c.reconnectInterval/time.Second)
-	c.dropLogger = common.NewDelayedCounterProcessor(func(c1, c2 *atomic.Uint64) {
-		c.logger.Infof("Dropped %d packets (%d bytes)", c1.Load(), c2.Load())
-	}).WithBackoff(time.Second, time.Second*15)
-	c.dropLogger.Start(ctx)
+
+	if c.dropLogger == nil {
+		c.dropLogger = common.NewDelayedCounterProcessor(func(c1, c2 *atomic.Uint64) {
+			c.logger.Infof("Dropped %d packets (%d bytes)", c1.Load(), c2.Load())
+		}).WithBackoff(time.Second, time.Second*15)
+		c.dropLogger.Start(ctx)
+	}
+
+	c.resetClosed()
+
 	go c.readFromAdapter(ctx)
 	go c.manageConnection(ctx, dialFunc)
+
 	return nil
 }
 
@@ -112,9 +123,11 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 			c.logger.Errorf("Failed to connect to server: %v", err)
 			select {
 			case <-ctx.Done():
+				c.closeWithEvent(&EventContext{Event: EventStopped})
 				c.logger.Infof("Context done, exiting")
 				return
 			case <-time.After(c.reconnectInterval):
+				c.signalEvent(&EventContext{Event: EventConnectionFailed, Error: err})
 				c.logger.Error("Retrying connection...")
 				continue
 			}
@@ -124,6 +137,7 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 		if c.authenticator != nil {
 			if err := c.authenticator.Authenticate(ctx, conn); err != nil {
 				c.logger.Errorf("Failed to authenticate: %v", err)
+				c.signalEvent(&EventContext{Event: EventConnectionFailed, Error: err})
 				conn.Close()
 				continue
 			}
@@ -131,33 +145,14 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 
 		c.drainQueues()
 		c.conn = conn
-		c.resetClosed()
+		// c.resetClosed()
 
 		go c.writeToAdapter(ctx)
 		go c.handleInbound(ctx)
 		go c.handleOutbound(ctx)
 
 		c.logger.Infof("Connected to server %s", conn.RemoteAddr())
-
-		// Execute start script
-		c.scriptExecutor.ExecuteStartScript(script.ScriptContext{
-			TunnelName:  c.adapter.Name(),
-			TunnelIndex: c.adapter.Index(),
-			RemoteAddr:  strings.Split(conn.RemoteAddr().String(), ":")[0],
-			NatAddr:     "", // No NAT address in client mode
-			TunnelProto: string(c.config.Proto),
-		})
-
-		c.stopFunc = func() {
-			c.logger.Debug("Executing stop script")
-			c.scriptExecutor.ExecuteStopScript(script.ScriptContext{
-				TunnelName:  c.adapter.Name(),
-				TunnelIndex: c.adapter.Index(),
-				RemoteAddr:  strings.Split(conn.RemoteAddr().String(), ":")[0],
-				NatAddr:     "", // No NAT address in client mode
-				TunnelProto: string(c.config.Proto),
-			})
-		}
+		c.signalEvent(&EventContext{Event: EventConnected, Conn: conn})
 
 		select {
 		case <-c.done:
@@ -165,27 +160,38 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 			return
 		case <-ctx.Done():
 			c.logger.Infof("Context done, exiting")
-			c.Close()
+			c.closeWithEvent(&EventContext{Event: EventStopped, Conn: c.conn})
 			return
 		case err := <-c.connError:
 			c.logger.Errorf("Connection lost: %v", err)
-			c.Close()
-			<-time.After(c.reconnectInterval)
-			continue
+			c.closeWithEvent(&EventContext{Event: EventDisconnected, Conn: c.conn, Error: err})
+			//<-time.After(c.reconnectInterval)
+			//continue
+			return
 		}
 	}
 }
 
+func (c *Client) WaitClose() {
+	<-c.done
+}
+
 // Close gracefully shuts down the client and all its goroutines
 func (c *Client) Close() error {
+	return c.closeWithEvent(&EventContext{Event: EventStopped, Conn: c.conn})
+}
+
+// Close gracefully shuts down the client and all its goroutines
+func (c *Client) closeWithEvent(event *EventContext) error {
 	if c.closed.CompareAndSwap(false, true) {
+		if event != nil {
+			c.signalEvent(event)
+		}
 		close(c.done)
 		c.streams.CloseAll()
 		if c.conn != nil {
 			c.conn.Close()
-		}
-		if c.stopFunc != nil {
-			c.stopFunc()
+			c.conn = nil
 		}
 	}
 	return nil
@@ -199,6 +205,11 @@ func (c *Client) GetAdapter() common.TunnelAdapter {
 // Wait blocks until the client is done
 func (c *Client) Wait() {
 	<-c.done
+}
+
+// Events returns the channel for receiving client events
+func (c *Client) Events() <-chan *EventContext {
+	return c.events
 }
 
 func (c *Client) drainQueues() {

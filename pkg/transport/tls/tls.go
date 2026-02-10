@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice"
-	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-func GetClientFromConn(ctx context.Context, co net.Conn, config *config.Config, tlsConfig *tls.Config) (transport.Conn, error) {
+func GetClientFromConn(ctx context.Context, co net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config) (transport.Conn, error) {
 	tlsConn := tls.Client(co, tlsConfig.Clone())
 	if err := tlsConn.Handshake(); err != nil {
 		return nil, fmt.Errorf("failed to handshake: %w", err)
@@ -20,12 +20,12 @@ func GetClientFromConn(ctx context.Context, co net.Conn, config *config.Config, 
 	return NewTLSConn(tlsConn), nil
 }
 
-func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Config, tlsConfig *tls.Config) (transport.Listener, error) {
+func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config) (transport.Listener, error) {
 	tlsConn := tls.Server(co, tlsConfig.Clone())
 	return ice.NewListenerConn(NewTLSConn(tlsConn), nil), nil
 }
 
-func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
+func GetClientDialFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
 		addr := fmt.Sprintf("%s:%d", config.Target.Address, config.Target.Port)
 		dialer := &net.Dialer{}
@@ -37,7 +37,7 @@ func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.C
 	}
 }
 
-func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
+func GetServerListenFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Listener, error) {
 	return func() (transport.Listener, error) {
 		addr := fmt.Sprintf(":%d", config.Target.Port)
 		listener, err := tls.Listen("tcp", addr, tlsConfig.Clone())

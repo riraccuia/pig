@@ -138,18 +138,6 @@ func GenerateFoundation(addr string) string {
 	return base64.StdEncoding.EncodeToString(hash[:8])[:8] // First 8 chars of hash
 }
 
-// CalculateHostPriority returns the priority for host candidates
-func CalculateHostPriority() uint32 {
-	// Per ICE RFC: type preference (126) << 24 | local preference (65535) << 8 | 255
-	return (126 << 24) | (65535 << 8) | 255
-}
-
-// CalculateSrflxPriority returns the priority for server reflexive candidates
-func CalculateSrflxPriority() uint32 {
-	// Per ICE RFC: type preference (100) << 24 | local preference (65535) << 8 | 255
-	return (100 << 24) | (65535 << 8) | 255
-}
-
 // generateCredentials creates ICE credentials from the encryption key
 func generateCredentials() ICECredentials {
 	// Create a random username

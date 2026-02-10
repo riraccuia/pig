@@ -52,7 +52,7 @@ func (s *Signaler) SendICEAnswer(topicBase string, iceMsg *message.ICEMessage, c
 func (s *Signaler) ReceiveICEOffers(ctx context.Context) (offersChan <-chan *message.ICEMessage, topicBase string, err error) {
 	// Perform STUN query to get our public IP
 	var mappedIP net.IP
-	mappedIP, _, err = stun.QueryServerUDP(s.opts.Logger, s.opts.STUNServer, 0)
+	mappedIP, _, err = stun.QueryServerUDP(s.opts.Logger, s.opts.STUNServer, &net.UDPAddr{IP: nil, Port: 0})
 	if err != nil {
 		if s.opts.Logger != nil {
 			s.opts.Logger.Errorf("SIG: STUN query failed: %v", err)

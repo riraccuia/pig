@@ -83,7 +83,7 @@ func (s *mockStunServer) handleConnection(conn net.Conn) {
 		bindReq.Auth = s.auth
 	}
 	bindReq.Ice = s.iceAttrs
-	s.t.Logf("Sending SendUsername: %s, controlling: %d, controlled: %d", bindReq.Auth.PeerUsername, bindReq.Ice.IceControlling, bindReq.Ice.IceControlled)
+	s.t.Logf("Sending controlling: %d, controlled: %d", bindReq.Ice.IceControlling, bindReq.Ice.IceControlled)
 	result, err := bindReq.SendBindingRequest(true)
 	if err != nil {
 		s.t.Logf("Send binding request error: %v", err)

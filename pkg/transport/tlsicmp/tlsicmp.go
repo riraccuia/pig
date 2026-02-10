@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice"
-	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/transport"
 	"github.com/riraccuia/pig/pkg/transport/icmp"
 )
 
-func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Config, tlsConfig *tls.Config) (transport.Conn, error) {
+func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config) (transport.Conn, error) {
 	tlsConn, err := newConn(conn, tlsConfig.Clone(), false)
 	if err != nil {
 		fmt.Println("failed to create TLS connection", err)
@@ -22,7 +22,7 @@ func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Config
 	return tlsConn, nil
 }
 
-func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Config, tlsConfig *tls.Config) (transport.Listener, error) {
+func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config) (transport.Listener, error) {
 	listener := ice.NewListenerConn(co, func(conn net.Conn) (net.Conn, error) {
 		return newConn(conn, tlsConfig.Clone(), true)
 	})
@@ -30,7 +30,7 @@ func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Config
 }
 
 // GetClientDialFunc returns a function that creates client connections based on config
-func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
+func GetClientDialFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Conn, error) {
 	icmpDialer := icmp.GetClientDialFunc(ctx, logger, config)
 
 	return func() (transport.Conn, error) {
@@ -53,7 +53,7 @@ func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.C
 }
 
 // GetServerListenFunc returns a function that creates server listeners based on config
-func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
+func GetServerListenFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Listener, error) {
 	icmpListenFunc := icmp.GetServerListenFunc(ctx, logger, config)
 
 	return func() (transport.Listener, error) {
