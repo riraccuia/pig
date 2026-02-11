@@ -11,7 +11,7 @@ import (
 	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/network"
 )
 
 func getAdapter(cfg *config.TunnelConfig) (common.TunnelAdapter, error) {
@@ -25,7 +25,7 @@ func (s *Server) readFromAdapter() {
 	go s.processOutbound(context.Background())
 	runtime.Gosched()
 	for {
-		buffer := s.bufferPool.Get().(packet.IPv4Packet)
+		buffer := s.bufferPool.Get().(network.IPv4Packet)
 		n, err := s.adapter.Read(buffer)
 		if err != nil {
 			s.bufferPool.Put(buffer)

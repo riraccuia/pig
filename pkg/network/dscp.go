@@ -1,4 +1,4 @@
-package packet
+package network
 
 const (
 	DSCP_MARK_ADAPTER_SNAT = byte(8)

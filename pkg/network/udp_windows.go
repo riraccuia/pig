@@ -1,6 +1,6 @@
-//go:build !windows || unix
+//go:build windows && !unix
 
-package conn
+package network
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"net"
 	"syscall"
 
-	"golang.org/x/sys/unix"
+	"golang.org/x/sys/windows"
 )
 
 func dialUDP(network string, laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
@@ -16,8 +16,7 @@ func dialUDP(network string, laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
 		Control: func(network, address string, c syscall.RawConn) error {
 			return c.Control(func(fd uintptr) {
 				// Set SO_REUSEADDR
-				unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
-				unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+				windows.SetsockoptInt(windows.Handle(fd), windows.SOL_SOCKET, windows.SO_REUSEADDR, 1)
 			})
 		},
 	}
@@ -44,9 +43,8 @@ func listenUDP(network string, laddr *net.UDPAddr) (*net.UDPConn, error) {
 	lc := net.ListenConfig{
 		Control: func(network, address string, c syscall.RawConn) error {
 			return c.Control(func(fd uintptr) {
-				// Set SO_REUSEADDR
-				unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
-				unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+				// Set SO_REUSEADDR for Windows (equivalent to SO_REUSEADDR + SO_REUSEPORT on Unix)
+				windows.SetsockoptInt(windows.Handle(fd), windows.SOL_SOCKET, windows.SO_REUSEADDR, 1)
 			})
 		},
 	}

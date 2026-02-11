@@ -4,7 +4,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/network"
 )
 
 const (
@@ -12,7 +12,7 @@ const (
 	DefaultConnectOffset = time.Millisecond * 500
 )
 
-type PacketQueue chan packet.IPv4Packet
+type PacketQueue chan network.IPv4Packet
 
 type TunnelAdapter interface {
 	Read([]byte) (int, error)

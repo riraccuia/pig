@@ -1,4 +1,4 @@
-package packet
+package network
 
 func (p IPv4Packet) UpdateChecksum() {
 	if p.TotalLength() > len(p) {

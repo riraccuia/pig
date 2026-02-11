@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -52,7 +52,7 @@ func (c *Client) processInbound(connOrStream io.ReadWriteCloser) {
 		// Process complete packets
 		processed := 0
 		for processed+20 <= len(unprocessed) {
-			pkt := packet.IPv4Packet(unprocessed[processed:])
+			pkt := network.IPv4Packet(unprocessed[processed:])
 			totalLen := pkt.TotalLength()
 
 			if totalLen < 20 || totalLen > c.config.MTU {
@@ -66,14 +66,14 @@ func (c *Client) processInbound(connOrStream io.ReadWriteCloser) {
 			}
 
 			// Get new packet from pool and copy data
-			newPkt := c.bufferPool.Get().(packet.IPv4Packet)
+			newPkt := c.bufferPool.Get().(network.IPv4Packet)
 			copy(newPkt[:totalLen], unprocessed[processed:processed+totalLen])
 			switch newPkt.GetMark() {
-			case packet.DSCP_MARK_ADAPTER_SNAT:
+			case network.DSCP_MARK_ADAPTER_SNAT:
 				newPkt.SetSourceIP(c.adapter.IP())
-			case packet.DSCP_MARK_ADAPTER_DNAT:
+			case network.DSCP_MARK_ADAPTER_DNAT:
 				newPkt.SetDestinationIP(c.adapter.IP())
-			case packet.DSCP_MARK_MASQ_SNAT:
+			case network.DSCP_MARK_MASQ_SNAT:
 				newPkt.SetSourceIP(c.masqAddr)
 			}
 			newPkt.ClearMark()
@@ -132,9 +132,9 @@ func (c *Client) processOutboundStream(ctx context.Context) {
 
 			switch {
 			case c.adapter.IP().Equal(pkt.SourceIP()):
-				pkt.Mark(packet.DSCP_MARK_MASQ_SNAT)
+				pkt.Mark(network.DSCP_MARK_MASQ_SNAT)
 			case c.masqAddr.Equal(pkt.DestinationIP()):
-				pkt.Mark(packet.DSCP_MARK_ADAPTER_DNAT)
+				pkt.Mark(network.DSCP_MARK_ADAPTER_DNAT)
 			}
 
 			_, err := stream.Write(pkt[:totalLen])
@@ -170,7 +170,7 @@ func (c *Client) processOutboundConn(ctx context.Context, conn transport.Conn) {
 		return nil
 	}
 
-	processPacket := func(pkt packet.IPv4Packet) error {
+	processPacket := func(pkt network.IPv4Packet) error {
 		if c.outbound.IsDrop() {
 			c.dropLogger.Incr(1, uint64(pkt.TotalLength()))
 			c.bufferPool.Put(pkt)
@@ -184,9 +184,9 @@ func (c *Client) processOutboundConn(ctx context.Context, conn transport.Conn) {
 
 		switch {
 		case c.adapter.IP().Equal(pkt.SourceIP()):
-			pkt.Mark(packet.DSCP_MARK_MASQ_SNAT)
+			pkt.Mark(network.DSCP_MARK_MASQ_SNAT)
 		case c.masqAddr.Equal(pkt.DestinationIP()):
-			pkt.Mark(packet.DSCP_MARK_ADAPTER_DNAT)
+			pkt.Mark(network.DSCP_MARK_ADAPTER_DNAT)
 		}
 
 		// If adding this packet would exceed batch size, flush current batch first

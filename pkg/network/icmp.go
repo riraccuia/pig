@@ -1,21 +1,20 @@
-package conn
+package network
 
 import (
 	"encoding/binary"
 	"fmt"
 	"net"
 
-	"github.com/riraccuia/pig/pkg/packet"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 )
 
-// SendICMPTimeExceeded sends a ICMP time exceeded message to a remote address
+// SendICMPv4TimeExceeded sends a ICMP time exceeded message to a remote address
 // using raw sockets, golang.org/x/net/icmp is used to send the message
 // localAddr is the local address of the sender
 // remoteAddr is the remote address of the receiver
 // eaddr is the address of the endpoint for the original packet embedded in the time exceeded message
-func SendICMPTimeExceeded(localAddr, remoteAddr, eaddr net.IP) error {
+func SendICMPv4TimeExceeded(localAddr, remoteAddr, eaddr net.IP) error {
 	// Create a raw ICMP socket
 	conn, err := net.ListenIP("ip4:icmp", nil)
 	if err != nil {
@@ -107,6 +106,6 @@ func createFakeIPv4Datagram(srcIP, dstIP net.IP) []byte {
 	// Sequence Number: 0x0001
 	binary.BigEndian.PutUint16(datagram[26:28], 0x0001)
 	// Calculate and set ICMP checksum
-	packet.IPv4Packet(datagram).UpdateChecksum()
+	IPv4Packet(datagram).UpdateChecksum()
 	return datagram
 }

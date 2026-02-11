@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
-	"github.com/riraccuia/pig/pkg/ice/conn"
+	"github.com/riraccuia/pig/pkg/network"
 )
 
 // QueryServerUDP is a convenience function that uses a StunClient under the hood.
@@ -113,11 +113,11 @@ func (c *StunClient) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrLocalAddr
 			return nil, fmt.Errorf("invalid local address: %v", connOrLocalAddr)
 		}
 		var _udpConn *net.UDPConn
-		_udpConn, err = conn.DialUDP("udp", laddr, serverAddr)
+		_udpConn, err = network.DialUDP("udp", laddr, serverAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to dial UDP: %w", err)
 		}
-		udpConn = conn.NewUDPPacketConn(_udpConn)
+		udpConn = network.NewUDPPacketConn(_udpConn)
 		// only close the connection if we created it
 		defer udpConn.Close()
 	}

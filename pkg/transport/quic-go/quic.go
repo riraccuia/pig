@@ -11,7 +11,7 @@ import (
 	"github.com/quic-go/quic-go"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/ice/conn"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -26,7 +26,7 @@ func GetServerListenFunc(ctx context.Context, logger common.Logger, config *conf
 			listenerAddr = &net.UDPAddr{IP: nil, Port: config.Target.Port}
 			err          error
 		)
-		udpConn, err = conn.ListenUDP("udp", listenerAddr)
+		udpConn, err = network.ListenUDP("udp", listenerAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
 		}
@@ -110,7 +110,7 @@ func dialFuncWithSrcPort(ctx context.Context, logger common.Logger, address stri
 			udpAddr *net.UDPAddr
 			err     error
 		)
-		udpConn, err = conn.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: srcPort})
+		udpConn, err = network.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: srcPort})
 		if err != nil {
 			return nil, err
 		}

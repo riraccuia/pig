@@ -10,7 +10,7 @@ import (
 	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/network"
 )
 
 func getAdapter(cfg *config.TunnelConfig) (common.TunnelAdapter, error) {
@@ -43,7 +43,7 @@ func (s *Server) readFromAdapter() {
 
 func (s *Server) readFromTunQueue(q io.Reader) {
 	for {
-		buffer := s.bufferPool.Get().(packet.IPv4Packet)
+		buffer := s.bufferPool.Get().(network.IPv4Packet)
 		n, err := q.Read(buffer)
 		if err != nil {
 			s.bufferPool.Put(buffer)
@@ -61,7 +61,7 @@ func (s *Server) readFromTunQueue(q io.Reader) {
 			freeBuf := true
 			s.clients.Range(func(key, value any) bool {
 				client := value.(*ClientTunnel)
-				pkt.Mark(packet.DSCP_MARK_MASQ_SNAT)
+				pkt.Mark(network.DSCP_MARK_MASQ_SNAT)
 				select {
 				case client.outbound.C <- buffer:
 					freeBuf = false
@@ -86,7 +86,7 @@ func (s *Server) readFromTunQueue(q io.Reader) {
 
 func (s *Server) _readFromTunQueue(q io.Reader) {
 	for {
-		buffer := s.bufferPool.Get().(packet.IPv4Packet)
+		buffer := s.bufferPool.Get().(network.IPv4Packet)
 		n, err := q.Read(buffer)
 		if err != nil {
 			s.bufferPool.Put(buffer)

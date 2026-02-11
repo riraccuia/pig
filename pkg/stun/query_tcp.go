@@ -5,7 +5,7 @@ import (
 	"net"
 
 	"github.com/riraccuia/pig/pkg/common"
-	"github.com/riraccuia/pig/pkg/ice/conn"
+	"github.com/riraccuia/pig/pkg/network"
 )
 
 // QueryServerTCP is a convenience function that queries a STUN server over TCP.
@@ -130,7 +130,7 @@ func (c *StunClient) sendStunRequestTCP(serverAddr *net.TCPAddr, connOrLocalAddr
 
 // createTCPConnection creates a TCP connection to the STUN server from the specified local port.
 func createTCPConnection(serverAddr *net.TCPAddr, laddr *net.TCPAddr) (*net.TCPConn, error) {
-	conn, err := conn.DialTCP("tcp", laddr, serverAddr)
+	conn, err := network.DialTCP("tcp", laddr, serverAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to STUN server %s from %s: %w",
 			serverAddr, laddr, err)

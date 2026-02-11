@@ -9,7 +9,7 @@ import (
 
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -43,7 +43,7 @@ func New(logger common.Logger, cfg *config.TunnelConfig, authenticator common.Au
 // NewWithAdapter creates a new Server instance with a custom network adapter
 func NewWithAdapter(logger common.Logger, cfg *config.TunnelConfig, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Server, error) {
 	logger.Infof("Creating server with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), cfg.MTU)
-	_, network, err := net.ParseCIDR(cfg.TunnelAddress)
+	_, _network, err := net.ParseCIDR(cfg.TunnelAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -57,11 +57,11 @@ func NewWithAdapter(logger common.Logger, cfg *config.TunnelConfig, adapter comm
 		config:   cfg,
 		adapter:  adapter,
 		clients:  &sync.Map{}, //new(ash.Map).From(ash.NewSkipList(32)),
-		ipPool:   newIPPool(network),
+		ipPool:   newIPPool(_network),
 		outbound: make(common.PacketQueue, cfg.QueueSize),
 		bufferPool: &sync.Pool{
 			New: func() interface{} {
-				return make(packet.IPv4Packet, cfg.MTU, cfg.MTU)
+				return make(network.IPv4Packet, cfg.MTU, cfg.MTU)
 			},
 		},
 		done: make(chan struct{}),

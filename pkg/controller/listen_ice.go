@@ -14,8 +14,8 @@ import (
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice"
-	"github.com/riraccuia/pig/pkg/ice/conn"
 	"github.com/riraccuia/pig/pkg/ice/signaling"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/transport"
 	"github.com/riraccuia/pig/pkg/transport/dtls"
 	qt "github.com/riraccuia/pig/pkg/transport/quic-go"
@@ -126,12 +126,12 @@ func processICEServerConnectPaths(ctx context.Context, logger common.Logger, cfg
 	var l transport.Listener
 	switch nomination.Protocol.Protocol {
 	case "quic":
-		co := conn.NewUDPPacketConn(nomination.Conn.(*net.UDPConn))
+		co := network.NewUDPPacketConn(nomination.Conn.(*net.UDPConn))
 		l, err = qt.GetListenerFromConn(ctx, co, cfg, tlsConfig)
 	case "ws":
 		l, err = ws.GetListenerFromConn(ctx, nomination.Conn, cfg, tlsConfig)
 	case "dtls":
-		co := conn.NewUDPPacketConn(nomination.Conn.(*net.UDPConn))
+		co := network.NewUDPPacketConn(nomination.Conn.(*net.UDPConn))
 		l, err = dtls.GetListenerFromConn(ctx, co, cfg, tlsConfig)
 	case "tls":
 		l, err = trtls.GetListenerFromConn(ctx, nomination.Conn, cfg, tlsConfig)

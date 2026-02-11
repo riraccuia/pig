@@ -8,12 +8,11 @@ import (
 	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
-	"github.com/riraccuia/pig/pkg/ice/conn"
 	"github.com/riraccuia/pig/pkg/ice/signaling"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/stun"
 	"github.com/riraccuia/pig/pkg/transport"
 	"github.com/riraccuia/pig/pkg/transport/icmp"
-	"golang.org/x/sys/unix"
 )
 
 var ErrConnectICMP = fmt.Errorf("call ConnectICMP instead")
@@ -45,11 +44,11 @@ func (cp *ConnectPath) Connect() (co net.Conn, err error) {
 	switch cp.Protocol.Network {
 	case "udp":
 		var _co *net.UDPConn
-		_co, err = conn.DialUDP("udp", cp.LocalAddr.(*net.UDPAddr), cp.RemoteAddr.(*net.UDPAddr))
+		_co, err = network.DialUDP("udp", cp.LocalAddr.(*net.UDPAddr), cp.RemoteAddr.(*net.UDPAddr))
 		//co = conn.NewUDPPacketConn(_co)
 		co = _co
 	case "tcp":
-		co, err = conn.DialTCP("tcp", cp.LocalAddr.(*net.TCPAddr), cp.RemoteAddr.(*net.TCPAddr))
+		co, err = network.DialTCP("tcp", cp.LocalAddr.(*net.TCPAddr), cp.RemoteAddr.(*net.TCPAddr))
 	case "icmp":
 		return nil, ErrConnectICMP
 	default:
@@ -131,7 +130,7 @@ func getPathForProto(tr transport.ICEProtocolDefinition, localNet *net.IPNet, lo
 
 func getFamilyForIP(ip net.IP) int {
 	if ip.To4() != nil {
-		return unix.AF_INET
+		return 0x2 // AF_INET
 	}
-	return unix.AF_INET6
+	return 0xa // AF_INET6
 }

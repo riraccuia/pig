@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/riraccuia/pig/pkg/common"
-	"github.com/riraccuia/pig/pkg/ice/conn"
+	"github.com/riraccuia/pig/pkg/network"
 )
 
 type Server struct {
@@ -101,7 +101,7 @@ func (s *Server) WaitClose() {
 }
 
 func (s *Server) stunListenUDP(listenAddr *net.UDPAddr) (*net.UDPConn, error) {
-	listener, err := conn.ListenUDP("udp", listenAddr)
+	listener, err := network.ListenUDP("udp", listenAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on STUN listen address: %w", err)
 	}

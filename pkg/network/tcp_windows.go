@@ -1,6 +1,6 @@
 //go:build windows && !unix
 
-package conn
+package network
 
 import (
 	"fmt"

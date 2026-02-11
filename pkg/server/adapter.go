@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 
-	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/network"
 )
 
 func (s *Server) processOutbound(ctx context.Context) {
@@ -17,7 +17,7 @@ func (s *Server) processOutbound(ctx context.Context) {
 				freeBuf := true
 				s.clients.Range(func(key, value any) bool {
 					client := value.(*ClientTunnel)
-					pkt.Mark(packet.DSCP_MARK_MASQ_SNAT)
+					pkt.Mark(network.DSCP_MARK_MASQ_SNAT)
 					select {
 					case client.outbound.C <- pkt:
 						freeBuf = false

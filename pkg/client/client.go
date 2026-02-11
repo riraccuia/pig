@@ -10,7 +10,7 @@ import (
 
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/queue"
 	"github.com/riraccuia/pig/pkg/queue/wred"
 	"github.com/riraccuia/pig/pkg/streams"
@@ -77,7 +77,7 @@ func NewWithAdapter(logger common.Logger, cfg *config.TunnelConfig, adapter comm
 		outbound: outbound,
 		bufferPool: &sync.Pool{
 			New: func() interface{} {
-				return make(packet.IPv4Packet, cfg.MTU, cfg.MTU)
+				return make(network.IPv4Packet, cfg.MTU, cfg.MTU)
 			},
 		},
 		done:              make(chan struct{}),

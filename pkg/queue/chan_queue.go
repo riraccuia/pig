@@ -2,7 +2,7 @@
 package queue
 
 import (
-	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/queue/drand"
 	"github.com/riraccuia/pig/pkg/queue/wred"
 )
@@ -10,11 +10,11 @@ import (
 // ChanQueue implements a channel-based queue with WRED support for IPv4 packets.
 // It provides congestion control through WRED and probabilistic packet dropping.
 type ChanQueue struct {
-	wred      *wred.WRED             // WRED instance for congestion management
-	threshold int                    // Queue length threshold for drop decisions
-	ct        *drand.CondensedTable  // Probability table for drop decisions
-	size      int                    // Queue size
-	C         chan packet.IPv4Packet // Channel for packet buffering
+	wred      *wred.WRED              // WRED instance for congestion management
+	threshold int                     // Queue length threshold for drop decisions
+	ct        *drand.CondensedTable   // Probability table for drop decisions
+	size      int                     // Queue size
+	C         chan network.IPv4Packet // Channel for packet buffering
 }
 
 // NewChanQueue creates a new channel-based queue with the specified length.
@@ -26,7 +26,7 @@ type ChanQueue struct {
 //   - *ChanQueue: A new queue instance
 func NewChanQueue(size int) *ChanQueue {
 	return &ChanQueue{
-		C:    make(chan packet.IPv4Packet, size),
+		C:    make(chan network.IPv4Packet, size),
 		size: size,
 	}
 }

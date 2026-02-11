@@ -9,7 +9,7 @@ import (
 	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/network"
 )
 
 func getAdapter(cfg *config.TunnelConfig) (common.TunnelAdapter, error) {
@@ -32,7 +32,7 @@ func (c *Client) readFromAdapter(ctx context.Context) {
 			// TODO: improve this
 			return
 		default:
-			pkt := c.bufferPool.Get().(packet.IPv4Packet)
+			pkt := c.bufferPool.Get().(network.IPv4Packet)
 			_, err := c.adapter.Read(pkt[:])
 			if err != nil {
 				c.bufferPool.Put(pkt)

@@ -22,7 +22,7 @@ import (
 	"github.com/riraccuia/pig/pkg/client"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/log"
-	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/server"
 	"github.com/riraccuia/pig/pkg/transport"
 	qt "github.com/riraccuia/pig/pkg/transport/quic"
@@ -301,8 +301,8 @@ func TestEndToEndTunnelWithQUICMockedAdapter(t *testing.T) {
 	testPacket := make([]byte, 40)                 // Minimum IPv4 header size
 	testPacket[0] = 0x45                           // Version 4, Header length 5 (20 bytes)
 	binary.BigEndian.PutUint16(testPacket[2:], 40) // Total length
-	packet.IPv4Packet(testPacket).SetSourceIP(net.ParseIP("10.0.0.2"))
-	packet.IPv4Packet(testPacket).SetDestinationIP(net.ParseIP("10.0.0.1"))
+	network.IPv4Packet(testPacket).SetSourceIP(net.ParseIP("10.0.0.2"))
+	network.IPv4Packet(testPacket).SetDestinationIP(net.ParseIP("10.0.0.1"))
 	rand.Read(testPacket[20:])
 
 	t.Logf("Sending packet: %x", testPacket)

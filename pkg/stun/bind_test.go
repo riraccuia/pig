@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/riraccuia/pig/pkg/ice/conn"
 	"github.com/riraccuia/pig/pkg/log"
+	"github.com/riraccuia/pig/pkg/network"
 )
 
 // mockStunServer implements a simple STUN server for testing
@@ -369,11 +369,11 @@ func TestConcurrentBindingRequests(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		peer1, dialErr1 = conn.DialTCP("tcp", laddr, raddr)
+		peer1, dialErr1 = network.DialTCP("tcp", laddr, raddr)
 	}()
 	go func() {
 		defer wg.Done()
-		peer2, dialErr2 = conn.DialTCP("tcp", raddr, laddr)
+		peer2, dialErr2 = network.DialTCP("tcp", raddr, laddr)
 	}()
 
 	// Wait for both dialers to complete

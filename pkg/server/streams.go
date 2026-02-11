@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -68,13 +68,13 @@ func (s *Server) handleOutboundConn(ctx context.Context, client *ClientTunnel) {
 		return nil
 	}
 
-	processPacket := func(pkt packet.IPv4Packet) error {
+	processPacket := func(pkt network.IPv4Packet) error {
 		if client.outbound.IsDrop() {
 			client.dropLogger.Incr(1, uint64(pkt.TotalLength()))
 			s.bufferPool.Put(pkt)
 			return nil
 		}
-		ipPkt := packet.IPv4Packet(pkt)
+		ipPkt := network.IPv4Packet(pkt)
 		totalLen := ipPkt.TotalLength()
 		if totalLen <= 0 || totalLen > len(pkt) {
 			s.logger.Debugf("outbound packet with invalid length: %d", totalLen)
@@ -83,7 +83,7 @@ func (s *Server) handleOutboundConn(ctx context.Context, client *ClientTunnel) {
 		}
 
 		if client.sourceIP.Equal(ipPkt.DestinationIP()) {
-			ipPkt.Mark(packet.DSCP_MARK_ADAPTER_DNAT)
+			ipPkt.Mark(network.DSCP_MARK_ADAPTER_DNAT)
 		}
 
 		// If adding this packet would exceed batch size, flush current batch first
@@ -154,7 +154,7 @@ func (s *Server) handleOutboundStream(ctx context.Context, client *ClientTunnel)
 				s.bufferPool.Put(pkt)
 				continue
 			}
-			ipPkt := packet.IPv4Packet(pkt)
+			ipPkt := network.IPv4Packet(pkt)
 			totalLen := ipPkt.TotalLength()
 			if totalLen <= 0 || totalLen > len(pkt) {
 				s.bufferPool.Put(pkt)
@@ -162,7 +162,7 @@ func (s *Server) handleOutboundStream(ctx context.Context, client *ClientTunnel)
 			}
 
 			if client.sourceIP.Equal(ipPkt.DestinationIP()) {
-				ipPkt.Mark(packet.DSCP_MARK_ADAPTER_DNAT)
+				ipPkt.Mark(network.DSCP_MARK_ADAPTER_DNAT)
 			}
 
 			stream := client.streams.SelectByIPAndPort(pkt.SourceIP(), pkt.SourcePort())

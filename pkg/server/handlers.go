@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -67,7 +67,7 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 		// Process complete packets
 		processed := 0
 		for processed+20 <= len(unprocessed) {
-			pkt := packet.IPv4Packet(unprocessed[processed:])
+			pkt := network.IPv4Packet(unprocessed[processed:])
 			totalLen := pkt.TotalLength()
 
 			if totalLen < 20 || totalLen > s.config.MTU {
@@ -80,15 +80,15 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 			}
 
 			// Get new packet from pool and copy data
-			newPkt := s.bufferPool.Get().(packet.IPv4Packet)
+			newPkt := s.bufferPool.Get().(network.IPv4Packet)
 			copy(newPkt[:totalLen], unprocessed[processed:processed+totalLen])
 
 			switch newPkt.GetMark() {
-			case packet.DSCP_MARK_MASQ_SNAT:
+			case network.DSCP_MARK_MASQ_SNAT:
 				newPkt.SetSourceIP(client.sourceIP)
-			case packet.DSCP_MARK_MASQ_DNAT:
+			case network.DSCP_MARK_MASQ_DNAT:
 				newPkt.SetDestinationIP(client.sourceIP)
-			case packet.DSCP_MARK_ADAPTER_DNAT:
+			case network.DSCP_MARK_ADAPTER_DNAT:
 				newPkt.SetDestinationIP(s.adapter.IP())
 			}
 			newPkt.ClearMark()

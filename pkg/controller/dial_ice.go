@@ -12,8 +12,8 @@ import (
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice"
-	"github.com/riraccuia/pig/pkg/ice/conn"
 	"github.com/riraccuia/pig/pkg/ice/signaling"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/transport"
 	"github.com/riraccuia/pig/pkg/transport/dtls"
 	qt "github.com/riraccuia/pig/pkg/transport/quic-go"
@@ -62,10 +62,10 @@ func (c *Controller) getICEDialFunc(ctx context.Context, cfg *config.TunnelConfi
 		case "ws":
 			return ws.GetClientFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
 		case "quic":
-			co := conn.NewUDPPacketConn(selectedPath.Conn.(*net.UDPConn))
+			co := network.NewUDPPacketConn(selectedPath.Conn.(*net.UDPConn))
 			return qt.GetClientFromConn(ctx, co, cfg, tlsConfig)
 		case "dtls":
-			co := conn.NewUDPPacketConn(selectedPath.Conn.(*net.UDPConn))
+			co := network.NewUDPPacketConn(selectedPath.Conn.(*net.UDPConn))
 			co.SetReadBuffer(1024 * 2048)
 			co.SetWriteBuffer(1024 * 2048)
 			return dtls.GetClientFromConn(ctx, co, cfg, tlsConfig)
