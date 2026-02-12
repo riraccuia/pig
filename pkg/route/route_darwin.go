@@ -514,12 +514,12 @@ func (m *darwinManager) buildRouteMessageRaw(rt *Route, msgType int, flags int) 
 	}
 
 	// Add netmask address in position 2
-	ones, bits := rt.Destination.Mask.Size()
-	if ones != bits {
-		maskIP := net.IP(rt.Destination.Mask)
-		// Add netmask address in position 2
-		addrs = append(addrs, m.createInetAddr(maskIP))
-	}
+	// ones, bits := rt.Destination.Mask.Size()
+	//if ones != bits {
+	maskIP := net.IP(rt.Destination.Mask)
+	// Add netmask address in position 2
+	addrs = append(addrs, m.createInetAddr(maskIP))
+	//}
 
 	// Create RouteMessage
 	msg.Flags |= flags | unix.RTF_UP | unix.RTF_STATIC | unix.RTF_PRCLONING

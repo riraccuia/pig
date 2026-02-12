@@ -96,7 +96,7 @@ func (c *Controller) setupLogger() error {
 		logger = log.NewLogger()
 		logger.SetLevel(c.cfg.LogConfig.Level)
 	default:
-		logger, err = log.NewFileLogger(c.cfg.LogConfig.File, c.cfg.LogConfig.RotateSize.(int64))
+		logger, err = log.NewFileLogger(c.cfg.LogConfig.File, c.cfg.LogConfig.RotateSize)
 		if err != nil {
 			return fmt.Errorf("failed to create file logger: %v", err)
 		}

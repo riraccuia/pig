@@ -244,18 +244,22 @@ func LoadConfigFromFile(path string) (*Config, error) {
 }
 
 func LoadConfigFromBytes(data []byte, decodeAs string) (*Config, error) {
-	var config Config
+	config := &Config{}
 	switch decodeAs {
 	case "toml":
-		if _, err := toml.Decode(string(data), &config); err != nil {
+		if _, err := toml.Decode(string(data), config); err != nil {
 			return nil, err
 		}
 	case "json":
-		if err := json.Unmarshal(data, &config); err != nil {
+		if err := json.Unmarshal(data, config); err != nil {
 			return nil, err
 		}
 	default:
 		return nil, fmt.Errorf("unsupported config format: %s", decodeAs)
 	}
-	return &config, nil
+	err := config.normalize()
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
 }

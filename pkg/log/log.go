@@ -54,7 +54,11 @@ func NewLogger() *Logger {
 	}
 }
 
-func NewFileLogger(path string, rotateSize int64) (*Logger, error) {
+func NewFileLogger(path string, rotateSizeAny any) (*Logger, error) {
+	rotateSize, err := RotateSizeFromRotateString(rotateSizeAny)
+	if err != nil {
+		return nil, err
+	}
 	fw, err := NewFileWriter(path)
 	if err != nil {
 		return nil, err

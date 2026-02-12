@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -119,18 +118,14 @@ func initPig(mode config.Mode) (*config.Config, *log.Logger) {
 		cfg = &config.Config{}
 		applyCommandLineFlags(cfg, flags, mode, logger)
 	}
-	err = applyLogSettings(cfg)
-	if err != nil {
-		log.NewBlockingLogger().Fatalf("Failed to apply log settings: %v", err)
-	}
 	switch cfg.LogConfig.File {
 	case "":
 		logger = log.NewLogger()
 		logger.SetLevel(cfg.LogConfig.Level)
 	default:
-		logger, err = log.NewFileLogger(cfg.LogConfig.File, cfg.LogConfig.RotateSize.(int64))
+		logger, err = log.NewFileLogger(cfg.LogConfig.File, cfg.LogConfig.RotateSize)
 		if err != nil {
-			logger.Fatalf("Failed to create file logger: %v", err)
+			log.NewBlockingLogger().Fatalf("Failed to create file logger: %v", err)
 		}
 		logger.SetLevel(cfg.LogConfig.Level)
 	}
@@ -277,58 +272,6 @@ func applyCommandLineFlags(cfg *config.Config, flags *pigFlags, mode config.Mode
 
 	buildAuthSettingsFromFlags(cfg, flags, logger)
 	buildICESettingsFromFlags(cfg, flags, logger)
-}
-
-func applyLogSettings(cfg *config.Config) (err error) {
-	if cfg.LogConfig.File == "" {
-		return nil
-	}
-
-	if cfg.LogConfig.RotateSize == nil {
-		cfg.LogConfig.RotateSize = int64(0)
-		return nil
-	}
-
-	rotateSizeStr, ok := cfg.LogConfig.RotateSize.(string)
-	if !ok {
-		rotateSizeInt, ok := cfg.LogConfig.RotateSize.(int64)
-		if !ok {
-			err = fmt.Errorf("invalid rotate size: %v", cfg.LogConfig.RotateSize)
-			return
-		}
-		cfg.LogConfig.RotateSize = rotateSizeInt
-		return
-	}
-
-	if rotateSizeStr == "" {
-		cfg.LogConfig.RotateSize = 5 * 1024 * 1024
-		return
-	}
-
-	re := regexp.MustCompile(`^(\d+)([kmg])$`)
-	sub := re.FindStringSubmatch(rotateSizeStr)
-	if len(sub) != 3 {
-		err = fmt.Errorf("invalid rotate size: %s", rotateSizeStr)
-		return
-	}
-
-	rotateSize, err := strconv.Atoi(sub[1])
-	if err != nil {
-		err = fmt.Errorf("invalid rotate size: %s", rotateSizeStr)
-		return
-	}
-
-	switch sub[2] {
-	case "k":
-		cfg.LogConfig.RotateSize = int64(rotateSize * 1024)
-	case "m":
-		cfg.LogConfig.RotateSize = int64(rotateSize * 1024 * 1024)
-	case "g":
-		cfg.LogConfig.RotateSize = int64(rotateSize * 1024 * 1024 * 1024)
-	default:
-		err = fmt.Errorf("invalid rotate size: %s", cfg.LogConfig.RotateSize)
-	}
-	return
 }
 
 func applyNetworkSettings(cfg *config.Config, logger common.Logger) {

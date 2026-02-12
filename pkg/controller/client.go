@@ -135,7 +135,7 @@ func (c *Controller) setupClientRoutes(cfg *config.RouteConfig, adapter common.T
 		return
 	}
 	remoteMask := net.CIDRMask(32, 32)
-	if remoteIP.To16() != nil {
+	if remoteIP.To4() == nil {
 		remoteMask = net.CIDRMask(128, 128)
 	}
 	if !remoteIP.IsPrivate() {
