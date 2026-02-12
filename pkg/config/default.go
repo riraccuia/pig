@@ -35,6 +35,10 @@ func (c *Config) normalize() error {
 		c.TunnelConfig.ICE = &ICEConfig{Enabled: false}
 	}
 
+	if c.TunnelConfig.Auth == nil {
+		c.TunnelConfig.Auth = &AuthConfig{}
+	}
+
 	if c.TunnelConfig.MTU == 0 {
 		c.TunnelConfig.MTU = DefaultMTU
 	}

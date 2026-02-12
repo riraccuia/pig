@@ -74,11 +74,13 @@ func DialConn(ctx context.Context, conn net.Conn, address string, tlsConfig *tls
 		return nil, fmt.Errorf("failed to dial websocket: %w", err)
 	}
 
+	remoteAddr, _ := net.ResolveTCPAddr("tcp", address)
+
 	netConn := websocket.NetConn(context.Background(), wsConn, websocket.MessageBinary)
 	return &WSConn{
 		Conn:       netConn,
 		localAddr:  conn.LocalAddr(),
-		remoteAddr: conn.RemoteAddr(),
+		remoteAddr: remoteAddr, //conn.RemoteAddr(),
 	}, nil
 }
 
@@ -105,8 +107,11 @@ func Dial(ctx context.Context, address string, tlsConfig *tls.Config) (transport
 		return nil, fmt.Errorf("failed to dial websocket: %w", err)
 	}
 
+	remoteAddr, _ := net.ResolveTCPAddr("tcp", address)
+
 	netConn := websocket.NetConn(context.Background(), wsConn, websocket.MessageBinary)
 	return &WSConn{
-		Conn: netConn,
+		Conn:       netConn,
+		remoteAddr: remoteAddr,
 	}, nil
 }
