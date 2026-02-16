@@ -23,6 +23,11 @@ var (
 	procCertCloseStore = modcrypt32.NewProc("CertCloseStore")
 )
 
+const (
+	apiCertOpenStore  = "crypt32.dll!CertOpenStore"
+	apiCertCloseStore = "crypt32.dll!CertCloseStore"
+)
+
 // CertOpenStore opens a certificate store by using a specified store provider type.
 //
 // Parameters:
@@ -56,7 +61,7 @@ func CertOpenStore(
 		uintptr(pvPara),
 	)
 	if ret == 0 {
-		return HCERTSTORE(0), windows.GetLastError()
+		return HCERTSTORE(0), newLastErrorCode(apiCertOpenStore)
 	}
 	return HCERTSTORE(ret), nil
 }
@@ -85,7 +90,7 @@ func CertCloseStore(hCertStore HCERTSTORE, dwFlags uint32) error {
 		uintptr(dwFlags),
 	)
 	if ret == 0 {
-		return windows.GetLastError()
+		return newLastErrorCode(apiCertCloseStore)
 	}
 	return nil
 }

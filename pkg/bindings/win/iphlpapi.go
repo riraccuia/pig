@@ -17,12 +17,19 @@ var (
 	procGetBestRoute2          = modiphlpapi.NewProc("GetBestRoute2")
 )
 
+const (
+	apiInitializeIpForwardEntry = "iphlpapi.dll!InitializeIpForwardEntry"
+	apiCreateIpForwardEntry2    = "iphlpapi.dll!CreateIpForwardEntry2"
+	apiDeleteIpForwardEntry2    = "iphlpapi.dll!DeleteIpForwardEntry2"
+	apiGetBestRoute2            = "iphlpapi.dll!GetBestRoute2"
+)
+
 // InitializeIpForwardEntry initializes a MIB_IPFORWARD_ROW2 structure with default values.
 // See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-initializeipforwardentry.
 func InitializeIpForwardEntry(row *windows.MibIpForwardRow2) error {
 	ret, _, _ := procInitializeIpForwardRow.Call(uintptr(unsafe.Pointer(row)))
 	if ret != 0 {
-		return windows.Errno(ret)
+		return newReturnCodeError(apiInitializeIpForwardEntry, ret)
 	}
 	return nil
 }
@@ -32,7 +39,7 @@ func InitializeIpForwardEntry(row *windows.MibIpForwardRow2) error {
 func CreateIpForwardEntry2(row *windows.MibIpForwardRow2) error {
 	ret, _, _ := procCreateIpForwardEntry2.Call(uintptr(unsafe.Pointer(row)))
 	if ret != 0 {
-		return windows.Errno(ret)
+		return newReturnCodeError(apiCreateIpForwardEntry2, ret)
 	}
 	return nil
 }
@@ -42,7 +49,7 @@ func CreateIpForwardEntry2(row *windows.MibIpForwardRow2) error {
 func DeleteIpForwardEntry2(row *windows.MibIpForwardRow2) error {
 	ret, _, _ := procDeleteIpForwardEntry2.Call(uintptr(unsafe.Pointer(row)))
 	if ret != 0 {
-		return windows.Errno(ret)
+		return newReturnCodeError(apiDeleteIpForwardEntry2, ret)
 	}
 	return nil
 }
@@ -88,7 +95,7 @@ func GetBestRoute2(
 		bestSrcPt,
 	)
 	if ret != 0 {
-		return windows.Errno(ret)
+		return newReturnCodeError(apiGetBestRoute2, ret)
 	}
 	return nil
 }
