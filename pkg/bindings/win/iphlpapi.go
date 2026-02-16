@@ -27,10 +27,7 @@ const (
 // InitializeIpForwardEntry initializes a MIB_IPFORWARD_ROW2 structure with default values.
 // See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-initializeipforwardentry.
 func InitializeIpForwardEntry(row *windows.MibIpForwardRow2) error {
-	ret, _, _ := procInitializeIpForwardRow.Call(uintptr(unsafe.Pointer(row)))
-	if ret != 0 {
-		return newReturnCodeError(apiInitializeIpForwardEntry, ret)
-	}
+	procInitializeIpForwardRow.Call(uintptr(unsafe.Pointer(row)))
 	return nil
 }
 
