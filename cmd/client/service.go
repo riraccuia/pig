@@ -11,6 +11,8 @@ import (
 var clientCancel context.CancelFunc
 
 func runService() {
+	defer recoverToLogFile()
+
 	handler, err := service.New("PigClient", onStart, onStop)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create service handler: %v\n", err)
