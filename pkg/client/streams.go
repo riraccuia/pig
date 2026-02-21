@@ -37,6 +37,9 @@ func (c *Client) doStream(ctx context.Context, stream transport.Stream) {
 			}
 			return
 		}
+		if c.conn == nil {
+			return
+		}
 		go c.reconnectStream(ctx)
 		// stream.Close()
 	}()

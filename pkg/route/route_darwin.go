@@ -4,10 +4,10 @@ package route
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -68,13 +68,13 @@ func newManager(ctx context.Context) (manager, error) {
 	}
 
 	// Perform reconnaissance to discover default gateways
-	manager.discoverDefaultGateways()
+	// manager.discoverDefaultGateways()
 
 	// Start route monitoring routine
-	go manager.monitorRoutesV4()
-	go manager.monitorRoutesV6()
+	// go manager.monitorRoutesV4()
+	// go manager.monitorRoutesV6()
 
-	runtime.Gosched()
+	// runtime.Gosched()
 
 	return manager, nil
 }
@@ -100,6 +100,10 @@ func (m *darwinManager) trackedRoutesForRoute(rt *Route) *sync.Map {
 	return &m.trackedRoutesV6
 }
 
+// AddRoute adds a static route to the system.
+// If the gateway field of the route is left unset, the best route for the destination IP will be looked up
+// and used instead.
+// Otherwise the route will be added with the provided gateway.
 func (m *darwinManager) AddRoute(rt *Route) error {
 	// Build route message
 	msg, err := m.buildRouteMessageWithBestRoute(rt, unix.RTM_ADD, 0)
@@ -124,6 +128,8 @@ func (m *darwinManager) AddRoute(rt *Route) error {
 	return nil
 }
 
+// RemoveRoute removes a static route from the system. The destination IP address
+// must be set in the route struct. Everything else is optional.
 func (m *darwinManager) RemoveRoute(rt *Route) error {
 	// Build route message
 	msg, err := m.buildRouteMessageRaw(rt, unix.RTM_DELETE, 0)
@@ -268,6 +274,7 @@ func (m *darwinManager) convertRouteMessage(rm *route.RouteMessage) (*Route, err
 		gateway       net.IP
 		netmask       net.IPMask
 		interfaceName string
+		linkAddr      net.HardwareAddr
 	)
 
 	// Parse addresses from the route message
@@ -289,7 +296,7 @@ func (m *darwinManager) convertRouteMessage(rm *route.RouteMessage) (*Route, err
 			ip = net.IP(a.IP[:]).To16()
 			mask = net.IPMask(a.IP[:])
 		case *route.LinkAddr:
-			// no ARP for now, but we will use it later
+			linkAddr = net.HardwareAddr(a.Addr[:])
 			continue
 		}
 		if i == 0 { // First address is destination
@@ -332,6 +339,7 @@ func (m *darwinManager) convertRouteMessage(rm *route.RouteMessage) (*Route, err
 	}
 	rt.Gateway = gateway
 	rt.Interface = interfaceName
+	rt.LinkAddr = linkAddr
 
 	return rt, nil
 }
@@ -535,6 +543,9 @@ func (m *darwinManager) buildRouteMessageWithBestRoute(rt *Route, msgType int, f
 		bestRoute, err := m.FindBestRoute(rt.Destination.IP)
 		if err != nil {
 			return nil, err
+		}
+		if bestRoute.IsDirectlyConnected() {
+			return nil, fmt.Errorf("%s is directly connected via %s (%s)", rt.Destination.IP.String(), bestRoute.LinkAddr.String(), bestRoute.Interface)
 		}
 		rt.Gateway = bestRoute.Gateway
 		rt.Interface = bestRoute.Interface
@@ -800,6 +811,9 @@ func (m *darwinManager) discoverIfDefaultGateway6(ifIndex int) (net.IP, *route.R
 			routeMsg = rm
 			break
 		}
+	}
+	if routerIP == nil {
+		return nil, nil, errors.New("could not find a suitable gateway")
 	}
 	return routerIP, routeMsg, nil
 }

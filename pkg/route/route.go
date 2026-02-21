@@ -11,11 +11,23 @@ type Route struct {
 	Destination *net.IPNet
 	Gateway     net.IP
 	Interface   string
+	LinkAddr    net.HardwareAddr
 }
 
 // Is4 returns true if the route is an IPv4 route
 func (r Route) Is4() bool {
 	return r.Destination.IP.To4() != nil
+}
+
+func (r Route) IsDirectlyConnected() bool {
+	if r.Gateway != nil && !r.Gateway.Equal(net.IPv4zero) && !r.Gateway.Equal(net.IPv6zero) {
+		return false
+	}
+	return r.LinkAddr != nil
+}
+
+func (r Route) HasGateway() bool {
+	return r.Gateway != nil && !r.Gateway.Equal(net.IPv4zero) && !r.Gateway.Equal(net.IPv6zero)
 }
 
 // String returns a unique string representation of the route
@@ -76,13 +88,16 @@ func (m *Manager) AddRouteToBestRoute(destination *net.IPNet) error {
 	if err != nil {
 		return fmt.Errorf("failed to find best route for %s: %w", destination.IP.String(), err)
 	}
-	route.Destination = destination
-	if route.Gateway == nil || route.Gateway.Equal(net.IPv4zero) || route.Gateway.Equal(net.IPv6zero) {
-		return fmt.Errorf("failed to find route for %s", destination.IP.String())
+	if route.IsDirectlyConnected() {
+		return fmt.Errorf("%s is directly connected via %s (%s)", destination.IP.String(), route.LinkAddr.String(), route.Interface)
 	}
+	if !route.HasGateway() {
+		return fmt.Errorf("cannot route %s: no suitable gateway found", destination.IP.String())
+	}
+	route.Destination = destination
 	err = m.manager.AddRoute(route)
 	if err != nil {
-		return fmt.Errorf("failed to add route for %s: %w", destination.IP.String(), err)
+		return fmt.Errorf("failed to add route for %s: %w", destination.String(), err)
 	}
 	return nil
 }

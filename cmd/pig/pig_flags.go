@@ -118,6 +118,10 @@ func initPig(mode config.Mode) (*config.Config, *log.Logger) {
 		cfg = &config.Config{}
 		applyCommandLineFlags(cfg, flags, mode, logger)
 	}
+	err = cfg.Initialize()
+	if err != nil {
+		log.NewBlockingLogger().Fatalf("Failed to initialize config: %v", err)
+	}
 	switch cfg.LogConfig.File {
 	case "":
 		logger = log.NewLogger()
@@ -129,10 +133,7 @@ func initPig(mode config.Mode) (*config.Config, *log.Logger) {
 		}
 		logger.SetLevel(cfg.LogConfig.Level)
 	}
-	applyNetworkSettings(cfg, logger)
 	applyICESettings(cfg, flags, logger)
-	applyAuthSettings(cfg, logger)
-	validateConfig(cfg, logger)
 	return cfg, logger
 }
 
@@ -274,49 +275,6 @@ func applyCommandLineFlags(cfg *config.Config, flags *pigFlags, mode config.Mode
 	buildICESettingsFromFlags(cfg, flags, logger)
 }
 
-func applyNetworkSettings(cfg *config.Config, logger common.Logger) {
-	if cfg.Mode == "" {
-		cfg.Mode = config.ModeClient
-	}
-
-	if cfg.TunnelConfig.MTU == 0 {
-		cfg.TunnelConfig.MTU = 1400
-	}
-
-	if cfg.TunnelConfig.Target.Address != "" && net.ParseIP(cfg.TunnelConfig.Target.Address) == nil {
-		logger.Debugf("Resolving %s address: %s", "target", cfg.TunnelConfig.Target.Address)
-		ips, err := net.LookupIP(cfg.TunnelConfig.Target.Address)
-		if err != nil {
-			logger.Fatalf("Failed to resolve %s address: %v", "target", err)
-		}
-		if len(ips) == 0 {
-			logger.Fatalf("No IP addresses found for %s address: %s", "target", cfg.TunnelConfig.Target.Address)
-		}
-		cfg.TunnelConfig.Target.Address = ips[0].String()
-		logger.Debugf("Resolved %s address: %s", "target", cfg.TunnelConfig.Target.Address)
-	}
-
-	if cfg.TunnelConfig.TunnelAddress == "" {
-		cfg.TunnelConfig.TunnelAddress = "172.31.254.1/29"
-		if cfg.Mode == "server" {
-			cfg.TunnelConfig.TunnelAddress = "172.31.255.1/24"
-		}
-	}
-
-	if cfg.TunnelConfig.ReconnectInterval == 0 {
-		cfg.TunnelConfig.ReconnectInterval = 5
-	}
-	if cfg.TunnelConfig.Wred.WeightFactor == 0 {
-		cfg.TunnelConfig.Wred.WeightFactor = 5
-	}
-	if cfg.TunnelConfig.Wred.DropProbability == 0 {
-		cfg.TunnelConfig.Wred.DropProbability = 0.25
-	}
-	if cfg.TunnelConfig.Wred.Threshold == 0 {
-		cfg.TunnelConfig.Wred.Threshold = 0.30
-	}
-}
-
 func buildAuthSettingsFromFlags(cfg *config.Config, flags *pigFlags, logger common.Logger) {
 	if cfg.TunnelConfig.Auth != nil {
 		return
@@ -355,21 +313,6 @@ func buildAuthSettingsFromFlags(cfg *config.Config, flags *pigFlags, logger comm
 	}
 }
 
-func applyAuthSettings(cfg *config.Config, logger common.Logger) {
-	if cfg.TunnelConfig.Auth == nil {
-		return
-	}
-
-	if cfg.TunnelConfig.Auth.Type == config.AuthTypeJWT {
-		if cfg.Mode == "server" && cfg.TunnelConfig.Auth.JWT.PublicKeySource == "" {
-			logger.Fatalf("JWT public key source not specified")
-		}
-		if cfg.Mode == "client" && cfg.TunnelConfig.Auth.JWT.Token == "" {
-			logger.Fatalf("JWT token not specified")
-		}
-	}
-}
-
 func buildICESettingsFromFlags(cfg *config.Config, flags *pigFlags, logger common.Logger) {
 	if !flags.iceEnabled {
 		cfg.TunnelConfig.ICE = &config.ICEConfig{
@@ -404,22 +347,6 @@ func applyICESettings(cfg *config.Config, flags *pigFlags, logger common.Logger)
 		cfg.TunnelConfig.ICE.Signaling = &config.ICESignalingOpts{}
 	}
 	setConfigField(&cfg.TunnelConfig.ICE.Signaling.MQTTBrokerAddress, flags.iceMQTTBroker)
-
-	if cfg.TunnelConfig.Proto == "." && len(cfg.TunnelConfig.ICE.Protos) == 0 {
-		cfg.TunnelConfig.ICE.Protos = []string{"ws", "quic", "dtls", "tls"} // keeping tls-in-icmp out for now because it has issues with ice
-	}
-	if len(cfg.TunnelConfig.ICE.Protos) == 0 {
-		flagProtos := strings.Split(string(cfg.TunnelConfig.Proto), ",")
-		cfg.TunnelConfig.ICE.Protos = flagProtos
-	}
-	if len(cfg.TunnelConfig.ICE.Protos) == 0 {
-		logger.Fatalf("No ICE protocols specified")
-	}
-	for _, proto := range cfg.TunnelConfig.ICE.Protos {
-		if !config.TransportType(proto).IsICEProtocol() {
-			logger.Fatalf("Invalid ICE protocol: %s", proto)
-		}
-	}
 }
 
 func configureTarget(cfg *config.Config, addr string, addrType string, logger common.Logger) error {
@@ -460,52 +387,4 @@ func configureTarget(cfg *config.Config, addr string, addrType string, logger co
 	cfg.TunnelConfig.Target.Address = address
 	cfg.TunnelConfig.Target.Port = port
 	return nil
-}
-
-func needsTarget(cfg *config.Config) bool {
-	if cfg.TunnelConfig.Target.Address != "" {
-		return false
-	}
-	if !cfg.TunnelConfig.ICE.Enabled {
-		return true
-	}
-	if cfg.TunnelConfig.ICE.Signaling == nil {
-		return true
-	}
-	if cfg.TunnelConfig.ICE.Signaling.ServerID != "" {
-		return false
-	}
-	return true
-}
-
-func validateConfig(cfg *config.Config, logger common.Logger) {
-	if !cfg.Mode.IsValid() {
-		logger.Fatalf("Invalid pig mode: %s", cfg.Mode)
-	}
-
-	if needsTarget(cfg) {
-		logger.Fatalf("Target address not specified")
-	}
-
-	if cfg.TunnelConfig.ICE.Enabled {
-		// the checks below do not apply when ICE is enabled
-		return
-	}
-
-	if !cfg.TunnelConfig.Proto.IsValid() {
-		logger.Fatalf("Invalid transport: %s", cfg.TunnelConfig.Proto)
-	}
-
-	if cfg.TunnelConfig.Proto == config.TransportICMP || cfg.TunnelConfig.Proto == config.TransportTLSICMP {
-		if cfg.TunnelConfig.BindAdapter == "" {
-			logger.Fatalf("Bind adapter not specified, but required for %s. Use -I flag to specify the adapter.", cfg.TunnelConfig.Proto)
-		}
-	}
-
-	if cfg.TunnelConfig.Target.Port == 0 {
-		if cfg.TunnelConfig.Proto == config.TransportICMP || cfg.TunnelConfig.Proto == config.TransportTLSICMP {
-			return
-		}
-		logger.Fatalf("Target port not specified")
-	}
 }

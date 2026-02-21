@@ -94,20 +94,8 @@ type Config struct {
 	LogConfig    LogConfig    `toml:"log" json:"log"`   // Log configuration
 	TunnelConfig TunnelConfig `toml:"tunnel" json:"tunnel"`
 	RouteConfig  RouteConfig  `toml:"route" json:"route"`
-	//TunnelAddress     string        `toml:"tunnel_address" json:"tunnel_address"` // CIDR format
-	//TLSConfig         TLSConfig     `toml:"tls_config" json:"tls_config"`
-	//MTU               int           `toml:"mtu" json:"mtu"`
-	//StreamCount       int           `toml:"stream_count" json:"stream_count"`
-	//Proto             TransportType `toml:"proto" json:"proto"`
-	//Target            Target        `toml:"target" json:"target"`
-	//ReconnectInterval int           `toml:"reconnect_interval" json:"reconnect_interval"` // in seconds
-	//BindAdapter       string        `toml:"bind_adapter" json:"bind_adapter"`             // The adapter to bind to
-	//Wred              WredConfig    `toml:"wred" json:"wred"`
-	StartScript string `toml:"start_script" json:"start_script"` // Script to execute when a tunnel connection is established
-	StopScript  string `toml:"stop_script" json:"stop_script"`   // Script to execute when a tunnel connection is disconnected
-	//Auth              *AuthConfig   `toml:"auth" json:"auth"`
-	//QueueSize         int           `toml:"queue_size" json:"queue_size"` // Size of packet queues (default: 256)
-	//ICE               *ICEConfig    `toml:"ice" json:"ice"`
+	StartScript  string       `toml:"start_script" json:"start_script"` // Script to execute when a tunnel connection is established
+	StopScript   string       `toml:"stop_script" json:"stop_script"`   // Script to execute when a tunnel connection is disconnected
 }
 
 type TunnelConfig struct {
@@ -143,16 +131,16 @@ func (c *ICEConfig) UseProtos() (protos []transport.ICEProtocolDefinition) {
 		return []transport.ICEProtocolDefinition{transport.ICEProtocolWS, transport.ICEProtocolQUIC}
 	}*/
 	for _, proto := range c.Protos {
-		switch proto {
-		case "ws":
+		switch TransportType(proto) {
+		case TransportWS:
 			protos = append(protos, transport.ICEProtocolWS)
-		case "quic":
+		case TransportQUIC:
 			protos = append(protos, transport.ICEProtocolQUIC)
-		case "dtls":
+		case TransportDTLS:
 			protos = append(protos, transport.ICEProtocolDTLS)
-		case "tls":
+		case TransportTLS:
 			protos = append(protos, transport.ICEProtocolTLS)
-		case "tls-in-icmp":
+		case TransportTLSICMP:
 			protos = append(protos, transport.ICEProtocolTLSInICMP)
 		}
 	}
@@ -216,12 +204,38 @@ type JWTAuth struct {
 	Token string `toml:"token" json:"token"`
 }
 
+type RouteType string
+
+const (
+	RouteTypeTunnel RouteType = "tunnel"
+	RouteTypeBypass RouteType = "bypass"
+	RouteTypeStatic RouteType = "static"
+)
+
+type Route struct {
+	Destination string    `toml:"destination" json:"destination"`
+	Type        RouteType `toml:"type" json:"type"`
+	Gateway     string    `toml:"gateway" json:"gateway"`
+	Interface   string    `toml:"interface" json:"interface"`
+}
+
+func routeTypePriority(t RouteType) int {
+	switch t {
+	case RouteTypeBypass:
+		return 0
+	case RouteTypeStatic:
+		return 1
+	case RouteTypeTunnel:
+		return 2
+	default:
+		return 3 // unknown types go last
+	}
+}
+
 type RouteConfig struct {
 	Enabled bool `toml:"enabled" json:"enabled"`
-	// TunnelRoutes are the routes that will be used for the tunnel
-	TunnelRoutes []string `toml:"tunnel_routes" json:"tunnel_routes"`
-	// BypassRoutes are the routes that will be sent via the default gateway
-	BypassRoutes []string `toml:"bypass_routes" json:"bypass_routes"`
+	// Routes are the routes that will be used for the routing
+	Routes []Route `toml:"routes" json:"routes"`
 }
 
 func LoadConfigFromFile(path string) (*Config, error) {
@@ -257,7 +271,7 @@ func LoadConfigFromBytes(data []byte, decodeAs string) (*Config, error) {
 	default:
 		return nil, fmt.Errorf("unsupported config format: %s", decodeAs)
 	}
-	err := config.normalize()
+	err := config.Initialize()
 	if err != nil {
 		return nil, err
 	}

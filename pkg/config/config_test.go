@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"math/rand"
 	"reflect"
 	"testing"
 
@@ -61,5 +62,41 @@ func TestTOMLConfigUnmarshal(t *testing.T) {
 	}
 	if !reflect.DeepEqual(cfg, cfg2) {
 		t.Fatalf("Config mismatch: %+#v != %+#v", cfg, cfg2)
+	}
+}
+
+func TestRouteConfigNormalization(t *testing.T) {
+	rng := rand.New(rand.NewSource(42))
+	routeTypes := []RouteType{RouteTypeTunnel, RouteTypeBypass, RouteTypeStatic}
+	routes := make([]Route, 0, 9)
+
+	for i := 0; i < 9; i++ {
+		routes = append(routes, Route{
+			Destination: "10.0.0.0/24",
+			Type:        routeTypes[rng.Intn(len(routeTypes))],
+		})
+	}
+
+	cfg := &Config{
+		RouteConfig: RouteConfig{
+			Enabled: true,
+			Routes:  routes,
+		},
+	}
+	err := cfg.RouteConfig.Initialize()
+	if err != nil {
+		t.Fatalf("Failed to normalize route config: %v", err)
+	}
+
+	/*for _, route := range cfg.RouteConfig.Routes {
+		t.Logf("RouteType: %s", route.Type)
+	}*/
+
+	for i := 1; i < len(cfg.RouteConfig.Routes); i++ {
+		prev := routeTypePriority(cfg.RouteConfig.Routes[i-1].Type)
+		curr := routeTypePriority(cfg.RouteConfig.Routes[i].Type)
+		if prev > curr {
+			t.Fatalf("routes are not ordered by type priority at index %d: %s before %s", i, cfg.RouteConfig.Routes[i-1].Type, cfg.RouteConfig.Routes[i].Type)
+		}
 	}
 }

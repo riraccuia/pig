@@ -39,11 +39,12 @@ func (c *Controller) startClient(ctx context.Context, cfg *config.Config) {
 
 	c.logger.Infof("Starting pig | Mode: %s %s MTU: %d", cfg.Mode, transportStr, cfg.TunnelConfig.MTU)
 
-	if cfg.TunnelConfig.ICE.Enabled {
+	switch cfg.TunnelConfig.ICE.Enabled {
+	case true:
 		c.logger.Info("ICE enabled | STUN server: ", cfg.TunnelConfig.ICE.STUNAddress, " | MQTT broker: ", cfg.TunnelConfig.ICE.Signaling.MQTTBrokerAddress)
+	case false:
+		c.logger.Infof("Target: %s:%d, proto: %s", cfg.TunnelConfig.Target.Address, cfg.TunnelConfig.Target.Port, cfg.TunnelConfig.Proto)
 	}
-
-	c.logger.Infof("Resolved target: %s:%d", cfg.TunnelConfig.Target.Address, cfg.TunnelConfig.Target.Port)
 
 	// Create authenticator if configured
 	authenticator, err = c.createClientAuthenticator(cfg.TunnelConfig.Auth)
@@ -134,32 +135,53 @@ func (c *Controller) setupClientRoutes(cfg *config.RouteConfig, adapter common.T
 		c.logger.Errorf("Failed to parse IP: %v", err)
 		return
 	}
-	remoteMask := net.CIDRMask(32, 32)
+	remoteMaskBits := 32
 	if remoteIP.To4() == nil {
-		remoteMask = net.CIDRMask(128, 128)
+		remoteMaskBits = 128
 	}
-	if !remoteIP.IsPrivate() {
-		c.logger.Infof("Adding bypass route for %s", remoteIP.String())
-		err = c.routeManager.AddRouteToBestRoute(&net.IPNet{
-			IP:   remoteIP,
-			Mask: remoteMask,
-		})
-		if err != nil {
-			c.logger.Errorf("Failed to add bypass route: %v", err)
-		}
+	peerRoute := config.Route{
+		Destination: fmt.Sprintf("%s/%d", remoteIP.String(), remoteMaskBits),
+		Type:        config.RouteTypeBypass,
 	}
-	for _, tRoute := range cfg.TunnelRoutes {
-		_, ipNet, err := net.ParseCIDR(tRoute)
+	// work with a hard copy of the routes, adding the peer route first
+	for _, tRoute := range append([]config.Route{peerRoute}, cfg.Routes...) {
+		_, ipNet, err := net.ParseCIDR(tRoute.Destination)
 		if err != nil {
-			c.logger.Errorf("Failed to parse CIDR: %v", err)
+			c.logger.Errorf("Failed to parse configuration route (type: %s): %v", tRoute.Type, err)
 			continue
 		}
-		c.logger.Infof("Routing %s to %s via %s", ipNet.String(), adapter.IP().String(), adapter.Name())
-		err = c.routeManager.AddRoute(&route.Route{
-			Destination: ipNet,
-			Gateway:     adapter.IP(),
-			Interface:   adapter.Name(),
-		})
+		switch tRoute.Type {
+		case config.RouteTypeBypass:
+			c.logger.Infof("Bypassing %s", ipNet.String())
+			err = c.routeManager.AddRouteToBestRoute(ipNet)
+		case config.RouteTypeStatic:
+			gateway := net.ParseIP(tRoute.Gateway)
+			if gateway == nil {
+				c.logger.Errorf("Failed to parse gateway: %v", tRoute.Gateway)
+				continue
+			}
+			interfaceName := ""
+			if tRoute.Interface != "" {
+				interfaceName = tRoute.Interface
+			}
+			logStr := fmt.Sprintf("Adding static route for %s via %s", ipNet.String(), gateway.String())
+			if interfaceName != "" {
+				logStr += fmt.Sprintf(" on <%s>", interfaceName)
+			}
+			c.logger.Infof(logStr)
+			err = c.routeManager.AddRoute(&route.Route{
+				Destination: ipNet,
+				Gateway:     gateway,
+				Interface:   interfaceName,
+			})
+		case config.RouteTypeTunnel:
+			c.logger.Infof("Routing %s to %s via %s", ipNet.String(), adapter.IP().String(), adapter.Name())
+			err = c.routeManager.AddRoute(&route.Route{
+				Destination: ipNet,
+				Gateway:     adapter.IP(),
+				Interface:   adapter.Name(),
+			})
+		}
 		if err != nil {
 			c.logger.Errorf("Failed to add route: %v", err)
 		}
