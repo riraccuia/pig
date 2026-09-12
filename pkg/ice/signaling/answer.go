@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package signaling
 
 import (
@@ -13,17 +27,9 @@ import (
 	"github.com/riraccuia/pig/pkg/stun"
 )
 
-func (s *Signaler) SendICEAnswer(topicBase string, iceMsg *message.ICEMessage, candidates []message.ICECandidate) (answer *message.ICEMessage, err error) {
-	// Create an ICE answer message
-	answer, err = message.GenerateICEAnswer(candidates)
-	if err != nil {
-		if s.opts.Logger != nil {
-			s.opts.Logger.Errorf("SIG: failed to generate ICE answer: %v", err)
-		}
-		return
-	}
-
-	answer.SessionID = iceMsg.SessionID
+func (s *Signaler) SendICEAnswer(topicBase string, offer *message.ICEMessage, answer *message.ICEMessage) (err error) {
+	answer.SessionID = offer.SessionID
+	answer.Timestamp[1] = time.Now().UnixMilli() // T3: server departure time of the reply
 
 	var payload []byte
 	payload, err = s.preparePayload(answer)
@@ -35,7 +41,7 @@ func (s *Signaler) SendICEAnswer(topicBase string, iceMsg *message.ICEMessage, c
 	}
 
 	// Publish to the answer topic
-	topic := topicBase + iceMsg.SessionID + "/answer/"
+	topic := topicBase + offer.SessionID + "/answer/"
 	if s.opts.Logger != nil {
 		s.opts.Logger.Tracef("SIG: publishing ICE answer to topic: %s", topic)
 	}
@@ -49,19 +55,25 @@ func (s *Signaler) SendICEAnswer(topicBase string, iceMsg *message.ICEMessage, c
 	return
 }
 
-func (s *Signaler) ReceiveICEOffers(ctx context.Context) (offersChan <-chan *message.ICEMessage, topicBase string, err error) {
+type ReceivedOffer struct {
+	Offer       *message.ICEMessage
+	ArrivalTime int64
+}
+
+func (s *Signaler) ReceiveICEOffers(ctx context.Context) (offersChan <-chan *ReceivedOffer, topicBase string, err error) {
 	// Perform STUN query to get our public IP
-	var mappedIP net.IP
-	mappedIP, _, err = stun.QueryServerUDP(s.opts.Logger, s.opts.STUNServer, &net.UDPAddr{IP: nil, Port: 0})
+	var result *stun.BindingResult
+	result, err = s.stunClient.QueryStunServerUDP(&net.UDPAddr{IP: nil, Port: 0})
 	if err != nil {
 		if s.opts.Logger != nil {
 			s.opts.Logger.Errorf("SIG: STUN query failed: %v", err)
 		}
 		return nil, "", err
 	}
+	mappedIP := result.IP
 
 	topicBase = s.getTopicPrefix(mappedIP.String()) + "/"
-	ch := make(chan *message.ICEMessage)
+	ch := make(chan *ReceivedOffer)
 
 	s.opts.Logger.Tracef("SIG: receiving ICE offers from topic: %s", topicBase+"+/offer")
 
@@ -85,18 +97,22 @@ func (s *Signaler) ReceiveICEOffers(ctx context.Context) (offersChan <-chan *mes
 	return ch, topicBase, nil
 }
 
-func (s *Signaler) getICEOfferHandler(ch chan *message.ICEMessage) func(client mqtt.Client, msg mqtt.Message) {
+func (s *Signaler) getICEOfferHandler(ch chan *ReceivedOffer) func(client mqtt.Client, msg mqtt.Message) {
 	return func(client mqtt.Client, msg mqtt.Message) {
+		ro := ReceivedOffer{
+			ArrivalTime: time.Now().UnixMilli(), // T2: server arrival time of the request
+		}
 		iceMsg, err := s.handleOfferMessage(msg.Payload())
 		if err != nil {
 			s.opts.Logger.Errorf("SIG: failed to handle offer message: %w", err)
 			return
 		}
-		ch <- iceMsg
+		ro.Offer = iceMsg
+		ch <- &ro
 	}
 }
 
-// handleOfferMessage decrypts and validates an ICE message
+// handleOfferMessage decrypts and validates an ICE message.
 func (s *Signaler) handleOfferMessage(msg []byte) (*message.ICEMessage, error) {
 	var (
 		payload []byte
@@ -125,17 +141,18 @@ func (s *Signaler) handleOfferMessage(msg []byte) (*message.ICEMessage, error) {
 	return &iceMsg, nil
 }
 
-// waitForAnswer subscribes to the answer topic and waits for a response
-func (s *Signaler) waitForAnswer(topicBase, sessionID string) (answer *message.ICEMessage, err error) {
+// waitForAnswer subscribes to the answer topic and waits for a response.
+func (s *Signaler) waitForAnswer(topicBase string, offer *message.ICEMessage) (answer *message.ICEMessage, err error) {
 	iceMsgChan := make(chan *message.ICEMessage)
 
 	// Subscribe to answer topic
-	answerTopic := topicBase + sessionID + "/answer/#"
+	answerTopic := topicBase + offer.SessionID + "/answer/#"
 	if s.opts.Logger != nil {
 		s.opts.Logger.Tracef("SIG: answer topic: %s", answerTopic)
 	}
 
 	if token := s.mqttClient.Subscribe(answerTopic, 0, func(client mqtt.Client, msg mqtt.Message) {
+		offer.Timestamp[1] = time.Now().UnixMilli() // T4: client arrival time of the reply
 		s.handleAnswerMessage(msg, iceMsgChan)
 	}); token.Wait() && token.Error() != nil {
 		return nil, fmt.Errorf("failed to subscribe to ICE answer: %w", token.Error())
@@ -145,7 +162,7 @@ func (s *Signaler) waitForAnswer(topicBase, sessionID string) (answer *message.I
 	select {
 	case answer = <-iceMsgChan:
 		s.opts.Logger.Tracef("SIG: received ICE answer for session: %s", answer.SessionID)
-		if answer.SessionID != sessionID {
+		if answer.SessionID != offer.SessionID {
 			err = fmt.Errorf("received ICE answer for different session: %s", answer.SessionID)
 			break
 		}
@@ -161,7 +178,7 @@ func (s *Signaler) waitForAnswer(topicBase, sessionID string) (answer *message.I
 	return answer, err
 }
 
-// handleAnswerMessage processes an answer message from MQTT
+// handleAnswerMessage processes an answer message from MQTT.
 func (s *Signaler) handleAnswerMessage(msg mqtt.Message, iceMsgChan chan<- *message.ICEMessage) {
 	if s.opts.Logger != nil {
 		s.opts.Logger.Tracef("SIG: received ICE answer")

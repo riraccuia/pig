@@ -1,50 +1,36 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package client
 
 import (
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-// Event represents the current event type of the client
-type Event int
-
-const (
-	// EventUnknown indicates an unknown event
-	EventUnknown Event = iota
-	// EventStopped indicates the client has stopped
-	EventStopped
-	// EventConnected indicates the client is connected to the server
-	EventConnected
-	// EventDisconnected indicates the client has disconnected from the server
-	EventDisconnected
-	// EventConnectionFailed indicates the client has failed to connect to the server
-	EventConnectionFailed
-)
-
-// EventMap is a map of event types to their string representations
-var EventMap = map[Event]string{
-	EventUnknown:          "unknown",
-	EventStopped:          "stopped",
-	EventConnected:        "connected",
-	EventDisconnected:     "disconnected",
-	EventConnectionFailed: "connection failed",
-}
-
-func (e Event) String() string {
-	return EventMap[e]
-}
-
-// EventContext represents a client event that is sent over the event channel
+// EventContext represents a client event that is sent over the event channel.
 type EventContext struct {
-	Event Event
+	State State
 	Conn  transport.Conn
 	Error error // Error that occurred during the event
 }
 
 func (c *Client) signalEvent(event *EventContext) {
+	c.updateStateFromEvent(event)
 	select {
 	case c.events <- event:
 		return
 	default:
-		c.logger.Errorf("Events channel full, dropping event %s", event.Event)
+		c.logger.Errorf("Events channel full, dropping event %s", event.State)
 	}
 }

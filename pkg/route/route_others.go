@@ -1,4 +1,18 @@
-//go:build !darwin && !windows
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//go:build !darwin && !linux && !windows
 
 package route
 
@@ -8,13 +22,13 @@ import (
 	"net"
 )
 
-// Stub implementations for non-macOS platforms
-// These will be implemented when adding support for Linux and Windows
-func newManager(ctx context.Context) (manager, error) {
+// Stub implementations for non-macOS platforms.
+// These will be implemented when adding support for Linux and Windows.
+func newManager(ctx context.Context) (Manager, error) {
 	return &stubManager{}, nil
 }
 
-// Stub implementation for GetAdapterIP on non-macOS platforms
+// Stub implementation for GetAdapterIP on non-macOS platforms.
 type stubManager struct{}
 
 func (s *stubManager) AddRoute(route *Route) error {

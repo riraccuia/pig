@@ -1,6 +1,28 @@
 //go:build windows
 // +build windows
 
+/* SPDX-License-Identifier: MIT
+ *
+ * Copyright (C) 2017-2021 WireGuard LLC. All Rights Reserved.
+ *
+ * Portions of this file are derived from wintun-go
+ * (https://git.zx2c4.com/wintun-go/tree/).
+ */
+
+// Modifications Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package adapter
 
 import (
@@ -33,7 +55,7 @@ type rateJuggler struct {
 }
 
 type NativeTun struct {
-	ip        net.IP
+	ip, ipv6  *net.IPNet
 	wt        *wintun.Adapter
 	name      string
 	handle    windows.Handle
@@ -91,7 +113,25 @@ func (tun *NativeTun) Name() string {
 }
 
 func (tun *NativeTun) IP() net.IP {
+	if tun.ip != nil {
+		return tun.ip.IP
+	}
+	return nil
+}
+
+func (tun *NativeTun) IP6() net.IP {
+	if tun.ipv6 != nil {
+		return tun.ipv6.IP
+	}
+	return nil
+}
+
+func (tun *NativeTun) IPNet() *net.IPNet {
 	return tun.ip
+}
+
+func (tun *NativeTun) IPNet6() *net.IPNet {
+	return tun.ipv6
 }
 
 func (tun *NativeTun) Index() int {

@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package ws
 
 import (
@@ -11,7 +25,7 @@ import (
 	"github.com/coder/websocket"
 )
 
-// WSListener implements transport.Listener for WebSocket connections
+// WSListener implements transport.Listener for WebSocket connections.
 type WSListener struct {
 	server   *http.Server
 	ctx      context.Context
@@ -19,7 +33,7 @@ type WSListener struct {
 	connChan chan *WSConn
 }
 
-// NewWSListener creates a new WebSocket transport
+// NewWSListener creates a new WebSocket transport.
 func NewWSListener(ctx context.Context) *WSListener {
 	if ctx == nil {
 		ctx = context.Background()
@@ -73,7 +87,7 @@ func (t *WSListener) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Listen starts the WebSocket server on the given address
+// Listen starts the WebSocket server on the given address.
 func (t *WSListener) ListenWithListener(l net.Listener, tlsConfig *tls.Config) error {
 	t.server = &http.Server{
 		Handler:   t,
@@ -91,7 +105,7 @@ func (t *WSListener) ListenWithListener(l net.Listener, tlsConfig *tls.Config) e
 	return t.server.Serve(tls.NewListener(l, tlsConfig))
 }
 
-// Listen starts the WebSocket server on the given address
+// Listen starts the WebSocket server on the given address.
 func (t *WSListener) Listen(network, address string, tlsConfig *tls.Config) error {
 	t.server = &http.Server{
 		Addr:      address,

@@ -33,7 +33,7 @@ import (
 type MockTunnelAdapter struct {
 	cloneChan chan []byte
 	writeChan chan []byte
-	ip        net.IP
+	ip        *net.IPNet
 	closed    bool
 	mu        sync.Mutex
 }
@@ -42,7 +42,7 @@ func NewMockTunnelAdapter(ip net.IP) *MockTunnelAdapter {
 	return &MockTunnelAdapter{
 		cloneChan: make(chan []byte, 100),
 		writeChan: make(chan []byte, 100),
-		ip:        ip,
+		ip:        &net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)},
 	}
 }
 
@@ -74,6 +74,18 @@ func (m *MockTunnelAdapter) Close() error {
 }
 
 func (m *MockTunnelAdapter) IP() net.IP {
+	return m.ip.IP
+}
+
+func (m *MockTunnelAdapter) IPNet() *net.IPNet {
+	return m.ip
+}
+
+func (m *MockTunnelAdapter) IP6() net.IP {
+	return m.ip.IP
+}
+
+func (m *MockTunnelAdapter) IPNet6() *net.IPNet {
 	return m.ip
 }
 
@@ -229,36 +241,44 @@ func TestEndToEndTunnelWithQUICMockedAdapter(t *testing.T) {
 
 	// Create server config
 	serverConfig := &config.Config{
-		Mode: config.ModeServer,
-		TunnelConfig: config.TunnelConfig{
-			TLSConfig: config.TLSConfig{
-				Insecure: true,
-				CertFile: certPath,
-				KeyFile:  keyPath,
-			},
-			TunnelAddress: "10.0.0.1/24",
-			MTU:           1300,
-			StreamCount:   4,
-			Target: config.Target{
-				Address: "127.0.0.1",
-				Port:    12345,
+		Tunnels: []config.TunnelConfig{
+			{
+				Direction: config.TunnelDirectionListen,
+				Adapter: &config.AdapterConfig{
+					TunnelAddress: []string{"10.0.0.1/24"},
+					MTU:           1300,
+				},
+				TLSConfig: config.TLSConfig{
+					Insecure: true,
+					CertFile: certPath,
+					KeyFile:  keyPath,
+				},
+				StreamCount: 4,
+				Listen: config.ListenTarget{
+					Address: "127.0.0.1",
+					Port:    12345,
+				},
 			},
 		},
 	}
 
 	// Create client config
 	clientConfig := &config.Config{
-		Mode: config.ModeClient,
-		TunnelConfig: config.TunnelConfig{
-			TLSConfig: config.TLSConfig{
-				Insecure: true,
-			},
-			TunnelAddress: "10.0.0.1/32",
+		Adapter: config.AdapterConfig{
+			TunnelAddress: []string{"10.0.0.1/32"},
 			MTU:           1300,
-			StreamCount:   4,
-			Target: config.Target{
-				Address: "127.0.0.1",
-				Port:    12345,
+		},
+		Tunnels: []config.TunnelConfig{
+			{
+				Direction: config.TunnelDirectionConnect,
+				TLSConfig: config.TLSConfig{
+					Insecure: true,
+				},
+				StreamCount: 4,
+				Connect: config.ConnectTarget{
+					Address: "127.0.0.1",
+					Port:    12345,
+				},
 			},
 		},
 	}
@@ -274,22 +294,22 @@ func TestEndToEndTunnelWithQUICMockedAdapter(t *testing.T) {
 	logger.SetLevel("debug")
 
 	// Create and start client with mock adapter
-	cli, err := client.NewWithAdapter(logger, &clientConfig.TunnelConfig, clientAdapter, nil)
+	cli, err := client.NewWithAdapter(logger, &clientConfig.Adapter, &clientConfig.Tunnels[0], clientAdapter, nil)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
 	// Create and start server with mock adapter
-	srv, err := server.NewWithAdapter(logger, &serverConfig.TunnelConfig, serverAdapter, nil)
+	srv, err := server.NewWithAdapter(logger, serverConfig.Tunnels[0].Adapter, &serverConfig.Tunnels[0], serverAdapter, nil)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
-	if err := srv.Start(ctx, getServerQUICListenFunc(ctx, serverConfig)); err != nil {
+	if err := srv.Start(ctx, getServerQUICListenFunc(serverConfig)); err != nil {
 		t.Fatalf("Failed to start server: %v", err)
 	}
 
-	if err := cli.Start(ctx, getClientQUICDialFunc(ctx, clientConfig)); err != nil {
+	if err := cli.Start(ctx, getClientQUICDialFunc(clientConfig)); err != nil {
 		t.Fatalf("Failed to start client: %v", err)
 	}
 	// defer cli.Close()
@@ -331,9 +351,10 @@ func TestEndToEndTunnelWithQUICMockedAdapter(t *testing.T) {
 	}
 }
 
-func getClientQUICDialFunc(ctx context.Context, config *config.Config) func() (transport.Conn, error) {
-	return func() (transport.Conn, error) {
-		tlsConfig, err := createTLSConfig(config)
+func getClientQUICDialFunc(cfg *config.Config) func(ctx context.Context) (transport.Conn, error) {
+	tc := &cfg.Tunnels[0]
+	return func(ctx context.Context) (transport.Conn, error) {
+		tlsConfig, err := createTLSConfig(tc)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
@@ -341,7 +362,7 @@ func getClientQUICDialFunc(ctx context.Context, config *config.Config) func() (t
 		if err != nil {
 			return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
 		}
-		conn, err := endpoint.Dial(ctx, "udp", fmt.Sprintf("%s:%d", config.TunnelConfig.Target.Address, config.TunnelConfig.Target.Port), &quic.Config{TLSConfig: tlsConfig})
+		conn, err := endpoint.Dial(ctx, "udp", fmt.Sprintf("%s:%d", tc.Connect.Address, tc.Connect.Port), &quic.Config{TLSConfig: tlsConfig})
 		if err != nil {
 			return nil, fmt.Errorf("failed to establish QUIC connection: %w", err)
 		}
@@ -349,15 +370,16 @@ func getClientQUICDialFunc(ctx context.Context, config *config.Config) func() (t
 	}
 }
 
-func getServerQUICListenFunc(ctx context.Context, config *config.Config) func() (transport.Listener, error) {
-	return func() (transport.Listener, error) {
-		tlsConfig, err := createTLSConfig(config)
+func getServerQUICListenFunc(cfg *config.Config) func(ctx context.Context) (transport.Listener, error) {
+	tc := &cfg.Tunnels[0]
+	return func(ctx context.Context) (transport.Listener, error) {
+		tlsConfig, err := createTLSConfig(tc)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
 		endpoint, err := quic.Listen(
 			"udp",
-			fmt.Sprintf(":%d", config.TunnelConfig.Target.Port),
+			fmt.Sprintf("%s:%d", tc.Listen.Address, tc.Listen.Port),
 			&quic.Config{TLSConfig: tlsConfig},
 		)
 
@@ -368,9 +390,9 @@ func getServerQUICListenFunc(ctx context.Context, config *config.Config) func() 
 	}
 }
 
-func createTLSConfig(cfg *config.Config) (*tls.Config, error) {
+func createTLSConfig(tc *config.TunnelConfig) (*tls.Config, error) {
 	tlsCfg := &tls.Config{
-		InsecureSkipVerify: cfg.TunnelConfig.TLSConfig.Insecure,
+		InsecureSkipVerify: tc.TLSConfig.Insecure,
 		MinVersion:         tls.VersionTLS13,
 		CipherSuites: []uint16{
 			tls.TLS_AES_128_GCM_SHA256,
@@ -382,8 +404,8 @@ func createTLSConfig(cfg *config.Config) (*tls.Config, error) {
 		},
 	}
 
-	if cfg.TunnelConfig.TLSConfig.CertFile != "" {
-		cert, err := tls.LoadX509KeyPair(cfg.TunnelConfig.TLSConfig.CertFile, cfg.TunnelConfig.TLSConfig.KeyFile)
+	if tc.TLSConfig.CertFile != "" {
+		cert, err := tls.LoadX509KeyPair(tc.TLSConfig.CertFile, tc.TLSConfig.KeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load TLS certificate: %w", err)
 		}

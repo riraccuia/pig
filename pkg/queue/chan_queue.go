@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Package queue provides queue implementations for packet buffering and management.
 package queue
 
@@ -10,11 +24,11 @@ import (
 // ChanQueue implements a channel-based queue with WRED support for IPv4 packets.
 // It provides congestion control through WRED and probabilistic packet dropping.
 type ChanQueue struct {
-	wred      *wred.WRED              // WRED instance for congestion management
-	threshold int                     // Queue length threshold for drop decisions
-	ct        *drand.CondensedTable   // Probability table for drop decisions
-	size      int                     // Queue size
-	C         chan network.IPv4Packet // Channel for packet buffering
+	wred      *wred.WRED            // WRED instance for congestion management
+	threshold int                   // Queue length threshold for drop decisions
+	ct        *drand.CondensedTable // Probability table for drop decisions
+	size      int                   // Queue size
+	C         chan network.IPPacket // Channel for packet buffering
 }
 
 // NewChanQueue creates a new channel-based queue with the specified length.
@@ -26,7 +40,7 @@ type ChanQueue struct {
 //   - *ChanQueue: A new queue instance
 func NewChanQueue(size int) *ChanQueue {
 	return &ChanQueue{
-		C:    make(chan network.IPv4Packet, size),
+		C:    make(chan network.IPPacket, size),
 		size: size,
 	}
 }
@@ -43,7 +57,8 @@ func NewChanQueue(size int) *ChanQueue {
 func (q *ChanQueue) WithWRED(wred *wred.WRED, dropProbability, threshold float64) *ChanQueue {
 	q.wred = wred
 	q.threshold = int(threshold * float64(q.size))
-	q.ct = drand.NewCondensedTable([]string{"drop", "pass"}, []float64{dropProbability, 1 - dropProbability})
+	// 0: drop, 1: pass
+	q.ct = drand.NewCondensedTable([]any{0, 1}, []float64{dropProbability, 1 - dropProbability})
 	return q
 }
 
@@ -70,7 +85,7 @@ func (q *ChanQueue) IsDrop() bool {
 		return false
 	}
 	if q.Len() > q.threshold {
-		return q.ct.Sample() == "drop"
+		return q.ct.Sample() == 0
 	}
 	return false
 }

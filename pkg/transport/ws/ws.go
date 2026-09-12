@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package ws
 
 import (
@@ -30,11 +44,11 @@ func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Tunnel
 	return tr, nil
 }
 
-func GetClientDialFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Conn, error) {
-	return func() (transport.Conn, error) {
+func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func(ctx context.Context) (transport.Conn, error) {
+	return func(ctx context.Context) (transport.Conn, error) {
 		conn, err := Dial(
 			ctx,
-			fmt.Sprintf("%s:%d", config.Target.Address, config.Target.Port),
+			fmt.Sprintf("%s:%d", config.Connect.Address, config.Connect.Port),
 			tlsConfig,
 		)
 		if err != nil {
@@ -44,13 +58,13 @@ func GetClientDialFunc(ctx context.Context, logger common.Logger, config *config
 	}
 }
 
-func GetServerListenFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Listener, error) {
-	return func() (transport.Listener, error) {
+func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func(ctx context.Context) (transport.Listener, error) {
+	return func(ctx context.Context) (transport.Listener, error) {
 		tr := NewWSListener(ctx)
 		go func() {
 			err := tr.Listen(
 				"ws",
-				fmt.Sprintf(":%d", config.Target.Port),
+				fmt.Sprintf("%s:%d", config.Listen.Address, config.Listen.Port),
 				tlsConfig.Clone(),
 			)
 			if err != nil && err != http.ErrServerClosed {
@@ -61,12 +75,12 @@ func GetServerListenFunc(ctx context.Context, logger common.Logger, config *conf
 	}
 }
 
-// NewHTTPSClient creates a new HTTPS client that uses a TCP connection
+// NewHTTPSClient creates a new HTTPS client that uses a TCP connection.
 func NewHTTPSClient(conn net.Conn, tlsConfig *tls.Config) *http.Client {
 	return newHTTPClient(conn, tlsConfig)
 }
 
-// NewHTTPClient creates a new HTTP client that uses a TCP connection
+// NewHTTPClient creates a new HTTP client that uses a TCP connection.
 func NewHTTPClient(conn net.Conn) *http.Client {
 	return newHTTPClient(conn, nil)
 }

@@ -1,126 +1,185 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package stun
 
 import (
 	"context"
+	"crypto/tls"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
 	"runtime"
 	"sync"
-
-	"github.com/riraccuia/pig/pkg/common"
-	"github.com/riraccuia/pig/pkg/network"
 )
 
+// Server represents a STUN server.
+// It listens on a given address and handles STUN requests.
+// It's backed by a worker pool to process requests more efficiently.
+// Callers must use the Listen method to start the server and the Close method to stop it.
 type Server struct {
-	logger     common.Logger
+	config     *ServerConfig
 	workerPool *serverWorkerPool
 	listener   io.Closer
-	bufPool    *sync.Pool
 }
 
-func NewServer(logger common.Logger, listenAddr net.Addr) (*Server, error) {
-	return newServer(context.Background(), logger, listenAddr)
+// ServerConfig is the configuration for a STUN server.
+type ServerConfig struct {
+	Logger LoggerFunc
+	// TLS configuration for the STUN server
+	TLSConfig *tls.Config
+	// Number of workers that the STUN server will spawn to process requests
+	// When 0, the number of workers will be set to the number of CPU cores
+	Workers int
+	// Function that will be used to get a buffer from the buffer pool
+	// When nil, memory will be allocated on the fly
+	GetBufferFunc func() []byte
+	// Function that will be used to put a buffer back into the buffer pool
+	// When nil, the buffer will be discarded
+	PutBufferFunc func([]byte)
+	// Function that will be used to listen on UDP, this is particularly useful for custom listeners like QUIC or DTLS,
+	// or where specific network configuration is required (e.g. reuseaddr, reuseport, etc.).
+	// When nil, the default UDP listener will be used (net.ListenUDP).
+	UDPListenFunc func(network string, listenAddr *net.UDPAddr) (*net.UDPConn, error)
+	// Function that will be used to listen on TCP, this is particularly useful for custom listeners,
+	// or where specific network configuration is required (e.g. reuseaddr, reuseport, etc.).
+	// When nil, the default TCP listener will be used (net.ListenTCP).
+	TCPListenFunc func(network string, listenAddr *net.TCPAddr) (*net.TCPListener, error)
 }
 
-func NewServerWithContext(ctx context.Context, logger common.Logger, listenAddr net.Addr) (*Server, error) {
-	return newServer(ctx, logger, listenAddr)
-}
-
-// stunListenMode listens for STUN requests on the specified protocol, address and port.
-func newServer(ctx context.Context, logger common.Logger, listenAddr net.Addr) (*Server, error) {
-	var (
-		workerPool *serverWorkerPool
-		listener   io.Closer
-		err        error
-	)
-
-	if listenAddr == nil {
-		logger.Fatalf("STUN listen address is required")
+// NewServer creates a new STUN server instance with the given configuration.
+func NewServer(config *ServerConfig) (*Server, error) {
+	if config == nil {
+		return nil, fmt.Errorf("STUN server config is required")
 	}
 
-	// Create and start worker pool (defaults to number of CPU cores)
-	workerPool = newServerWorkerPool(0, logger)
-	workerPool.Start(ctx)
+	if config.UDPListenFunc == nil {
+		config.UDPListenFunc = net.ListenUDP
+	}
+
+	if config.TCPListenFunc == nil {
+		config.TCPListenFunc = net.ListenTCP
+	}
 
 	s := &Server{
-		logger:     logger,
-		workerPool: workerPool,
+		config: config,
 	}
-
-	switch listenAddr.Network() {
-	case "udp":
-		listener, err = s.stunListenUDP(listenAddr.(*net.UDPAddr))
-		if err != nil {
-			logger.Fatalf("Failed to listen on STUN listen address: %v", err)
-		}
-	case "tcp":
-		listener, err = s.stunListenTCP(listenAddr.(*net.TCPAddr))
-		if err != nil {
-			logger.Fatalf("Failed to listen on STUN listen address: %v", err)
-		}
-	default:
-		logger.Fatalf("Unsupported STUN protocol for listen: %s", listenAddr.Network())
-	}
-
-	s.listener = listener
-
-	logger.Infof("STUN server listening on %s %s", listenAddr.Network(), listenAddr.String())
-
+	s.workerPool = newServerWorkerPool(s, config.Workers)
 	return s, nil
 }
 
-func (s *Server) WithBufPool(bufPool *sync.Pool) *Server {
-	s.bufPool = bufPool
-	return s
+func (s *Server) logger() LoggerFunc {
+	if s.config.Logger == nil {
+		return func(level string, args ...any) {}
+	}
+	return s.config.Logger
 }
 
-func (s *Server) GetBuffer() []byte {
-	if s.bufPool != nil {
-		return *s.bufPool.Get().(*[]byte)
+func (s *Server) getBuffer() []byte {
+	if s.config.GetBufferFunc != nil {
+		return s.config.GetBufferFunc()
 	}
 	return make([]byte, 1024)
 }
 
-func (s *Server) PutBuffer(buf []byte) {
-	if s.bufPool != nil {
-		s.bufPool.Put(&buf)
+func (s *Server) putBuffer(buf []byte) {
+	if s.config.PutBufferFunc != nil {
+		s.config.PutBufferFunc(buf[:cap(buf)])
 	}
 }
 
+// Close closes the STUN server and frees up resources.
 func (s *Server) Close() error {
+	var err error
 	s.workerPool.Stop()
+	listener := s.listener
 	if s.listener != nil {
-		return s.listener.Close()
+		err = listener.Close()
+		if err != nil {
+			err = fmt.Errorf("failed to close STUN listener: %w", err)
+		}
+		s.listener = nil
 	}
-	return nil
+	return err
 }
 
+// WaitClose waits for the worker pool to finish processing all work items after the server is closed.
 func (s *Server) WaitClose() {
 	s.workerPool.workerWg.Wait()
 }
 
+// Listen starts the STUN server and listens on the given address.
+func (s *Server) Listen(ctx context.Context, listenAddr net.Addr) error {
+	return s.listen(ctx, listenAddr)
+}
+
+// listen starts the STUN server and listens on the given address.
+func (s *Server) listen(ctx context.Context, listenAddr net.Addr) error {
+	if s.listener != nil {
+		return nil
+	}
+	s.workerPool.Start(ctx)
+
+	var (
+		listener io.Closer
+		err      error
+	)
+	switch listenAddr.Network() {
+	case "udp":
+		listener, err = s.stunListenUDP(listenAddr.(*net.UDPAddr))
+		if err != nil {
+			s.logger()("fatal", fmt.Sprintf("Failed to listen on STUN listen address: %v", err))
+		}
+	case "tcp":
+		listener, err = s.stunListenTCP(listenAddr.(*net.TCPAddr))
+		if err != nil {
+			s.logger()("fatal", fmt.Sprintf("Failed to listen on STUN listen address: %v", err))
+		}
+	default:
+		s.logger()("fatal", fmt.Sprintf("Unsupported STUN protocol for listen: %s", listenAddr.Network()))
+	}
+
+	s.listener = listener
+
+	s.logger()("info", fmt.Sprintf("STUN server listening on %s %s", listenAddr.Network(), listenAddr.String()))
+
+	return nil
+}
+
 func (s *Server) stunListenUDP(listenAddr *net.UDPAddr) (*net.UDPConn, error) {
-	listener, err := network.ListenUDP("udp", listenAddr)
+	//listener, err := network.ListenUDP("udp", listenAddr)
+	listener, err := s.config.UDPListenFunc("udp", listenAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on STUN listen address: %w", err)
 	}
 
 	go func() {
 		for {
-			readBuffer := s.GetBuffer()
+			readBuffer := s.getBuffer()
 			n, addr, err := listener.ReadFromUDP(readBuffer)
 			if err != nil {
-				s.logger.Errorf("STUN: Failed to read from %s: %v", listenAddr, err)
+				s.logger()("error", fmt.Sprintf("STUN: Failed to read from %s: %v", listenAddr, err))
 				return
 			}
 
-			s.logger.Infof("STUN: Received %d bytes from %s", n, addr)
+			s.logger()("info", fmt.Sprintf("STUN: Received %d bytes from %s", n, addr))
 
 			// Create write function for UDP
 			writeFn := func(data []byte) error {
 				_, err := listener.WriteToUDP(data, addr)
-				s.PutBuffer(data)
+				s.putBuffer(data)
 				return err
 			}
 
@@ -139,8 +198,8 @@ func (s *Server) stunListenUDP(listenAddr *net.UDPAddr) (*net.UDPConn, error) {
 	return listener, nil
 }
 
-func (s *Server) stunListenTCP(listenAddr *net.TCPAddr) (*net.TCPListener, error) {
-	listener, err := net.ListenTCP("tcp", listenAddr)
+func (s *Server) stunListenTCP(listenAddr *net.TCPAddr) (net.Listener, error) {
+	listener, err := s.getTCPListener(listenAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on STUN listen address: %w", err)
 	}
@@ -149,24 +208,38 @@ func (s *Server) stunListenTCP(listenAddr *net.TCPAddr) (*net.TCPListener, error
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
-				s.logger.Errorf("STUN: Failed to accept from %s: %v", listener.Addr(), err)
+				s.logger()("error", fmt.Sprintf("STUN: Failed to accept from %s: %v", listener.Addr(), err))
 				return
 			}
 
-			readBuffer := s.GetBuffer()
-			n, err := conn.Read(readBuffer)
+			readBuffer := s.getBuffer()
+			n, err := io.ReadFull(conn, readBuffer[:20])
 			if err != nil {
-				s.logger.Errorf("STUN: Failed to read from %s: %v", conn.RemoteAddr(), err)
-				return
+				s.logger()("error", fmt.Sprintf("STUN: Failed to read from %s: %v", conn.RemoteAddr(), err))
+				continue
 			}
 
-			s.logger.Infof("STUN: Received %d bytes from %s", n, conn.RemoteAddr())
+			msgLen := binary.BigEndian.Uint16(readBuffer[2:4])
+			if msgLen > uint16(len(readBuffer)-20) {
+				s.logger()("error", fmt.Sprintf("STUN: Message too long from %s: %d bytes", conn.RemoteAddr(), msgLen))
+				continue
+			}
+
+			n, err = io.ReadFull(conn, readBuffer[20:20+msgLen])
+			if err != nil {
+				s.logger()("error", fmt.Sprintf("STUN: Failed to read from %s: %v", conn.RemoteAddr(), err))
+				continue
+			}
+
+			n += 20
+
+			s.logger()("info", fmt.Sprintf("STUN: Received %d bytes from %s", n, conn.RemoteAddr()))
 
 			// Create write function for TCP
 			writeFn := func(data []byte) error {
 				_, err := conn.Write(data)
 				conn.Close()
-				s.PutBuffer(data)
+				s.putBuffer(data)
 				return err
 			}
 
@@ -185,7 +258,20 @@ func (s *Server) stunListenTCP(listenAddr *net.TCPAddr) (*net.TCPListener, error
 	return listener, nil
 }
 
-// serverWorkerPoolItem represents work to be processed by worker goroutines
+// getTCPListener returns a TCP listener for the given address and TLS configuration.
+func (s *Server) getTCPListener(listenAddr net.Addr) (net.Listener, error) {
+	listener, err := s.config.TCPListenFunc("tcp", listenAddr.(*net.TCPAddr))
+	if err != nil {
+		return nil, fmt.Errorf("failed to listen on STUN listen address: %w", err)
+	}
+	if s.config.TLSConfig == nil {
+		return listener, nil
+	}
+	// create the TLS listener using the existing TCP listener
+	return tls.NewListener(listener, s.config.TLSConfig.Clone()), nil
+}
+
+// serverWorkerPoolItem represents work to be processed by worker goroutines.
 type serverWorkerPoolItem struct {
 	DataBuf    []byte             // Raw bytes received
 	DataLen    int                // Length of the data
@@ -193,31 +279,31 @@ type serverWorkerPoolItem struct {
 	WriteFn    func([]byte) error // Function to write response back
 }
 
-// serverWorkerPool manages a pool of workers to process STUN requests
+// serverWorkerPool manages a pool of workers to process STUN requests.
 type serverWorkerPool struct {
+	parent     *Server
 	workChan   chan serverWorkerPoolItem
 	workerWg   sync.WaitGroup
 	cancel     context.CancelFunc
-	logger     common.Logger
 	numWorkers int
 }
 
-// newServerWorkerPool creates a new worker pool with the specified number of workers
-func newServerWorkerPool(numWorkers int, logger common.Logger) *serverWorkerPool {
+// newServerWorkerPool creates a new worker pool with the specified number of workers.
+func newServerWorkerPool(parent *Server, numWorkers int) *serverWorkerPool {
 	if numWorkers <= 0 {
 		numWorkers = runtime.NumCPU()
 	}
 
 	return &serverWorkerPool{
+		parent:     parent,
 		workChan:   make(chan serverWorkerPoolItem, numWorkers*2), // Buffer for better throughput
-		logger:     logger,
 		numWorkers: numWorkers,
 	}
 }
 
-// Start begins processing work items with the configured number of workers
+// Start begins processing work items with the configured number of workers.
 func (wp *serverWorkerPool) Start(ctx context.Context) {
-	wp.logger.Infof("STUN: Starting worker pool with %d workers", wp.numWorkers)
+	wp.parent.logger()("info", fmt.Sprintf("STUN: Starting worker pool with %d workers", wp.numWorkers))
 
 	_, cancel := context.WithCancel(ctx)
 	wp.cancel = cancel
@@ -228,38 +314,38 @@ func (wp *serverWorkerPool) Start(ctx context.Context) {
 	}
 }
 
-// Stop gracefully shuts down the worker pool
+// Stop gracefully shuts down the worker pool.
 func (wp *serverWorkerPool) Stop() {
-	wp.logger.Info("STUN: Stopping worker pool...")
+	wp.parent.logger()("info", "STUN: Stopping worker pool...")
 	wp.cancel()
 	//close(wp.workChan)
 	wp.workerWg.Wait()
-	wp.logger.Info("STUN: Worker pool stopped")
+	wp.parent.logger()("info", "STUN: Worker pool stopped")
 }
 
-// Submit adds a work item to the queue
+// Submit adds a work item to the queue.
 func (wp *serverWorkerPool) Submit(item serverWorkerPoolItem) {
 	select {
 	case wp.workChan <- item:
 		// Work submitted successfully
 	default:
 		// Channel is full, log and drop
-		wp.logger.Error("STUN: Worker queue full, dropping work item")
+		wp.parent.logger()("error", "STUN: Worker queue full, dropping work item")
 	}
 }
 
-// worker processes work items from the channel
+// worker processes work items from the channel.
 func (wp *serverWorkerPool) worker(ctx context.Context, id int) {
 	defer wp.workerWg.Done()
 
 	for {
 		select {
 		case <-ctx.Done():
-			wp.logger.Debugf("STUN: Worker %d shutting down", id)
+			wp.parent.logger()("debug", fmt.Sprintf("STUN: Worker %d shutting down", id))
 			return
 		case item, ok := <-wp.workChan:
 			if !ok {
-				wp.logger.Debugf("STUN: Worker %d: work channel closed", id)
+				wp.parent.logger()("debug", fmt.Sprintf("STUN: Worker %d: work channel closed", id))
 				return
 			}
 			wp.processWorkItem(id, item)
@@ -267,22 +353,36 @@ func (wp *serverWorkerPool) worker(ctx context.Context, id int) {
 	}
 }
 
-// processWorkItem handles a single STUN request
+// processWorkItem handles a single STUN request.
 func (wp *serverWorkerPool) processWorkItem(workerID int, item serverWorkerPoolItem) {
-	wp.logger.Debugf("STUN: Worker %d processing %d bytes from %s", workerID, len(item.DataBuf), item.RemoteAddr)
+	wp.parent.logger()("debug", fmt.Sprintf("STUN: Worker %d processing %d bytes from %s", workerID, len(item.DataBuf), item.RemoteAddr))
 
 	// Process the STUN request
-	response, err := processStunRequestBytes(item.DataBuf[:item.DataLen], item.RemoteAddr)
+	message, err := DecodeMessage(item.DataBuf[:item.DataLen])
 	if err != nil {
-		wp.logger.Errorf("STUN: Worker %d failed to process request from %s: %v", workerID, item.RemoteAddr, err)
+		wp.parent.logger()("error", fmt.Sprintf("STUN: Worker %d failed to parse request from %s: %v", workerID, item.RemoteAddr, err))
+		return
+	}
+
+	response, err := ProcessBindingRequest(message, item.RemoteAddr, nil, &BindingOptions{
+		RequireFingerprint: true,
+	})
+	if err != nil {
+		wp.parent.logger()("error", fmt.Sprintf("STUN: Worker %d failed to process request from %s: %v", workerID, item.RemoteAddr, err))
 		return
 	}
 
 	// Write the response back
-	if err := item.WriteFn(response.Raw); err != nil {
-		wp.logger.Errorf("STUN: Worker %d failed to write response to %s: %v", workerID, item.RemoteAddr, err)
+	raw := NewBuffer(wp.parent.getBuffer())
+	raw.Reset()
+	if err := response.SerializeTo(raw); err != nil {
+		wp.parent.logger()("error", fmt.Sprintf("STUN: Worker %d failed to serialize response: %v", workerID, err))
+		return
+	}
+	if err := item.WriteFn(raw.Bytes()); err != nil {
+		wp.parent.logger()("error", fmt.Sprintf("STUN: Worker %d failed to write response to %s: %v", workerID, item.RemoteAddr, err))
 		return
 	}
 
-	wp.logger.Infof("STUN: Worker %d successfully processed request from %s", workerID, item.RemoteAddr)
+	wp.parent.logger()("info", fmt.Sprintf("STUN: Worker %d successfully processed request from %s", workerID, item.RemoteAddr))
 }

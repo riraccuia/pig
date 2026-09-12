@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package icmp
 
 import (
@@ -14,7 +28,7 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-// Conn implements both transport.Conn and net.Conn interfaces
+// Conn implements both transport.Conn and net.Conn interfaces.
 type Conn struct {
 	emss       uint32
 	wantType   ipv4.ICMPType
@@ -26,17 +40,17 @@ type Conn struct {
 	writeBuf   *buffer
 	ctx        context.Context
 	cancel     context.CancelFunc
-	// For tracking ICMP identifiers and sequence numbers
+	// For tracking ICMP identifiers and sequence numbers.
 	icmpID      uint16
 	nextIcmpSeq atomic.Uint32
 	recvIcmpSeq atomic.Uint32
 	// For RTT tracking
-	rtt    atomic.Int64 // Stores nanoseconds
+	rtt    atomic.Int64 // Stores nanoseconds.
 	rttvar atomic.Int64
 	rtoSeq atomic.Value
 	// for congestion control, fast retransmit,
 	// fast recovery, etc.
-	// NewReno algorithm
+	// NewReno algorithm.
 	rq, ooq          *RetransmitQueue
 	retransmit       atomic.Bool
 	recovery         atomic.Bool
@@ -70,7 +84,7 @@ func Dial(ctx context.Context, logger common.Logger, bindAdapter, targetAddr str
 	return dial(ctx, logger, bindAdapter, targetAddr, icmpID, isServer)
 }
 
-// dial creates a new client connection to a target address
+// dial creates a new client connection to a target address.
 func dial(ctx context.Context, logger common.Logger, bindAdapter, targetAddr string, icmpID uint16, isServer bool) (transport.Conn, error) {
 	/*var (
 		sharedListener *sharedListener
@@ -113,7 +127,7 @@ func dial(ctx context.Context, logger common.Logger, bindAdapter, targetAddr str
 	return conn, nil
 }
 
-// newConnection creates a new connection with shared read/write loops
+// newConnection creates a new connection with shared read/write loops.
 func newConnection(ctx context.Context, listener *sharedListener, remoteAddr *net.IPAddr, icmpID uint16) *Conn {
 	connCtx, cancel := context.WithCancel(ctx)
 
@@ -151,7 +165,7 @@ func newConnection(ctx context.Context, listener *sharedListener, remoteAddr *ne
 	return c
 }
 
-// Connection interface implementation
+// Connection interface implementation.
 func (c *Conn) IsStreamed() bool {
 	return false
 }
@@ -216,7 +230,7 @@ func (c *Conn) SetWriteDeadline(t time.Time) error {
 	return c.writeBuf.SetWriteDeadline(t)
 }
 
-// readLoop handles incoming data from the connection's incoming channel
+// readLoop handles incoming data from the connection's incoming channel.
 func (c *Conn) readLoop() {
 	for {
 		select {
@@ -264,7 +278,7 @@ func (c *Conn) readLoop() {
 	}
 }
 
-// writeLoop handles outgoing data and sends it through the shared listener
+// writeLoop handles outgoing data and sends it through the shared listener.
 func (c *Conn) writeLoop() {
 	for {
 		select {
@@ -306,7 +320,7 @@ func (c *Conn) writeLoop() {
 	}
 }
 
-// processICMPPacket handles the processing of a raw ICMP packet
+// processICMPPacket handles the processing of a raw ICMP packet.
 func (c *Conn) processICMPPacket(packet *Packet) error {
 	if packet.IcmpType != c.wantType {
 		c.listener.logger.Errorf("received unexpected icmp packet, %s", packet.IcmpPacket())

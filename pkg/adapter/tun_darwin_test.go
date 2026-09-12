@@ -1,5 +1,4 @@
-//go:build darwin
-// +build darwin
+//go:build darwin && manual
 
 package adapter
 
@@ -8,6 +7,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestTUNAdapterCreation(t *testing.T) {
@@ -17,7 +18,7 @@ func TestTUNAdapterCreation(t *testing.T) {
 
 	// Create a new adapter with test configuration
 	config := AdapterConfig{
-		Address: "10.0.0.1/28",
+		Address: []string{"10.0.0.1/28"},
 		MTU:     1300,
 	}
 
@@ -62,4 +63,13 @@ func TestTUNAdapterCreation(t *testing.T) {
 	if !strings.Contains(outputStr, fmt.Sprintf("mtu %d", config.MTU)) {
 		t.Errorf("Expected MTU %d not found in adapter configuration", config.MTU)
 	}
+}
+
+func TestGetAdapterAddresses(t *testing.T) {
+	ip, ipNet, err := getAdapterAddress("en0", unix.AF_INET6)
+	if err != nil {
+		t.Fatalf("Failed to get adapter address: %v", err)
+	}
+	t.Log("Adapter address:", ip)
+	t.Log("Adapter IPNet:", ipNet)
 }

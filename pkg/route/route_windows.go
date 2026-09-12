@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //go:build windows
 // +build windows
 
@@ -7,33 +21,24 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"sync"
 	"unsafe"
 
 	"github.com/riraccuia/pig/pkg/bindings/win"
 	"golang.org/x/sys/windows"
 )
 
-type windowsManager struct {
-	trackedRoutesV4 sync.Map // map[string]*Route - key is route string representation
-	trackedRoutesV6 sync.Map // map[string]*Route - key is route string representation
+type windowsBackend struct {
 }
 
-// newManager constructs the Windows route manager.
-func newManager(ctx context.Context) (manager, error) {
-	return &windowsManager{}, nil
+func newBackend() (platformBackend, error) {
+	return &windowsBackend{}, nil
 }
 
-// trackedRoutesForRoute selects the tracking map by IP family.
-func (m *windowsManager) trackedRoutesForRoute(rt *Route) *sync.Map {
-	if rt.Is4() {
-		return &m.trackedRoutesV4
-	}
-	return &m.trackedRoutesV6
+func (b *windowsBackend) startWatch(ctx context.Context, onChange func(), routeTableV4, routeTableV6 *Table) error {
+	return nil
 }
 
-// AddRoute adds a static route using IP Helper (CreateIpForwardEntry2).
-func (m *windowsManager) AddRoute(route *Route) error {
+func (b *windowsBackend) applyRoute(route *Route) error {
 	if route == nil {
 		return fmt.Errorf("route is nil")
 	}
@@ -46,16 +51,7 @@ func (m *windowsManager) AddRoute(route *Route) error {
 		err error
 	)
 
-	if route.Gateway == nil {
-		bestRoute, err := m.FindBestRoute(route.Destination.IP)
-		if err != nil {
-			return err
-		}
-		route.Gateway = bestRoute.Gateway
-		route.Interface = bestRoute.Interface
-	}
-
-	err = m.buildForwardRow(&row, route.Destination, route.Interface, route.Gateway, 0)
+	err = b.buildForwardRow(&row, route.Destination, route.Interface, route.Gateway, 0)
 	if err != nil {
 		return err
 	}
@@ -65,15 +61,10 @@ func (m *windowsManager) AddRoute(route *Route) error {
 		return err
 	}
 
-	// Track for cleanup.
-	trackedRoutes := m.trackedRoutesForRoute(route)
-	trackedRoutes.Store(route.String(), route)
-
 	return nil
 }
 
-// RemoveRoute removes a static route using IP Helper (DeleteIpForwardEntry2).
-func (m *windowsManager) RemoveRoute(route *Route) error {
+func (b *windowsBackend) deleteRoute(route *Route) error {
 	if route == nil {
 		return fmt.Errorf("route is nil")
 	}
@@ -86,7 +77,7 @@ func (m *windowsManager) RemoveRoute(route *Route) error {
 		err error
 	)
 
-	err = m.buildForwardRow(&row, route.Destination, route.Interface, route.Gateway, 0)
+	err = b.buildForwardRow(&row, route.Destination, route.Interface, route.Gateway, 0)
 	if err != nil {
 		return err
 	}
@@ -96,15 +87,18 @@ func (m *windowsManager) RemoveRoute(route *Route) error {
 		return err
 	}
 
-	// Remove from tracking.
-	trackedRoutes := m.trackedRoutesForRoute(route)
-	trackedRoutes.Delete(route.String())
-
 	return nil
 }
 
-// FindBestRoute queries Windows for the best route to the destination.
-func (m *windowsManager) FindBestRoute(dst net.IP) (*Route, error) {
+func (b *windowsBackend) loadRoutes() ([]*Route, error) {
+	return nil, nil
+}
+
+func (b *windowsBackend) close() error {
+	return nil
+}
+
+func (b *windowsBackend) findBestRoute(dst net.IP) (*Route, error) {
 	if dst == nil {
 		return nil, fmt.Errorf("destination IP is nil")
 	}
@@ -140,68 +134,7 @@ func (m *windowsManager) FindBestRoute(dst net.IP) (*Route, error) {
 	return rt, nil
 }
 
-func (m *windowsManager) GetRoutes() ([]*Route, error) {
-	return nil, nil
-}
-
-// GetDefaultGateway4 is not implemented for Windows yet.
-func (m *windowsManager) GetDefaultGateway4() net.IP {
-	return nil
-}
-
-// GetDefaultGateway6 is not implemented for Windows yet.
-func (m *windowsManager) GetDefaultGateway6() net.IP {
-	return nil
-}
-
-// WaitDefaultGateway returns a closed channel for now.
-func (m *windowsManager) WaitDefaultGateway(v4, v6 bool) <-chan struct{} {
-	ch := make(chan struct{})
-	close(ch)
-	return ch
-}
-
-// Cleanup removes all tracked routes.
-func (m *windowsManager) Cleanup() error {
-	var err error
-	e := m.cleanup(&m.trackedRoutesV4)
-	if e != nil {
-		err = wrapError(err, e, "failed to cleanup tracked routes v4")
-	}
-	e = m.cleanup(&m.trackedRoutesV6)
-	if e != nil {
-		err = wrapError(err, e, "failed to cleanup tracked routes v6")
-	}
-	return err
-}
-
-// cleanup removes all routes in the given tracking map.
-func (m *windowsManager) cleanup(trackedRoutes *sync.Map) error {
-	var routesToRemove []*Route
-	trackedRoutes.Range(func(key, value interface{}) bool {
-		rt, ok := value.(*Route)
-		if ok {
-			routesToRemove = append(routesToRemove, rt)
-		}
-		return true
-	})
-
-	var errReturn error
-	for _, rt := range routesToRemove {
-		err := m.RemoveRoute(rt)
-		if err != nil {
-			errReturn = wrapError(errReturn, err, fmt.Sprintf("failed to remove route %s", rt.String()))
-		}
-	}
-	return errReturn
-}
-
-func (m *windowsManager) Close() error {
-	return nil
-}
-
-// buildForwardRow fills a MibIpForwardRow2 using explicit parameters.
-func (m *windowsManager) buildForwardRow(row *windows.MibIpForwardRow2, destination *net.IPNet, ifaceName string, gateway net.IP, metric uint32) error {
+func (b *windowsBackend) buildForwardRow(row *windows.MibIpForwardRow2, destination *net.IPNet, ifaceName string, gateway net.IP, metric uint32) error {
 	var (
 		prefix  windows.IpAddressPrefix
 		nextHop windows.RawSockaddrInet

@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package server
 
 import (
@@ -8,7 +22,7 @@ import (
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-// acceptStreams handles incoming stream connections from the QUIC transport
+// acceptStreams handles incoming stream connections from the QUIC transport.
 func (s *Server) acceptStreams(ctx context.Context, client *ClientTunnel) {
 	for {
 		select {
@@ -37,10 +51,6 @@ func (s *Server) acceptStreams(ctx context.Context, client *ClientTunnel) {
 }
 
 func (s *Server) handleOutbound(ctx context.Context, client *ClientTunnel) {
-	/*defer func() {
-		s.ipPool.Release(client.sourceIP)
-		client.streams.CloseAll()
-	}()*/
 	if client.conn.IsStreamed() {
 		s.handleOutboundStream(ctx, client)
 		return
@@ -68,40 +78,35 @@ func (s *Server) handleOutboundConn(ctx context.Context, client *ClientTunnel) {
 		return nil
 	}
 
-	processPacket := func(pkt network.IPv4Packet) error {
+	processPacket := func(pkt network.IPPacket) error {
 		if client.outbound.IsDrop() {
 			client.dropLogger.Incr(1, uint64(pkt.TotalLength()))
-			s.bufferPool.Put(pkt)
+			s.bufferPool.Put(pkt.Bytes())
 			return nil
 		}
-		ipPkt := network.IPv4Packet(pkt)
-		totalLen := ipPkt.TotalLength()
-		if totalLen <= 0 || totalLen > len(pkt) {
+		totalLen := pkt.TotalLength()
+		if totalLen <= 0 || totalLen > len(pkt.Bytes()) {
 			s.logger.Debugf("outbound packet with invalid length: %d", totalLen)
-			s.bufferPool.Put(pkt)
+			s.bufferPool.Put(pkt.Bytes())
 			return nil
-		}
-
-		if client.sourceIP.Equal(ipPkt.DestinationIP()) {
-			ipPkt.Mark(network.DSCP_MARK_ADAPTER_DNAT)
 		}
 
 		// If adding this packet would exceed batch size, flush current batch first
 		if len(batch)+totalLen > maxBatchSize {
 			if err := writeBatch(); err != nil {
-				s.bufferPool.Put(pkt)
+				s.bufferPool.Put(pkt.Bytes())
 				return err
 			}
 		}
 
 		// Append packet to batch
-		batch = append(batch, pkt[:totalLen]...)
-		s.bufferPool.Put(pkt)
+		batch = append(batch, pkt.Bytes()[:totalLen]...)
+		s.bufferPool.Put(pkt.Bytes())
 
 		// If batch is full, write immediately
 		if len(batch) >= maxBatchSize {
 			if err := writeBatch(); err != nil {
-				s.bufferPool.Put(pkt)
+				s.bufferPool.Put(pkt.Bytes())
 				return err
 			}
 		}
@@ -151,29 +156,24 @@ func (s *Server) handleOutboundStream(ctx context.Context, client *ClientTunnel)
 			}
 			if client.outbound.IsDrop() {
 				client.dropLogger.Incr(1, uint64(pkt.TotalLength()))
-				s.bufferPool.Put(pkt)
+				s.bufferPool.Put(pkt.Bytes())
 				continue
 			}
-			ipPkt := network.IPv4Packet(pkt)
-			totalLen := ipPkt.TotalLength()
-			if totalLen <= 0 || totalLen > len(pkt) {
-				s.bufferPool.Put(pkt)
+			totalLen := pkt.TotalLength()
+			if totalLen <= 0 || totalLen > len(pkt.Bytes()) {
+				s.bufferPool.Put(pkt.Bytes())
 				continue
-			}
-
-			if client.sourceIP.Equal(ipPkt.DestinationIP()) {
-				ipPkt.Mark(network.DSCP_MARK_ADAPTER_DNAT)
 			}
 
 			stream := client.streams.SelectByIPAndPort(pkt.SourceIP(), pkt.SourcePort())
 			if stream == nil {
 				s.logger.Infof("no stream found for client %s", client.conn.RemoteAddr())
-				s.bufferPool.Put(pkt)
+				s.bufferPool.Put(pkt.Bytes())
 				continue
 			}
-			_, err := stream.Write(pkt[:totalLen])
+			_, err := stream.Write(pkt.Bytes()[:totalLen])
 			stream.Flush()
-			s.bufferPool.Put(pkt)
+			s.bufferPool.Put(pkt.Bytes())
 			if err != nil {
 				return
 			}
@@ -184,7 +184,6 @@ func (s *Server) handleOutboundStream(ctx context.Context, client *ClientTunnel)
 func (s *Server) handleStream(client *ClientTunnel, stream transport.Stream) {
 	defer func() {
 		client.streams.Remove(stream)
-		//go s.reconnectStream(client)
 		stream.Close()
 	}()
 	s.handleInbound(client, stream)

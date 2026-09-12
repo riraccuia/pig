@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package controller
 
 import (
@@ -8,7 +22,7 @@ import (
 	"github.com/riraccuia/pig/pkg/config"
 )
 
-func (c *Controller) createTLSConfig(mode config.Mode, cfg *config.TunnelConfig) (*tls.Config, error) {
+func (c *Controller) createTLSConfig(direction config.TunnelDirection, cfg *config.TunnelConfig) (*tls.Config, error) {
 	tlsCfg := &tls.Config{
 		InsecureSkipVerify: cfg.TLSConfig.Insecure,
 		MinVersion:         tls.VersionTLS13,
@@ -22,12 +36,12 @@ func (c *Controller) createTLSConfig(mode config.Mode, cfg *config.TunnelConfig)
 		},
 	}
 
-	err := c.configureMTLS(mode, cfg.Auth, tlsCfg)
+	err := c.configureMTLS(direction, cfg.Auth, tlsCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure MTLS: %w", err)
 	}
 
-	if mode == config.ModeClient {
+	if direction == config.TunnelDirectionConnect {
 		return tlsCfg, nil
 	}
 

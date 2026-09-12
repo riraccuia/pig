@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package quicgo
 
 import (
@@ -15,15 +29,15 @@ import (
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-func GetClientDialFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Conn, error) {
-	return dialFuncWithSrcPort(ctx, logger, config.Target.Address, config.Target.SrcPort, config.Target.Port, tlsConfig)
+func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func(ctx context.Context) (transport.Conn, error) {
+	return dialFuncWithSrcPort(logger, config.Connect.Address, config.Connect.SrcPort, config.Connect.Port, tlsConfig)
 }
 
-func GetServerListenFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Listener, error) {
-	return func() (transport.Listener, error) {
+func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func(ctx context.Context) (transport.Listener, error) {
+	return func(ctx context.Context) (transport.Listener, error) {
 		var (
 			udpConn      *net.UDPConn
-			listenerAddr = &net.UDPAddr{IP: nil, Port: config.Target.Port}
+			listenerAddr = &net.UDPAddr{IP: net.ParseIP(config.Listen.Address), Port: config.Listen.Port}
 			err          error
 		)
 		udpConn, err = network.ListenUDP("udp", listenerAddr)
@@ -103,8 +117,8 @@ func dialFuncDefault(ctx context.Context, address string, dstPort int, tlsConfig
 	}
 }
 
-func dialFuncWithSrcPort(ctx context.Context, logger common.Logger, address string, srcPort, dstPort int, tlsConfig *tls.Config) func() (transport.Conn, error) {
-	return func() (transport.Conn, error) {
+func dialFuncWithSrcPort(logger common.Logger, address string, srcPort, dstPort int, tlsConfig *tls.Config) func(ctx context.Context) (transport.Conn, error) {
+	return func(ctx context.Context) (transport.Conn, error) {
 		var (
 			udpConn *net.UDPConn
 			udpAddr *net.UDPAddr

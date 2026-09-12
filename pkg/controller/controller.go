@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package controller
 
 import (
@@ -5,12 +19,15 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
+	"github.com/riraccuia/pig/pkg/demux"
 	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/route"
 	"github.com/riraccuia/pig/pkg/script"
@@ -22,8 +39,14 @@ type Controller struct {
 	logger         common.Logger
 	ctx            context.Context
 	cancel         context.CancelCauseFunc
-	routeManager   *route.Manager
+	routeManager   route.Manager
 	scriptExecutor *script.Executor
+	clientAdapter  common.TunnelAdapter
+	demux          *demux.Demux
+	routeRequests  chan routeRequest
+	tunnels        *sync.Map
+	adapters       *sync.Map
+	bufferPool     common.BufferPool
 }
 
 type Waiter interface {
@@ -41,6 +64,9 @@ func New(ctx context.Context) *Controller {
 		ctx:          iCtx,
 		cancel:       cancel,
 		routeManager: routeManager,
+		tunnels:      &sync.Map{},
+		adapters:     &sync.Map{},
+		bufferPool:   common.DefaultBufferPool,
 	}
 }
 
@@ -51,6 +77,10 @@ func (c *Controller) WithLogger(logger common.Logger) *Controller {
 
 func (c *Controller) WithConfig(cfg *config.Config) *Controller {
 	c.cfg = cfg
+	if c.logger != nil {
+		return c
+	}
+	c.setupLogger()
 	return c
 }
 
@@ -106,12 +136,47 @@ func (c *Controller) setupLogger() error {
 	return nil
 }
 
+func (c *Controller) createAdapter(cfg *config.AdapterConfig, multiQueue bool) (common.TunnelAdapter, error) {
+	adapterCfg := adapter.AdapterConfig{
+		Address:    cfg.TunnelAddress,
+		MTU:        cfg.MTU,
+		MultiQueue: multiQueue && runtime.GOOS == "linux",
+	}
+	a, err := adapter.NewAdapter(adapterCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create adapter: %w", err)
+	}
+	return a, nil
+}
+
 func (c *Controller) StartCallback(callback func(ctx context.Context)) {
 	c.Add(1)
 	go func() {
 		defer c.Done()
 		callback(c.ctx)
 	}()
+}
+
+func (c *Controller) Start() {
+	if c.cfg == nil {
+		c.logger.Fatal("config is not loaded")
+	}
+	if c.cfg.HasConnectTunnels() {
+		c.StartClient()
+	}
+	if c.cfg.HasListenTunnels() {
+		c.StartServer()
+	}
+}
+
+func tunnelsByDirection(cfg *config.Config, direction config.TunnelDirection) []*config.TunnelConfig {
+	tunnels := make([]*config.TunnelConfig, 0, len(cfg.Tunnels))
+	for i := range cfg.Tunnels {
+		if cfg.Tunnels[i].Direction == direction {
+			tunnels = append(tunnels, &cfg.Tunnels[i])
+		}
+	}
+	return tunnels
 }
 
 func (c *Controller) WaitClose() {

@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package server
 
 import (
@@ -47,7 +61,6 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 	unprocessed := buffer[:0]
 
 	for {
-		// inbound := s.getInboundPktQueue()
 		// Read more data
 		n, err := connOrStream.Read(buffer[len(unprocessed):])
 		if err != nil {
@@ -67,10 +80,16 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 		// Process complete packets
 		processed := 0
 		for processed+20 <= len(unprocessed) {
-			pkt := network.IPv4Packet(unprocessed[processed:])
-			totalLen := pkt.TotalLength()
+			var prePkt network.IPPacket
+			switch network.IPv4Packet(unprocessed[processed:]).Version() {
+			case 4:
+				prePkt = network.IPv4Packet(unprocessed[processed:])
+			case 6:
+				prePkt = network.IPv6Packet(unprocessed[processed:])
+			}
+			totalLen := prePkt.TotalLength()
 
-			if totalLen < 20 || totalLen > s.config.MTU {
+			if totalLen < 20 || totalLen > s.adapterCfg.MTU {
 				processed++
 				continue
 			}
@@ -80,24 +99,29 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 			}
 
 			// Get new packet from pool and copy data
-			newPkt := s.bufferPool.Get().(network.IPv4Packet)
-			copy(newPkt[:totalLen], unprocessed[processed:processed+totalLen])
+			buf := s.bufferPool.Get().([]byte)
+			copy(buf[:totalLen], unprocessed[processed:processed+totalLen])
 
-			switch newPkt.GetMark() {
-			case network.DSCP_MARK_MASQ_SNAT:
-				newPkt.SetSourceIP(client.sourceIP)
-			case network.DSCP_MARK_MASQ_DNAT:
-				newPkt.SetDestinationIP(client.sourceIP)
-			case network.DSCP_MARK_ADAPTER_DNAT:
-				newPkt.SetDestinationIP(s.adapter.IP())
+			var pkt network.IPPacket
+			switch prePkt.Version() {
+			case 4:
+				v4Pkt := network.IPv4Packet(buf[:])
+				v4Pkt.SetSourceIP(client.sourceIP)
+				pkt = v4Pkt
+			case 6:
+				v6Pkt := network.IPv6Packet(buf[:])
+				if client.sourceIP6 != nil {
+					v6Pkt.SetSourceIP(client.sourceIP6)
+				}
+				pkt = v6Pkt
 			}
-			newPkt.ClearMark()
-			newPkt.UpdateChecksum()
+
+			pkt.UpdateChecksum()
 
 			select {
-			case inbound <- newPkt:
+			case inbound <- pkt:
 			default:
-				s.bufferPool.Put(newPkt)
+				s.bufferPool.Put(buf)
 			}
 
 			processed += totalLen

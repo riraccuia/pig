@@ -1,6 +1,20 @@
 //go:build windows
 // +build windows
 
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package adapter
 
 import (
@@ -54,8 +68,8 @@ type MibIpinterfaceRow struct {
 	DisableDefaultRoutes                 uint8
 }
 
-// MibUnicastipaddressRow represents the Windows MIB_UNICASTIPADDRESS_ROW structure
-// It contains information about a unicast IP address assigned to an interface
+// MibUnicastipaddressRow represents the Windows MIB_UNICASTIPADDRESS_ROW structure.
+// It contains information about a unicast IP address assigned to an interface.
 // See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-mib_unicastipaddress_row
 type MibUnicastipaddressRow struct {
 	Address            [28]byte // SOCKADDR_INET
@@ -129,22 +143,19 @@ func configureWinTun(ifaceName string, config AdapterConfig) error {
 		return fmt.Errorf("configureWinTun: failed to get interface: %v", err)
 	}
 
-	// Parse IP and network
-	ip, ipNet, err := net.ParseCIDR(config.Address)
-	if err != nil {
-		return fmt.Errorf("configureWinTun: failed to parse address: %v", err)
-	}
+	for _, address := range config.Address {
+		// Parse IP and network
+		ip, ipNet, err := net.ParseCIDR(address)
+		if err != nil {
+			return fmt.Errorf("configureWinTun: failed to parse address: %v", err)
+		}
 
-	ipv4 := ip.To4()
-	if ipv4 == nil {
-		return fmt.Errorf("configureWinTun: invalid IPv4 address")
-	}
+		// Calculate prefix length from subnet mask
+		prefixLen, _ := ipNet.Mask.Size()
 
-	// Calculate prefix length from subnet mask
-	prefixLen, _ := ipNet.Mask.Size()
-
-	if err := setIPAddressUnicast(iface.Index, ipv4, uint8(prefixLen)); err != nil {
-		return fmt.Errorf("configureWinTun: %v", err)
+		if err := setIPAddressUnicast(iface.Index, ip, uint8(prefixLen)); err != nil {
+			return fmt.Errorf("configureWinTun: %v", err)
+		}
 	}
 
 	if err := setMTU(iface.Index, config.MTU); err != nil {
@@ -154,13 +165,13 @@ func configureWinTun(ifaceName string, config AdapterConfig) error {
 	return nil
 }
 
-// setIPAddressUnicast assigns an IPv4 address to a network interface using the CreateUnicastIpAddressEntry API.
+// setIPAddressUnicast assigns an IPv4 or IPv6 address to a network interface using the CreateUnicastIpAddressEntry API.
 // This is the modern replacement for the deprecated AddIPAddress function.
 //
 // Parameters:
 //   - ifIndex: The interface index to configure
-//   - ip: The IPv4 address to assign
-//   - prefixLength: The subnet prefix length (e.g., 24 for 255.255.255.0)
+//   - ip: The IPv4 or IPv6 address to assign
+//   - prefixLength: The subnet prefix length (e.g., 24 for 255.255.255.0 or 64 for ::/64)
 //
 // Returns:
 //   - error: nil if successful, otherwise an error describing what went wrong
@@ -179,11 +190,22 @@ func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
 	// Set the interface index
 	row.InterfaceIndex = uint32(ifIndex)
 
-	addr := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address[0]))
-	// Set the IP address family and value
-	addr.Family = windows.AF_INET
-	// Copy the IP address to the address buffer
-	copy(addr.Addr[:], ip)
+	switch {
+	case ip.To4() != nil:
+		addr := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address[0]))
+		// Set the IP address family and value
+		addr.Family = windows.AF_INET
+		// Copy the IP address to the address buffer
+		copy(addr.Addr[:], ip.To4())
+	case ip.To16() != nil:
+		addr := (*windows.RawSockaddrInet6)(unsafe.Pointer(&row.Address[0]))
+		// Set the IP address family and value
+		addr.Family = windows.AF_INET6
+		// Copy the IP address to the address buffer
+		copy(addr.Addr[:], ip.To16())
+	default:
+		return fmt.Errorf("setIPAddressUnicast: invalid IP address: %s", ip)
+	}
 
 	// Set the subnet prefix length
 	row.OnLinkPrefixLength = prefixLength

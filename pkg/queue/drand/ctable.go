@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package drand
 
 import (
@@ -5,14 +19,14 @@ import (
 	"sort"
 )
 
-// CondensedTable holds cumulative probabilities for fast sampling
+// CondensedTable holds cumulative probabilities for fast sampling.
 type CondensedTable struct {
-	outcomes []string
+	outcomes []any
 	cdf      []float64 // Cumulative distribution function values
 }
 
-// NewCondensedTable initializes the lookup table
-func NewCondensedTable(outcomes []string, probabilities []float64) *CondensedTable {
+// NewCondensedTable initializes the lookup table.
+func NewCondensedTable(outcomes []any, probabilities []float64) *CondensedTable {
 	n := len(outcomes)
 	cdf := make([]float64, n)
 
@@ -28,8 +42,8 @@ func NewCondensedTable(outcomes []string, probabilities []float64) *CondensedTab
 	return &CondensedTable{outcomes: outcomes, cdf: cdf}
 }
 
-// Sample draws an outcome using a precomputed CDF table
-func (ct *CondensedTable) Sample() string {
+// Sample draws an outcome using a precomputed CDF table.
+func (ct *CondensedTable) Sample() any {
 	r := rand.Float64()                     // Generate random number in [0,1)
 	index := sort.SearchFloat64s(ct.cdf, r) // Find the first index where r ≤ cdf[index]
 	return ct.outcomes[index]

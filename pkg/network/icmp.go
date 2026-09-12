@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package network
 
 import (
@@ -10,10 +24,9 @@ import (
 )
 
 // SendICMPv4TimeExceeded sends a ICMP time exceeded message to a remote address
-// using raw sockets, golang.org/x/net/icmp is used to send the message
-// localAddr is the local address of the sender
-// remoteAddr is the remote address of the receiver
-// eaddr is the address of the endpoint for the original packet embedded in the time exceeded message
+// using raw sockets, golang.org/x/net/icmp is used to send the message.
+// localAddr is the local address of the sender. remoteAddr is the remote address of the receiver.
+// eaddr is the address of the endpoint for the original packet embedded in the time exceeded message.
 func SendICMPv4TimeExceeded(localAddr, remoteAddr, eaddr net.IP) error {
 	// Create a raw ICMP socket
 	conn, err := net.ListenIP("ip4:icmp", nil)
@@ -70,7 +83,7 @@ func SendICMPv4TimeExceeded(localAddr, remoteAddr, eaddr net.IP) error {
 }
 
 // createFakeIPv4Datagram creates a fake IPv4 datagram with the specified source and destination IPs
-// carrying an ICMP echo request packet
+// carrying an ICMP echo request packet.
 func createFakeIPv4Datagram(srcIP, dstIP net.IP) []byte {
 	// IPv4 header (20 bytes) + ICMP echo request (8 bytes)
 	datagram := make([]byte, 20+8) // 20 bytes header + 8 bytes ICMP echo request

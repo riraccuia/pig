@@ -1,9 +1,34 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package route
 
 import (
-	"context"
+	"errors"
 	"fmt"
 	"net"
+)
+
+var (
+	ErrDirectlyConnected = errors.New("directly connected")
+)
+
+const (
+	// FamilyInet and FamilyInet6 identify route address families for the PATRICIA table.
+	// Values match unix.AF_INET / unix.AF_INET6 on Darwin and Linux.
+	FamilyInet  = 2
+	FamilyInet6 = 30
 )
 
 // Route represents a static route entry
@@ -15,11 +40,24 @@ type Route struct {
 }
 
 // Is4 returns true if the route is an IPv4 route
-func (r Route) Is4() bool {
+func (r *Route) Is4() bool {
 	return r.Destination.IP.To4() != nil
 }
 
-func (r Route) IsDirectlyConnected() bool {
+// Family returns the family of the route.
+// If the route is not IPv4 or IPv6, it returns -1.
+// Otherwise, the family is one of FamilyInet or FamilyInet6.
+func (r *Route) Family() int {
+	if r.Destination.IP.To4() != nil {
+		return FamilyInet
+	}
+	if r.Destination.IP.To16() != nil {
+		return FamilyInet6
+	}
+	return -1
+}
+
+func (r *Route) IsDirectlyConnected() bool {
 	if r.Gateway != nil && !r.Gateway.Equal(net.IPv4zero) && !r.Gateway.Equal(net.IPv6zero) {
 		return false
 	}
@@ -45,81 +83,5 @@ func (r *Route) ParseDestination(destCIDR string) error {
 		return fmt.Errorf("failed to parse destination CIDR: %w", err)
 	}
 	r.Destination = ipNet
-	return nil
-}
-
-type Manager struct {
-	manager
-}
-
-// manager handles static route operations
-type manager interface {
-	// GetRoutes returns all routes currently in the system
-	GetRoutes() ([]*Route, error)
-
-	// FindBestRoute finds the best route for a destination IP
-	FindBestRoute(dst net.IP) (*Route, error)
-
-	// AddRoute adds a static route
-	AddRoute(route *Route) error
-
-	// RemoveRoute removes a static route
-	RemoveRoute(route *Route) error
-
-	// Cleanup removes all routes added by this manager
-	Cleanup() error
-
-	// Close closes the manager and releases resources
-	Close() error
-
-	// GetDefaultGateway4 returns the IPv4 default gateway (nil if not set)
-	GetDefaultGateway4() net.IP
-
-	// GetDefaultGateway6 returns the IPv6 default gateway (nil if not set)
-	GetDefaultGateway6() net.IP
-
-	// WaitDefaultGateway waits for the default gateway to be set
-	WaitDefaultGateway(v4, v6 bool) <-chan struct{}
-}
-
-// AddRouteToBestRoute finds the best route for a destination IP and adds a static route to it
-func (m *Manager) AddRouteToBestRoute(destination *net.IPNet) error {
-	route, err := m.manager.FindBestRoute(destination.IP)
-	if err != nil {
-		return fmt.Errorf("failed to find best route for %s: %w", destination.IP.String(), err)
-	}
-	if route.IsDirectlyConnected() {
-		return fmt.Errorf("%s is directly connected via %s (%s)", destination.IP.String(), route.LinkAddr.String(), route.Interface)
-	}
-	if !route.HasGateway() {
-		return fmt.Errorf("cannot route %s: no suitable gateway found", destination.IP.String())
-	}
-	route.Destination = destination
-	err = m.manager.AddRoute(route)
-	if err != nil {
-		return fmt.Errorf("failed to add route for %s: %w", destination.String(), err)
-	}
-	return nil
-}
-
-// NewManager creates a new route manager for the current platform
-func NewManager(ctx context.Context) (*Manager, error) {
-	manager, err := newManager(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return &Manager{manager: manager}, nil
-}
-
-func wrapError(prev error, err error, label string) error {
-	if err != nil && prev != nil {
-		return fmt.Errorf("%w, %s: %w", prev, label, err)
-	}
-	if err != nil && prev == nil {
-		return fmt.Errorf("%s: %w", label, err)
-	}
-	if err == nil && prev != nil {
-		return prev
-	}
 	return nil
 }

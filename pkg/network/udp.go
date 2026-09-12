@@ -1,19 +1,80 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package network
 
 import (
+	"context"
 	"fmt"
 	"net"
+	"syscall"
 	"time"
 )
 
 // DialUDP uses a net.Dialer to dial a UDP connection and sets the SO_REUSEADDR option.
 func DialUDP(network string, laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
-	return dialUDP(network, laddr, raddr)
+	dialer := NewDialer(0)
+	return dialUDP(dialer, network, laddr, raddr)
 }
 
 // ListenUDP uses a net.ListenConfig to listen on a UDP address and sets the SO_REUSEADDR option.
 func ListenUDP(network string, laddr *net.UDPAddr) (*net.UDPConn, error) {
 	return listenUDP(network, laddr)
+}
+
+func dialUDP(dialer *net.Dialer, network string, laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
+	if laddr != nil {
+		dialer.LocalAddr = laddr
+	}
+
+	conn, err := dialer.Dial(network, raddr.String())
+	if err != nil {
+		return nil, err
+	}
+
+	udpConn, ok := conn.(*net.UDPConn)
+	if !ok {
+		conn.Close()
+		return nil, fmt.Errorf("failed to convert to UDPConn")
+	}
+
+	return udpConn, nil
+}
+
+func listenUDP(network string, laddr *net.UDPAddr) (*net.UDPConn, error) {
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			return c.Control(func(fd uintptr) {
+				// Set SO_REUSEADDR
+				setSockoptReuseAddr(fd)
+				setSockoptReusePort(fd)
+			})
+		},
+	}
+
+	conn, err := lc.ListenPacket(context.Background(), network, laddr.String())
+	if err != nil {
+		return nil, err
+	}
+
+	udpConn, ok := conn.(*net.UDPConn)
+	if !ok {
+		conn.Close()
+		return nil, fmt.Errorf("failed to convert to UDPConn")
+	}
+
+	return udpConn, nil
 }
 
 // PunchUDP performs UDP hole punching from the specified source port to the target address.

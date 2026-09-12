@@ -1,16 +1,27 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package controller
 
 import (
 	"context"
 	"fmt"
-	"net"
-	"runtime"
 	"time"
 
 	"github.com/riraccuia/pig/pkg/client"
-	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/route"
+	"github.com/riraccuia/pig/pkg/demux"
 	"github.com/riraccuia/pig/pkg/script"
 	"github.com/riraccuia/pig/pkg/transport"
 )
@@ -23,50 +34,106 @@ func (c *Controller) StartClient() {
 func (c *Controller) startClient(ctx context.Context, cfg *config.Config) {
 	defer c.Done()
 
-	c.scriptExecutor = script.New(c.logger, cfg.StartScript, cfg.StopScript)
+	adapterCfg := &cfg.Adapter
+	connectTunnels := tunnelsByDirection(cfg, config.TunnelDirectionConnect)
 
-	var (
-		tunnel        *client.Client
-		dialer        func() (transport.Conn, error)
-		authenticator common.Authenticator
-		err           error
-	)
+	c.logger.Infof("Starting pig connect runtime | MTU: %d | Tunnels: %d", adapterCfg.MTU, len(connectTunnels))
 
+	c.scriptExecutor = script.New(c.logger, cfg.ScriptPath)
+
+	c.routeRequests = make(chan routeRequest, 16)
+
+	if err := c.setupClientAdapter(ctx, adapterCfg); err != nil {
+		c.logger.Fatalf("Failed to setup adapter: %v", err)
+	}
+
+	// Central route manager goroutine: installs global routes once, then
+	// processes per-tunnel add/remove requests for the controller lifetime.
+	c.Add(1)
+	go c.manageRoutes(ctx, cfg)
+
+	for _, tunnelCfg := range connectTunnels {
+		if err := c.AddClientTunnel(ctx, tunnelCfg); err != nil {
+			c.logger.Fatalf("Failed to add client tunnel: %v", err)
+		}
+	}
+}
+
+// setupClientAdapter creates the adapter and starts the reader goroutine that dispatches
+// packets via the demux. Must be called after demux is initialized.
+func (c *Controller) setupClientAdapter(ctx context.Context, cfg *config.AdapterConfig) error {
+	adapter, err := c.createAdapter(cfg, false)
+	if err != nil {
+		return err
+	}
+	c.clientAdapter = adapter
+	c.adapters.Store(adapter.Name(), adapter)
+	c.demux = demux.New(c.logger, c.clientAdapter, cfg.MTU).WithBufferPool(c.bufferPool)
+	go c.demux.Start(ctx)
+	return nil
+}
+
+// AddClientTunnel creates and starts a client tunnel from the given config.
+// It can be called after StartClient to attach additional tunnels at runtime
+// (e.g. when a control plane pushes new peer configurations).
+func (c *Controller) AddClientTunnel(ctx context.Context, tunnelCfg *config.TunnelConfig) error {
+	if tunnelCfg.Direction != config.TunnelDirectionConnect {
+		return fmt.Errorf("tunnel %s is not a connect tunnel", tunnelCfg.Name)
+	}
+	if c.clientAdapter == nil {
+		return fmt.Errorf("adapter not initialized; call StartClient first")
+	}
+	if c.demux == nil {
+		return fmt.Errorf("demux not initialized; call StartClient first")
+	}
+
+	ta := c.demux.NewAdapter(ctx, 1024)
+	tunnel, dialer, err := c.newClientTunnel(ctx, tunnelCfg, ta)
+	if err != nil {
+		return err
+	}
+
+	c.tunnels.Store(tunnelCfg.Name, tunnel)
+	c.Add(1)
+	go c.runClientTunnel(ctx, tunnel, dialer)
+
+	return nil
+}
+
+func (c *Controller) newClientTunnel(ctx context.Context, tunnelCfg *config.TunnelConfig, ta *demux.Adapter) (*client.Client, func(ctx context.Context) (transport.Conn, error), error) {
 	transportStr := "|"
-	if !cfg.TunnelConfig.ICE.Enabled {
-		transportStr = fmt.Sprintf("| Transport:%s |", cfg.TunnelConfig.Proto)
+	if tunnelCfg.ICE == nil || !tunnelCfg.ICE.Enabled {
+		transportStr = fmt.Sprintf("| Transport:%s |", tunnelCfg.Proto)
 	}
+	c.logger.Infof("Adding tunnel %s Target: %s:%d", transportStr, tunnelCfg.Connect.Address, tunnelCfg.Connect.Port)
 
-	c.logger.Infof("Starting pig | Mode: %s %s MTU: %d", cfg.Mode, transportStr, cfg.TunnelConfig.MTU)
-
-	switch cfg.TunnelConfig.ICE.Enabled {
-	case true:
-		c.logger.Info("ICE enabled | STUN server: ", cfg.TunnelConfig.ICE.STUNAddress, " | MQTT broker: ", cfg.TunnelConfig.ICE.Signaling.MQTTBrokerAddress)
-	case false:
-		c.logger.Infof("Target: %s:%d, proto: %s", cfg.TunnelConfig.Target.Address, cfg.TunnelConfig.Target.Port, cfg.TunnelConfig.Proto)
-	}
-
-	// Create authenticator if configured
-	authenticator, err = c.createClientAuthenticator(cfg.TunnelConfig.Auth)
+	authenticator, err := c.createClientAuthenticator(tunnelCfg.Auth)
 	if err != nil {
-		c.logger.Fatalf("Failed to create authenticator: %v", err)
-	}
-	dialer, err = c.getDialFunc(ctx, &cfg.TunnelConfig)
-	if err != nil {
-		c.logger.Fatalf("Failed to get client dialer: %v", err)
-	}
-	tunnel, err = client.New(c.logger, &cfg.TunnelConfig, authenticator)
-	if err != nil {
-		c.logger.Fatalf("Failed to create client: %v", err)
+		return nil, nil, fmt.Errorf("failed to create authenticator: %w", err)
 	}
 
-	c.HandleClientEvents(tunnel)
+	dialer, err := c.getDialFunc(ctx, tunnelCfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create dialer: %w", err)
+	}
+
+	tunnel, err := client.NewWithAdapter(c.logger, &c.cfg.Adapter, tunnelCfg, ta, authenticator)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create client: %w", err)
+	}
+
+	return tunnel.WithBufferPool(c.bufferPool), dialer, nil
+}
+
+func (c *Controller) runClientTunnel(ctx context.Context, tunnel *client.Client, dialer func(ctx context.Context) (transport.Conn, error)) {
+	defer c.Done()
+
+	c.handleClientEventsAsync(ctx, tunnel)
 
 	t := time.NewTimer(time.Millisecond)
 	for {
 		select {
 		case <-t.C:
-			// continue with the loop
 		case <-ctx.Done():
 			c.logger.Debugf("Controller exiting, client tunnel stopped")
 			return
@@ -76,114 +143,5 @@ func (c *Controller) startClient(ctx context.Context, cfg *config.Config) {
 		}
 		tunnel.WaitClose()
 		t.Reset(time.Second)
-	}
-}
-
-func (c *Controller) HandleClientEvents(tunnel *client.Client) {
-	c.Add(1)
-	go c.handleClientEvents(c.ctx, c.cfg, tunnel)
-	runtime.Gosched()
-}
-
-func (c *Controller) handleClientEvents(ctx context.Context, cfg *config.Config, tunnel *client.Client) {
-	defer c.Done()
-	for {
-		var event *client.EventContext
-		select {
-		case event = <-tunnel.Events():
-		case <-ctx.Done():
-			tunnel.WaitClose()
-			// if the tunnel is closed, and there are no more events, exit the loop
-			if len(tunnel.Events()) == 0 {
-				c.logger.Debugf("Stopped monitoring client events")
-				return
-			}
-			continue
-		}
-		c.logger.Debugf("Client event received: %s", event.Event)
-		c.setupClientRoutes(&cfg.RouteConfig, tunnel.GetAdapter(), event)
-		c.executeClientScript(cfg.TunnelConfig.Proto, tunnel.GetAdapter(), event)
-	}
-}
-
-func (c *Controller) setupClientRoutes(cfg *config.RouteConfig, adapter common.TunnelAdapter, event *client.EventContext) {
-	if !cfg.Enabled {
-		return
-	}
-	if event.Event != client.EventConnected {
-		c.logger.Infof("Cleaning up routes")
-		err := c.routeManager.Cleanup()
-		if err != nil {
-			c.logger.Errorf("Failed to cleanup routes: %v", err)
-		}
-		return
-	}
-	// get the remote address from the event context conn
-	remoteAddr := event.Conn.RemoteAddr()
-	host, _, err := net.SplitHostPort(remoteAddr.String())
-	if err != nil && remoteAddr.Network() == "ip" {
-		// there is no port for IP addresses
-		host = remoteAddr.String()
-		err = nil
-	}
-	if err != nil {
-		c.logger.Errorf("Failed to split host and port (%s): %v", remoteAddr.Network(), err)
-		return
-	}
-	remoteIP := net.ParseIP(host)
-	if remoteIP == nil {
-		c.logger.Errorf("Failed to parse IP: %v", err)
-		return
-	}
-	remoteMaskBits := 32
-	if remoteIP.To4() == nil {
-		remoteMaskBits = 128
-	}
-	peerRoute := config.Route{
-		Destination: fmt.Sprintf("%s/%d", remoteIP.String(), remoteMaskBits),
-		Type:        config.RouteTypeBypass,
-	}
-	// work with a hard copy of the routes, adding the peer route first
-	for _, tRoute := range append([]config.Route{peerRoute}, cfg.Routes...) {
-		_, ipNet, err := net.ParseCIDR(tRoute.Destination)
-		if err != nil {
-			c.logger.Errorf("Failed to parse configuration route (type: %s): %v", tRoute.Type, err)
-			continue
-		}
-		switch tRoute.Type {
-		case config.RouteTypeBypass:
-			c.logger.Infof("Bypassing %s", ipNet.String())
-			err = c.routeManager.AddRouteToBestRoute(ipNet)
-		case config.RouteTypeStatic:
-			gateway := net.ParseIP(tRoute.Gateway)
-			if gateway == nil {
-				c.logger.Errorf("Failed to parse gateway: %v", tRoute.Gateway)
-				continue
-			}
-			interfaceName := ""
-			if tRoute.Interface != "" {
-				interfaceName = tRoute.Interface
-			}
-			logStr := fmt.Sprintf("Adding static route for %s via %s", ipNet.String(), gateway.String())
-			if interfaceName != "" {
-				logStr += fmt.Sprintf(" on <%s>", interfaceName)
-			}
-			c.logger.Infof(logStr)
-			err = c.routeManager.AddRoute(&route.Route{
-				Destination: ipNet,
-				Gateway:     gateway,
-				Interface:   interfaceName,
-			})
-		case config.RouteTypeTunnel:
-			c.logger.Infof("Routing %s to %s via %s", ipNet.String(), adapter.IP().String(), adapter.Name())
-			err = c.routeManager.AddRoute(&route.Route{
-				Destination: ipNet,
-				Gateway:     adapter.IP(),
-				Interface:   adapter.Name(),
-			})
-		}
-		if err != nil {
-			c.logger.Errorf("Failed to add route: %v", err)
-		}
 	}
 }

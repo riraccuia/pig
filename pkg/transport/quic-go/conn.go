@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package quicgo
 
 import (
@@ -42,8 +56,8 @@ func (c *QuicConn) IsStreamed() bool {
 	return true
 }
 
-// Read reads a datagram from the quic connection
-// it requires datagrams to be enabled explicitly
+// Read reads a datagram from the quic connection.
+// It requires datagrams to be enabled explicitly.
 func (c *QuicConn) Read(b []byte) (n int, err error) {
 	//return 0, transport.ErrNotImplemented
 	datagram, err := c.conn.ReceiveDatagram(context.Background())
@@ -54,8 +68,8 @@ func (c *QuicConn) Read(b []byte) (n int, err error) {
 	return len(datagram), nil
 }
 
-// Write writes a datagram to the quic connection
-// it requires datagrams to be enabled explicitly
+// Write writes a datagram to the quic connection.
+// It requires datagrams to be enabled explicitly.
 func (c *QuicConn) Write(b []byte) (n int, err error) {
 	//return 0, transport.ErrNotImplemented
 	err = c.conn.SendDatagram(b)

@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
@@ -8,33 +22,29 @@ import (
 	"github.com/riraccuia/pig/pkg/log"
 )
 
-func pig(mo config.Mode) {
+func pigFromCliFlags(mo Mode) {
+	//setupPprof(logger)
+	startPig(initPig(mo))
+}
+
+func pigFromConfigFileFlag() {
+	startPig(initPigConfig(), nil)
+}
+
+func startPig(cfg *config.Config, logger *log.Logger) {
 	var (
-		ctx    = context.Background()
-		logger *log.Logger
-		cfg    *config.Config
-		ctrl   *controller.Controller
+		ctx  = context.Background()
+		ctrl *controller.Controller
 	)
 
-	cfg, logger = initPig(mo)
-
 	ctrl = controller.New(ctx)
-	ctrl = ctrl.WithLogger(logger).WithConfig(cfg)
 
-	// write the configuration to a file, in json format
-	/*cfgJSON, err := json.Marshal(cfg)
-	if err != nil {
-		logger.Fatalf("Failed to marshal configuration: %v", err)
+	if logger != nil {
+		ctrl = ctrl.WithLogger(logger)
 	}
-	os.WriteFile("pig_config_exported.json", cfgJSON, 0644)*/
 
-	switch cfg.Mode {
-	case "client":
-		ctrl.StartClient()
-	case "server":
-		ctrl.StartServer()
-	default:
-		logger.Fatalf("Invalid mode: %s", cfg.Mode)
-	}
+	ctrl = ctrl.WithConfig(cfg)
+
+	ctrl.Start()
 	ctrl.HandleGracefulShutdown(nil)
 }

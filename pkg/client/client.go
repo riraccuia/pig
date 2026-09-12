@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package client
 
 import (
@@ -8,9 +22,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/queue"
 	"github.com/riraccuia/pig/pkg/queue/wred"
 	"github.com/riraccuia/pig/pkg/streams"
@@ -26,77 +40,95 @@ type Client struct {
 	conn              transport.Conn
 	streams           *streams.StreamManager
 	adapter           common.TunnelAdapter
-	masqAddr          net.IP
 	inbound           common.PacketQueue
-	outbound          *queue.ChanQueue //common.PacketQueue
-	bufferPool        *sync.Pool
+	outbound          *queue.ChanQueue
+	bufferPool        common.BufferPool
 	done              chan struct{}
 	closed            atomic.Bool
 	reconnectInterval time.Duration
 	connError         chan error
 	authenticator     common.Authenticator
 	events            chan *EventContext
+	mtu               int
+	state             atomic.Int32
+	peerAddr          atomic.Value
+	mappedIPs         *sync.Map
+	conntrack         *Conntrack
 }
 
-// New creates a new Client instance with the default network adapter.
-func New(logger common.Logger, cfg *config.TunnelConfig, authenticator common.Authenticator) (*Client, error) {
-	adapter, err := getAdapter(cfg)
+type atomicAddr struct {
+	net.Addr
+}
+
+// New creates a new Client instance with its own TUN adapter.
+// Use this for standalone / single-tunnel operation where the caller does not
+// manage the adapter externally.
+func New(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *config.TunnelConfig, authenticator common.Authenticator) (*Client, error) {
+	a, err := adapter.NewAdapter(adapter.AdapterConfig{
+		Address: adapterCfg.TunnelAddress,
+		MTU:     adapterCfg.MTU,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adapter: %w", err)
 	}
-	return NewWithAdapter(logger, cfg, adapter, authenticator)
+	return NewWithAdapter(logger, adapterCfg, tunnelCfg, a, authenticator)
 }
 
-// NewWithAdapter creates a new Client instance with a custom network adapter.
-func NewWithAdapter(logger common.Logger, cfg *config.TunnelConfig, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Client, error) {
-	logger.Infof("Creating client with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), cfg.MTU)
+// NewWithAdapter creates a new Client instance with a caller-supplied adapter.
+// In the multi-tunnel case the controller passes a per-tunnel virtual adapter
+// (tunnelAdapter) so that reads only deliver packets routed to this tunnel.
+func NewWithAdapter(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *config.TunnelConfig, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Client, error) {
+	logger.Infof("Creating client with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), adapterCfg.MTU)
 
-	if cfg.QueueSize <= 0 {
-		cfg.QueueSize = common.DefaultQueueSize
+	queueSize := adapterCfg.QueueSize
+	if queueSize <= 0 {
+		queueSize = config.DefaultQueueSize
 	}
 
-	outbound := queue.NewChanQueue(cfg.QueueSize)
-	if cfg.Wred.DropProbability > 0 {
-		wred, err := wred.NewWRED(cfg.Wred.WeightFactor)
+	outbound := queue.NewChanQueue(queueSize)
+	if tunnelCfg.Wred.DropProbability > 0 {
+		wred, err := wred.NewWRED(tunnelCfg.Wred.WeightFactor)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create WRED: %w", err)
 		}
-		logger.Infof("WRED enabled with weight factor: %d, drop probability: %d%%, threshold avg queue len: %d%%", int(cfg.Wred.WeightFactor), int(cfg.Wred.DropProbability*100), int(cfg.Wred.Threshold*100))
-		outbound = outbound.WithWRED(wred, cfg.Wred.DropProbability, cfg.Wred.Threshold)
+		logger.Infof("WRED enabled with weight factor: %d, drop probability: %d%%, threshold avg queue len: %d%%", int(tunnelCfg.Wred.WeightFactor), int(tunnelCfg.Wred.DropProbability*100), int(tunnelCfg.Wred.Threshold*100))
+		outbound = outbound.WithWRED(wred, tunnelCfg.Wred.DropProbability, tunnelCfg.Wred.Threshold)
 	}
 
-	masqAddr, _ := getMasqAddress(cfg.TunnelAddress)
-
-	return &Client{
-		logger:   logger,
-		config:   cfg,
-		streams:  streams.New(),
-		adapter:  adapter,
-		masqAddr: masqAddr,
-		inbound:  make(common.PacketQueue, cfg.QueueSize),
-		outbound: outbound,
-		bufferPool: &sync.Pool{
-			New: func() interface{} {
-				return make(network.IPv4Packet, cfg.MTU, cfg.MTU)
-			},
-		},
+	cl := &Client{
+		logger:            logger,
+		config:            tunnelCfg,
+		streams:           streams.New(),
+		adapter:           adapter,
+		inbound:           make(common.PacketQueue, queueSize),
+		outbound:          outbound,
+		bufferPool:        common.DefaultBufferPool,
 		done:              make(chan struct{}),
-		reconnectInterval: time.Duration(cfg.ReconnectInterval) * time.Second,
+		mtu:               adapterCfg.MTU,
+		reconnectInterval: time.Duration(tunnelCfg.ReconnectInterval) * time.Second,
 		connError:         make(chan error, 1),
 		authenticator:     authenticator,
 		events:            make(chan *EventContext, 10),
-	}, nil
+		mappedIPs:         &sync.Map{},
+	}
+	return cl, nil
+}
+
+func (c *Client) WithBufferPool(bufferPool common.BufferPool) *Client {
+	c.bufferPool = bufferPool
+	return c
 }
 
 // Start initializes the client connection and starts all necessary goroutines
 // for handling traffic. The dialFunc parameter provides the connection to the server.
-func (c *Client) Start(ctx context.Context, dialFunc func() (transport.Conn, error)) error {
+func (c *Client) Start(ctx context.Context, dialFunc func(ctx context.Context) (transport.Conn, error)) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
-		// continue with the logic
 	}
+
+	c.conntrack = NewConntrack()
 
 	c.logger.Infof("Starting client with reconnect interval %d seconds", c.reconnectInterval/time.Second)
 
@@ -115,19 +147,19 @@ func (c *Client) Start(ctx context.Context, dialFunc func() (transport.Conn, err
 	return nil
 }
 
-func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transport.Conn, error)) {
+func (c *Client) manageConnection(ctx context.Context, dialFunc func(ctx context.Context) (transport.Conn, error)) {
 	for {
-		c.logger.Infof("Connecting to server...")
-		conn, err := dialFunc()
+		c.logger.Infof("Connecting to target...")
+		conn, err := dialFunc(ctx)
 		if err != nil {
-			c.logger.Errorf("Failed to connect to server: %v", err)
+			c.logger.Errorf("Failed to connect to target: %v", err)
 			select {
 			case <-ctx.Done():
-				c.closeWithEvent(&EventContext{Event: EventStopped})
+				c.closeWithEvent(&EventContext{State: StateStopped})
 				c.logger.Infof("Context done, exiting")
 				return
 			case <-time.After(c.reconnectInterval):
-				c.signalEvent(&EventContext{Event: EventConnectionFailed, Error: err})
+				c.signalEvent(&EventContext{State: StateConnectionFailed, Error: err})
 				c.logger.Error("Retrying connection...")
 				continue
 			}
@@ -137,7 +169,7 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 		if c.authenticator != nil {
 			if err := c.authenticator.Authenticate(ctx, conn); err != nil {
 				c.logger.Errorf("Failed to authenticate: %v", err)
-				c.signalEvent(&EventContext{Event: EventConnectionFailed, Error: err})
+				c.signalEvent(&EventContext{State: StateConnectionFailed, Error: err})
 				conn.Close()
 				continue
 			}
@@ -145,14 +177,13 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 
 		c.drainQueues()
 		c.conn = conn
-		// c.resetClosed()
 
 		go c.writeToAdapter(ctx)
 		go c.handleInbound(ctx)
 		go c.handleOutbound(ctx)
 
-		c.logger.Infof("Connected to server %s", conn.RemoteAddr())
-		c.signalEvent(&EventContext{Event: EventConnected, Conn: conn})
+		c.logger.Infof("Connected to %s", conn.RemoteAddr())
+		c.signalEvent(&EventContext{State: StateConnected, Conn: conn})
 
 		select {
 		case <-c.done:
@@ -160,54 +191,78 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func() (transpor
 			return
 		case <-ctx.Done():
 			c.logger.Infof("Context done, exiting")
-			c.closeWithEvent(&EventContext{Event: EventStopped, Conn: c.conn})
+			c.closeWithEvent(&EventContext{State: StateStopped, Conn: c.conn})
 			return
 		case err := <-c.connError:
 			c.logger.Errorf("Connection lost: %v", err)
-			c.closeWithEvent(&EventContext{Event: EventDisconnected, Conn: c.conn, Error: err})
-			//<-time.After(c.reconnectInterval)
-			//continue
+			c.closeWithEvent(&EventContext{State: StateDisconnected, Conn: c.conn, Error: err})
 			return
 		}
 	}
+}
+
+func (c *Client) Name() string {
+	return c.config.Name
 }
 
 func (c *Client) WaitClose() {
 	<-c.done
 }
 
-// Close gracefully shuts down the client and all its goroutines
+// Close gracefully shuts down the client and all its goroutines.
 func (c *Client) Close() error {
-	return c.closeWithEvent(&EventContext{Event: EventStopped, Conn: c.conn})
+	return c.closeWithEvent(&EventContext{State: StateStopped, Conn: c.conn})
 }
 
-// Close gracefully shuts down the client and all its goroutines
 func (c *Client) closeWithEvent(event *EventContext) error {
 	if c.closed.CompareAndSwap(false, true) {
 		if event != nil {
 			c.signalEvent(event)
 		}
-		close(c.done)
+		c.state.Store(int32(StateStopped))
 		c.streams.CloseAll()
 		if c.conn != nil {
 			c.conn.Close()
 			c.conn = nil
 		}
+		c.conntrack.Close()
+		close(c.done)
 	}
 	return nil
 }
 
-// GetAdapter returns the current network adapter
+// Config returns the tunnel configuration.
+func (c *Client) Config() *config.TunnelConfig { return c.config }
+
+// PeerAddr returns the remote address when connected, or nil otherwise.
+func (c *Client) PeerAddr() net.Addr {
+	if c.State() != StateConnected {
+		return nil
+	}
+	return c.getPeerAddr()
+}
+
+// LastPeerAddr returns the last remote address.
+func (c *Client) LastPeerAddr() net.Addr {
+	return c.getPeerAddr()
+}
+
+// getPeerAddr returns the remote address.
+func (c *Client) getPeerAddr() net.Addr {
+	v := c.peerAddr.Load()
+	if v == nil {
+		return nil
+	}
+	h := v.(atomicAddr)
+	return h.Addr
+}
+
+// GetAdapter returns the current network adapter.
 func (c *Client) GetAdapter() common.TunnelAdapter {
 	return c.adapter
 }
 
-// Wait blocks until the client is done
-func (c *Client) Wait() {
-	<-c.done
-}
-
-// Events returns the channel for receiving client events
+// Events returns the channel for receiving client events.
 func (c *Client) Events() <-chan *EventContext {
 	return c.events
 }
@@ -221,7 +276,7 @@ func (c *Client) drainQueue(queue common.PacketQueue) {
 	for {
 		select {
 		case pkt := <-queue:
-			c.bufferPool.Put(pkt)
+			c.bufferPool.PutBuffer(pkt.Bytes())
 		default:
 			return
 		}

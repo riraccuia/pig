@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package icmp
 
 import (
@@ -15,7 +29,7 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-// sharedListener handles the raw ICMP socket and connection dispatching
+// sharedListener handles the raw ICMP socket and connection dispatching.
 type sharedListener struct {
 	isServer   bool
 	ip4Conn    *ipv4.RawConn
@@ -51,7 +65,7 @@ func (l *sharedListener) clearMemory(m []byte) {
 	l.bufPool.Put(&m)
 }
 
-// newSharedListener creates a new shared ICMP socket listener
+// newSharedListener creates a new shared ICMP socket listener.
 func newSharedListener(ctx context.Context, logger common.Logger, bindAddr *net.IPAddr, iface *net.Interface, isServer bool) (*sharedListener, error) {
 	conn, err := newIcmpIPConn(bindAddr, iface, isServer)
 	if err != nil {
@@ -92,7 +106,7 @@ func newSharedListener(ctx context.Context, logger common.Logger, bindAddr *net.
 	return l, nil
 }
 
-// Accept implements the Listener interface
+// Accept implements the Listener interface.
 func (l *sharedListener) Accept() (net.Conn, error) {
 	select {
 	case <-l.ctx.Done():
@@ -102,7 +116,7 @@ func (l *sharedListener) Accept() (net.Conn, error) {
 	}
 }
 
-// Close implements the Listener interface
+// Close implements the Listener interface.
 func (l *sharedListener) Close() error {
 	l.cancel()
 	l.clients.Range(func(key, value interface{}) bool {
@@ -114,7 +128,7 @@ func (l *sharedListener) Close() error {
 	return l.conn.Close()
 }
 
-// readPackets continuously reads ICMP packets and processes them for the listener
+// readPackets continuously reads ICMP packets and processes them for the listener.
 func (l *sharedListener) readPackets() {
 	for {
 		select {
@@ -149,7 +163,7 @@ func (l *sharedListener) readPackets() {
 	}
 }
 
-// dispatchPackets handles dispatching ICMP packets to their respective connections
+// dispatchPackets handles dispatching ICMP packets to their respective connections.
 func (l *sharedListener) dispatchPackets() {
 	for {
 		select {
@@ -223,7 +237,7 @@ func (l *sharedListener) getClientConn(ip net.IP, icmpID uint16, echoCode uint8)
 	return conn
 }
 
-// writePacket writes an ICMP packet to the raw socket
+// writePacket writes an ICMP packet to the raw socket.
 func (l *sharedListener) writePacket(dst net.IP, msg *icmp.Message) error {
 	msgBytes, err := msg.Marshal(nil)
 	if err != nil {

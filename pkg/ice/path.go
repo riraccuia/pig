@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package ice
 
 import (
@@ -5,10 +19,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
-	"time"
+	"sort"
 
 	"github.com/riraccuia/pig/pkg/common"
-	"github.com/riraccuia/pig/pkg/ice/signaling"
 	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/stun"
 	"github.com/riraccuia/pig/pkg/transport"
@@ -17,29 +30,29 @@ import (
 
 var ErrConnectICMP = fmt.Errorf("call ConnectICMP instead")
 
-// ConnectPath represents a network path for a connection
-// it is used to store information that will be exchanged
-// between the client and the server using the ICE protocol
+// ConnectPath represents a network path for a connection.
+// It is used to store information that will be exchanged
+// between the client and the server using the ICE protocol.
 type ConnectPath struct {
-	ICEID       string
-	Family      int // AF_INET or AF_INET6
-	LocalNet    *net.IPNet
-	LocalAddr   net.Addr
-	RemoteAddr  net.Addr
-	Protocol    transport.ICEProtocolDefinition
-	BindAgent   *stun.IceBindingAgent
-	Conn        net.Conn
-	ScheduledAt time.Time // the time at which the connection should be established
+	ICEID      string
+	Family     int // AF_INET or AF_INET6
+	LocalNet   *net.IPNet
+	LocalAddr  net.Addr
+	RemoteAddr net.Addr
+	RemoteIP   net.IP
+	Protocol   transport.ICEProtocolDefinition
+	BindAgent  *stun.BindingAgent
+	Conn       net.Conn
 }
 
-// String returns a string representation of the ConnectPath
+// String returns a string representation of the ConnectPath.
 func (cp ConnectPath) String() string {
 	return fmt.Sprintf("id=%s proto=%s local=%s remote=%s", cp.ICEID, cp.Protocol.Protocol, cp.LocalAddr.String(), cp.RemoteAddr.String())
 }
 
-// Connect establishes a layer 4 (e.g. UDP, TCP, ICMP) connection to the remote address
-// it will use the local address and port specified in the ConnectPath.
-// It also sets the obtained connection to the embedded ICE binding agent.
+// Connect establishes a layer 4 (e.g. UDP, TCP, ICMP) connection to the remote address.
+// It will use the local address and port specified in the ConnectPath.
+// It also attaches the obtained connection to the embedded STUN BindingAgent.
 func (cp *ConnectPath) Connect() (co net.Conn, err error) {
 	switch cp.Protocol.Network {
 	case "udp":
@@ -61,7 +74,8 @@ func (cp *ConnectPath) Connect() (co net.Conn, err error) {
 		return nil, fmt.Errorf("failed to connect unknown error")
 	}
 	cp.Conn = co
-	cp.BindAgent.Conn = co
+	cp.BindAgent.SetConn(co)
+	cp.BindAgent.Receive()
 	return
 }
 
@@ -78,24 +92,21 @@ func (cp *ConnectPath) ConnectICMP(ctx context.Context, logger common.Logger, bi
 		return nil, err
 	}
 	cp.Conn = co
-	cp.BindAgent.Conn = co
+	cp.BindAgent.SetConn(co)
 	return
 }
 
 // ICESetup sends a binding request to the remote peer and waits for the first binding response.
 // Then it starts receiving binding requests on the connection out of band.
 func (cp *ConnectPath) ICESetup() error {
-	if cp.BindAgent == nil || cp.BindAgent.Conn == nil {
+	if cp.BindAgent == nil || cp.Conn == nil {
 		return fmt.Errorf("the bind agent is not ready, call Connect first")
 	}
 	// wait for the first binding response
-	_, err := cp.BindAgent.SendBindingRequest(true)
+	_, err := cp.BindAgent.SendRequest(true)
 	if err != nil {
 		return fmt.Errorf("failed to send binding request: %w", err)
 	}
-	// let the binding agent handle requests out of band
-	// this call will not block
-	cp.BindAgent.Receive()
 	return nil
 }
 
@@ -106,7 +117,24 @@ func (cp *ConnectPath) CloseConn() error {
 	return cp.Conn.Close()
 }
 
-func getPathForProto(tr transport.ICEProtocolDefinition, localNet *net.IPNet, localIp, remoteIp net.IP, listenPort uint16, opts *signaling.Options) (cp *ConnectPath) {
+func (cp *ConnectPath) Priority() uint32 {
+	if cp == nil {
+		return 0
+	}
+	if cp.BindAgent == nil {
+		return 0
+	}
+	return cp.BindAgent.ICEPriority()
+}
+
+func sortConnectPaths(paths []*ConnectPath) []*ConnectPath {
+	sort.SliceStable(paths, func(i, j int) bool {
+		return paths[i].Priority() > paths[j].Priority()
+	})
+	return paths
+}
+
+func getPathForProto(tr transport.ICEProtocolDefinition, localNet *net.IPNet, localIp, remoteIp net.IP, listenPort uint16) (cp *ConnectPath) {
 	var (
 		localAddr  net.Addr
 		remoteAddr net.Addr
@@ -122,8 +150,8 @@ func getPathForProto(tr transport.ICEProtocolDefinition, localNet *net.IPNet, lo
 		LocalNet:   localNet,
 		LocalAddr:  localAddr,
 		RemoteAddr: remoteAddr,
+		RemoteIP:   remoteIp,
 		Protocol:   tr,
-		BindAgent:  stun.NewIceBindingAgent(opts.Logger, nil),
 	}
 	return cp
 }

@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package tls
 
 import (
@@ -25,10 +39,14 @@ func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Tunnel
 	return ice.NewListenerConn(NewTLSConn(tlsConn), nil), nil
 }
 
-func GetClientDialFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Conn, error) {
-	return func() (transport.Conn, error) {
-		addr := fmt.Sprintf("%s:%d", config.Target.Address, config.Target.Port)
-		dialer := &net.Dialer{}
+func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func(ctx context.Context) (transport.Conn, error) {
+	return func(ctx context.Context) (transport.Conn, error) {
+		addr := fmt.Sprintf("%s:%d", config.Connect.Address, config.Connect.Port)
+		dialer := &net.Dialer{
+			LocalAddr: &net.TCPAddr{
+				Port: config.Connect.SrcPort,
+			},
+		}
 		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig.Clone())
 		if err != nil {
 			return nil, fmt.Errorf("failed to establish TLS connection: %w", err)
@@ -37,9 +55,9 @@ func GetClientDialFunc(ctx context.Context, logger common.Logger, config *config
 	}
 }
 
-func GetServerListenFunc(ctx context.Context, logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Listener, error) {
-	return func() (transport.Listener, error) {
-		addr := fmt.Sprintf(":%d", config.Target.Port)
+func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func(ctx context.Context) (transport.Listener, error) {
+	return func(ctx context.Context) (transport.Listener, error) {
+		addr := fmt.Sprintf("%s:%d", config.Listen.Address, config.Listen.Port)
 		listener, err := tls.Listen("tcp", addr, tlsConfig.Clone())
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS listener: %w", err)

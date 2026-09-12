@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package network
 
 import (
@@ -145,7 +159,7 @@ func PathMTUDiscovery6(dst net.IP) (int, error) {
 }
 
 // sourceAddrForDst returns a source IPv6 address that has a route to dst
-// and the interface mtu for that route
+// and the interface for that route.
 func sourceAddrForDst(dst net.IP) (net.IP, *net.Interface, error) {
 	c, err := net.Dial("udp6", net.JoinHostPort(dst.String(), "53"))
 	if err != nil {

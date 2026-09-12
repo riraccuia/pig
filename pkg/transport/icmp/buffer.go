@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package icmp
 
 import (
@@ -6,7 +20,7 @@ import (
 	"time"
 )
 
-// buffer provides a thread-safe fixed-size circular buffer
+// buffer provides a thread-safe fixed-size circular buffer.
 type buffer struct {
 	mu            sync.Mutex
 	rcond         *sync.Cond
@@ -19,7 +33,7 @@ type buffer struct {
 	writeDeadline time.Time
 }
 
-// newBuffer creates a new buffer with the specified size
+// newBuffer creates a new buffer with the specified size.
 func newBuffer(size int) *buffer {
 	if size <= 0 {
 		size = 64 * 1024 // Ensure minimum buffer size
@@ -33,7 +47,7 @@ func newBuffer(size int) *buffer {
 	return b
 }
 
-// calculateUsed returns the number of bytes currently used in the buffer
+// calculateUsed returns the number of bytes currently used in the buffer.
 func (b *buffer) calculateUsed() int {
 	// Check if buffer is empty first
 	if b.writePos == b.readPos {
@@ -64,12 +78,12 @@ func (b *buffer) calculateUsed() int {
 	return used
 }
 
-// calculateAvailable returns the number of bytes available for writing
+// calculateAvailable returns the number of bytes available for writing.
 func (b *buffer) calculateAvailable() int {
 	return b.size - b.calculateUsed()
 }
 
-// Write copies data into the buffer
+// Write copies data into the buffer.
 func (b *buffer) Write(data []byte) (n int, err error) {
 	if len(data) == 0 {
 		return 0, nil
@@ -121,7 +135,7 @@ func (b *buffer) Write(data []byte) (n int, err error) {
 	return writeLen, nil
 }
 
-// Read copies data from the buffer
+// Read copies data from the buffer.
 func (b *buffer) Read(p []byte) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
@@ -172,7 +186,7 @@ func (b *buffer) Read(p []byte) (n int, err error) {
 	return available, nil
 }
 
-// Reset clears the buffer
+// Reset clears the buffer.
 func (b *buffer) Reset() {
 	b.mu.Lock()
 	b.readPos = 0
@@ -182,7 +196,7 @@ func (b *buffer) Reset() {
 	b.mu.Unlock()
 }
 
-// Len returns the number of bytes currently in the buffer
+// Len returns the number of bytes currently in the buffer.
 func (b *buffer) Len() int {
 	b.mu.Lock()
 	n := b.calculateUsed()

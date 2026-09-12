@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package server
 
 import (
@@ -7,84 +21,83 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-// Server represents a tunnel server that handles multiple client connections
+// Server represents a tunnel server that handles multiple client connections.
 type Server struct {
-	logger     common.Logger
-	config     *config.TunnelConfig
-	adapter    common.TunnelAdapter
-	listener   transport.Listener
-	clients    *sync.Map //*ash.Map
-	ipPool     *IPPool
-	bufferPool *sync.Pool
-	inbound    []common.PacketQueue
-	outbound   common.PacketQueue
-	done       chan struct{}
-	// scriptExecutor *script.Executor
-	authenticator  common.Authenticator
-	_next_queue_id atomic.Uint64
-	closed         atomic.Bool
+	logger          common.Logger
+	config          *config.TunnelConfig
+	adapterCfg      *config.AdapterConfig
+	adapter         common.TunnelAdapter
+	listener        transport.Listener
+	clients         *sync.Map
+	ipPool, ipPool6 *IPPool
+	bufferPool      *sync.Pool
+	inbound         []common.PacketQueue
+	outbound        common.PacketQueue
+	done            chan struct{}
+	authenticator   common.Authenticator
+	_next_queue_id  atomic.Uint64
+	closed          atomic.Bool
 }
 
-// New creates a new Server instance
-func New(logger common.Logger, cfg *config.TunnelConfig, authenticator common.Authenticator) (*Server, error) {
-	adapter, err := getAdapter(cfg)
+// New creates a new Server instance with its own TUN adapter.
+func New(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *config.TunnelConfig, authenticator common.Authenticator) (*Server, error) {
+	a, err := adapter.NewAdapter(adapter.AdapterConfig{
+		Address: adapterCfg.TunnelAddress,
+		MTU:     adapterCfg.MTU,
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create adapter: %w", err)
 	}
-	return NewWithAdapter(logger, cfg, adapter, authenticator)
+	return NewWithAdapter(logger, adapterCfg, tunnelCfg, a, authenticator)
 }
 
-// NewWithAdapter creates a new Server instance with a custom network adapter
-func NewWithAdapter(logger common.Logger, cfg *config.TunnelConfig, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Server, error) {
-	logger.Infof("Creating server with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), cfg.MTU)
-	_, _network, err := net.ParseCIDR(cfg.TunnelAddress)
-	if err != nil {
-		return nil, err
+// NewWithAdapter creates a new Server instance with a caller-supplied adapter.
+func NewWithAdapter(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *config.TunnelConfig, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Server, error) {
+	logger.Infof("Creating server with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), adapterCfg.MTU)
+	queueSize := adapterCfg.QueueSize
+	if queueSize <= 0 {
+		queueSize = config.DefaultQueueSize
 	}
-
-	if cfg.QueueSize <= 0 {
-		cfg.QueueSize = common.DefaultQueueSize
-	}
-
-	return &Server{
-		logger:   logger,
-		config:   cfg,
-		adapter:  adapter,
-		clients:  &sync.Map{}, //new(ash.Map).From(ash.NewSkipList(32)),
-		ipPool:   newIPPool(_network),
-		outbound: make(common.PacketQueue, cfg.QueueSize),
+	s := &Server{
+		logger:     logger,
+		config:     tunnelCfg,
+		adapterCfg: adapterCfg,
+		adapter:    adapter,
+		clients:    &sync.Map{},
+		outbound:   make(common.PacketQueue, queueSize),
 		bufferPool: &sync.Pool{
-			New: func() interface{} {
-				return make(network.IPv4Packet, cfg.MTU, cfg.MTU)
+			New: func() any {
+				return make([]byte, adapterCfg.MTU)
 			},
 		},
-		done: make(chan struct{}),
-		// scriptExecutor: script.New(logger, cfg.StartScript, cfg.StopScript),
+		done:          make(chan struct{}),
 		authenticator: authenticator,
-	}, nil
+	}
+	s.buildIPPool(adapter)
+	return s, nil
 }
 
-func (s *Server) Start(ctx context.Context, listenFunc func() (transport.Listener, error)) error {
+func (s *Server) Start(ctx context.Context, listenFunc func(ctx context.Context) (transport.Listener, error)) error {
 	if !s.closed.CompareAndSwap(false, true) {
 		return fmt.Errorf("server already started")
 	}
 
 	s.logger.Info("Starting server")
 
-	listener, err := listenFunc()
+	listener, err := listenFunc(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create listener: %w", err)
 	}
 	s.listener = listener
 	s.done = make(chan struct{})
 
-	s.logger.Infof("Listening on %s:%d", s.config.Target.Address, s.config.Target.Port)
+	s.logger.Infof("Listening on %s:%d", s.config.Listen.Address, s.config.Listen.Port)
 
 	go s.acceptClients(ctx)
 	go s.processInbound(ctx)
@@ -94,7 +107,7 @@ func (s *Server) Start(ctx context.Context, listenFunc func() (transport.Listene
 	return nil
 }
 
-// GetAdapter returns the adapter
+// GetAdapter returns the adapter.
 func (s *Server) GetAdapter() common.TunnelAdapter {
 	return s.adapter
 }
@@ -130,4 +143,29 @@ func (s *Server) WaitClose() {
 		return
 	}
 	<-s.done
+}
+
+func (s *Server) buildIPPool(adapter common.TunnelAdapter) {
+	ipNet := adapter.IPNet()
+	s.logger.Infof("Building IP pool for IPv4 network: %s", ipNet.String())
+	s.ipPool = newIPPool(ipNet)
+	ipNet6 := adapter.IPNet6()
+	s.logger.Infof("Building IP pool for IPv6 network: %s", ipNet6.String())
+	s.ipPool6 = newIPPool(ipNet6)
+}
+
+func (s *Server) AllocateIP() (net.IP, error) {
+	return s.ipPool.Allocate()
+}
+
+func (s *Server) AllocateIP6() (net.IP, error) {
+	return s.ipPool6.Allocate()
+}
+
+func (s *Server) ReleaseIP(ip net.IP) {
+	s.ipPool.Release(ip)
+}
+
+func (s *Server) ReleaseIP6(ip net.IP) {
+	s.ipPool6.Release(ip)
 }
