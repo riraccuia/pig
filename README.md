@@ -50,8 +50,8 @@ It is still a bit rough around the edges. Feel free to contribute and bring fres
 ## Getting started
 
 - Download the [latest release](https://github.com/riraccuia/pig/releases) or build from source using the [makefile](Makefile).
-- Run `[pig -h](docs/cli-help/main.md)` to see the available options.
-- Use the `[-to-cfg](docs/cli-help/connect.md)` option with both `-c` and `-l` subcommands to quickly generate a config file as the starting point for an advanced setup. See the [config file format documentation](docs/config.md).
+- Run [`pig -h`](docs/cli-help/main.md) to see the available options.
+- Use the [`-to-cfg`](docs/cli-help/connect.md) option with both `-c` and `-l` subcommands to quickly generate a config file as the starting point for an advanced setup. See the [config file format documentation](docs/config.md).
 
 ### Example
 

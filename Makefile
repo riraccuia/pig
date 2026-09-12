@@ -30,20 +30,20 @@ all: pig signtool
 help-docs:
 	@set -e; export COLUMNS=160; \
 	$(GO) run ./$(PIG_DIR) -docs config -md > $(DOCS_DIR)/config.md; \
-	{ echo '```'; $(GO) run ./$(PIG_DIR) -h; echo '```'; } | \
-		sed -e 's/ -c / [-c](connect.md)/g' \
-		    -e 's/ -l / [-l](listen.md)/g' \
-		    -e 's/ -stun / [-stun](stun.md)/g' \
-		    -e 's/ -config / [-config](..\/config.md)/g' \
-		    -e 's/ -docs / [-docs](docs.md)/g' \
+	{ echo '<pre><code>'; $(GO) run ./$(PIG_DIR) -h; echo '</code></pre>'; } | \
+		sed -e 's/ -c / \<a href="connect.md"\>-c\<\/a\>/g' \
+		    -e 's/ -l / \<a href="listen.md"\>-l\<\/a\>/g' \
+		    -e 's/ -stun / \<a href="stun.md"\>-stun\<\/a\>/g' \
+		    -e 's/ -config / \<a href="..\/config.md"\>-config\<\/a\>/g' \
+		    -e 's/ -docs / \<a href="docs.md"\>-docs\<\/a\>/g' \
 		> $(CLIHELP_DIR)/main.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -c -h; echo '```'; } > $(CLIHELP_DIR)/connect.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -l -h; echo '```'; } > $(CLIHELP_DIR)/listen.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -stun -h; echo '```'; } > $(CLIHELP_DIR)/stun.md; \
-	{ echo '```'; $(GO) run ./$(PIG_DIR) -docs -h 2>/dev/null; echo '```'; } | \
-		sed -e 's/ config / [config](config.md)/g' \
-		    -e 's/ env / [env](env.md)/g' \
-		    -e 's/ protos / [protos](protos.md)/g' \
+	{ echo '<pre><code>'; $(GO) run ./$(PIG_DIR) -docs -h 2>/dev/null; echo '</code></pre>'; } | \
+		sed -e 's/ config / \<a href="..\/config.md"\>config\<\/a\>/g' \
+		    -e 's/ env / \<a href="env.md"\>env\<\/a\>/g' \
+		    -e 's/ protos / \<a href="protos.md"\>protos\<\/a\>/g' \
 		> $(CLIHELP_DIR)/docs.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -docs env; echo '```'; } > $(CLIHELP_DIR)/env.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -docs protos; echo '```'; } > $(CLIHELP_DIR)/protos.md; \
