@@ -28,7 +28,7 @@ CLIHELP_DIR = $(DOCS_DIR)/cli-help
 all: pig signtool
 
 help-docs:
-	@set -e; export COLUMNS=160; \
+	@set -e; export COLUMNS=100; \
 	$(GO) run ./$(PIG_DIR) -docs config -md > $(DOCS_DIR)/config.md; \
 	{ echo '<pre><code>'; $(GO) run ./$(PIG_DIR) -h; echo '</code></pre>'; } | \
 		sed -e 's/ -c / \<a href="connect.md"\>-c\<\/a\>/g' \
