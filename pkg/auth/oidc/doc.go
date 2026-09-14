@@ -14,13 +14,11 @@
 
 // Package oidc implements OpenID Connect authenticators that satisfy common.Authenticator.
 //
-// Client: runs an OAuth 2.0 authorization code flow with PKCE by default, opens the system browser,
-// and writes the credential on the connection using the same 2-byte length prefix + payload framing as pkg/auth/jwt.
-// When the provider returns an id_token, that JWT is sent; for configured providers (e.g. GitHub) that omit id_token,
-// the OAuth access_token may be sent instead.
+// Client: wraps pkg/auth/oauth authorization code flow with a nonce on the authorization request,
+// requires an id_token (and matching nonce after the code flow), and writes it on the connection
+// using the same 2-byte length prefix + payload framing as pkg/auth/jwt.
 //
-// Server: reads a framed token. Values that look like a JWT are verified as an OIDC id_token (issuer, JWKS, aud, exp, etc.).
-// For supported providers, non-JWT payloads are treated as opaque access tokens and checked with provider-specific logic
-// (for example GitHub REST). Optional Config.ClaimMatchers apply additional constraints (regex or exact lists) to JWT
-// claims or to provider-resolved opaque claims.
+// Server: reads a framed JWT id_token and verifies it (issuer, JWKS, aud, exp, etc.).
+// Optional ClaimMatchers apply additional constraints to JWT claims. The listen side does not
+// check nonce (it was not party to the authorization request).
 package oidc

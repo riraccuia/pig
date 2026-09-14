@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package oidc
+package oauth
 
 import (
 	"fmt"
@@ -22,8 +22,8 @@ import (
 	jwtgo "github.com/golang-jwt/jwt/v5"
 )
 
-// claimRule is one configured constraint: claim name + how to match values.
-type claimRule struct {
+// ClaimRule is one configured constraint: claim name + how to match values.
+type ClaimRule struct {
 	claim string
 	m     claimMatcher
 }
@@ -55,21 +55,21 @@ func (m exactMatcher) Match(v string) bool {
 	return ok
 }
 
-func parseClaimMatchers(raw map[string]any) ([]claimRule, error) {
+func ParseClaimMatchers(raw map[string]any) ([]ClaimRule, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
-	rules := make([]claimRule, 0, len(raw))
+	rules := make([]ClaimRule, 0, len(raw))
 	for claim, val := range raw {
 		claim = strings.TrimSpace(claim)
 		if claim == "" {
-			return nil, fmt.Errorf("oidc: claim_matchers: empty claim name")
+			return nil, fmt.Errorf("oauth: claim_matchers: empty claim name")
 		}
 		m, err := parseClaimMatcherValue(val)
 		if err != nil {
-			return nil, fmt.Errorf("oidc: claim_matchers[%q]: %w", claim, err)
+			return nil, fmt.Errorf("oauth: claim_matchers[%q]: %w", claim, err)
 		}
-		rules = append(rules, claimRule{claim: claim, m: m})
+		rules = append(rules, ClaimRule{claim: claim, m: m})
 	}
 	return rules, nil
 }
@@ -120,7 +120,8 @@ func parseClaimMatcherValue(val any) (claimMatcher, error) {
 	}
 }
 
-func extractJWTClaimStrings(claims jwtgo.MapClaims, key string) ([]string, bool) {
+// ExtractJWTClaimStrings reads claim values from JWT map claims as strings.
+func ExtractJWTClaimStrings(claims jwtgo.MapClaims, key string) ([]string, bool) {
 	raw, ok := claims[key]
 	if !ok {
 		return nil, false
@@ -162,9 +163,9 @@ func fmtNumClaim(f float64) string {
 	return fmt.Sprintf("%g", f)
 }
 
-func validateJWTClaimRules(claims jwtgo.MapClaims, rules []claimRule) error {
-	return validateClaimRules(rules, func(r claimRule) ([]string, bool, error) {
-		vals, ok := extractJWTClaimStrings(claims, r.claim)
+func ValidateJWTClaimRules(claims jwtgo.MapClaims, rules []ClaimRule) error {
+	return validateClaimRules(rules, func(r ClaimRule) ([]string, bool, error) {
+		vals, ok := ExtractJWTClaimStrings(claims, r.claim)
 		return vals, ok, nil
 	})
 }
@@ -178,7 +179,7 @@ func valuesMatchRule(m claimMatcher, candidates []string) bool {
 	return false
 }
 
-func validateClaimRules(rules []claimRule, resolve func(r claimRule) ([]string, bool, error)) error {
+func validateClaimRules(rules []ClaimRule, resolve func(r ClaimRule) ([]string, bool, error)) error {
 	if len(rules) == 0 {
 		return nil
 	}
@@ -197,8 +198,8 @@ func validateClaimRules(rules []claimRule, resolve func(r claimRule) ([]string, 
 	return nil
 }
 
-func validateClaimRulesStringValues(rules []claimRule, get func(claim string) ([]string, bool, error)) error {
-	return validateClaimRules(rules, func(r claimRule) ([]string, bool, error) {
+func validateClaimRulesStringValues(rules []ClaimRule, get func(claim string) ([]string, bool, error)) error {
+	return validateClaimRules(rules, func(r ClaimRule) ([]string, bool, error) {
 		return get(r.claim)
 	})
 }

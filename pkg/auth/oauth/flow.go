@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package oidc
+package oauth
 
 import (
 	"context"
@@ -35,9 +35,8 @@ func randomState() string {
 }
 
 type tokenResult struct {
-	idToken string
-	tok     *oauth2.Token
-	err     error
+	tok *oauth2.Token
+	err error
 }
 
 // newAuthorizationCallbackHandler returns the loopback HTTP handler that validates the redirect,
@@ -53,19 +52,19 @@ func newAuthorizationCallbackHandler(
 		q := r.URL.Query()
 		if errStr := strings.TrimSpace(q.Get("error")); errStr != "" {
 			desc := strings.TrimSpace(q.Get("error_description"))
-			resultCh <- tokenResult{"", nil, fmt.Errorf("%w: %s %s", ErrAuthorizationDenied, errStr, desc)}
+			resultCh <- tokenResult{nil, fmt.Errorf("%w: %s %s", ErrAuthorizationDenied, errStr, desc)}
 			fmt.Fprintf(w, "Authorization error. You may close this window.")
 			return
 		}
 		code := strings.TrimSpace(q.Get("code"))
 		gotState := strings.TrimSpace(q.Get("state"))
 		if gotState != expectState {
-			resultCh <- tokenResult{"", nil, ErrInvalidState}
+			resultCh <- tokenResult{nil, ErrInvalidState}
 			http.Error(w, "invalid state", http.StatusBadRequest)
 			return
 		}
 		if code == "" {
-			resultCh <- tokenResult{"", nil, fmt.Errorf("oidc: missing code in callback")}
+			resultCh <- tokenResult{nil, fmt.Errorf("oauth: missing code in callback")}
 			http.Error(w, "missing code", http.StatusBadRequest)
 			return
 		}
@@ -76,18 +75,19 @@ func newAuthorizationCallbackHandler(
 		}
 		tok, err := oauthCfg.Exchange(flowCtx, code, exchangeOpts...)
 		if err != nil {
-			resultCh <- tokenResult{"", nil, fmt.Errorf("oidc: token exchange: %w", err)}
+			resultCh <- tokenResult{nil, fmt.Errorf("oauth: token exchange: %w", err)}
 			http.Error(w, "token exchange failed", http.StatusInternalServerError)
 			return
 		}
-		raw, _ := tok.Extra("id_token").(string)
-		resultCh <- tokenResult{raw, tok, nil}
+		resultCh <- tokenResult{tok, nil}
 		fmt.Fprintf(w, "Login successful. You may close this window.")
 	}
 }
 
-// runAuthorizationCodeFlow runs the browser + loopback callback flow and returns id_token and oauth2 token.
-func runAuthorizationCodeFlow(ctx context.Context, cfg *Config, meta *ProviderMetadata) (idToken string, tok *oauth2.Token, err error) {
+// runAuthorizationCodeFlow runs the browser + loopback callback flow and returns the OAuth token.
+// Providers that also return an id_token leave it in tok.Extra("id_token") for OIDC callers.
+// Extra authOpts are appended to the authorization URL (e.g. oauth2.SetAuthURLParam("nonce", ...)).
+func runAuthorizationCodeFlow(ctx context.Context, cfg *Config, meta *ProviderMetadata, extraAuthOpts ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
 	httpClient := cfg.httpClient()
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, httpClient)
 
@@ -107,6 +107,7 @@ func runAuthorizationCodeFlow(ctx context.Context, cfg *Config, meta *ProviderMe
 
 	var (
 		lb             LoopbackRedirect
+		err            error
 		needCloseLn    bool
 		shutdownServer = func(s *http.Server) {
 			ctx, c := context.WithTimeout(context.Background(), 3*time.Second)
@@ -122,7 +123,7 @@ func runAuthorizationCodeFlow(ctx context.Context, cfg *Config, meta *ProviderMe
 		lb, err = ListenEphemeralLoopbackRedirect(cfg)
 	}
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 
 	needCloseLn = true
@@ -136,6 +137,7 @@ func runAuthorizationCodeFlow(ctx context.Context, cfg *Config, meta *ProviderMe
 		verifier = oauth2.GenerateVerifier()
 		authOpts = append(authOpts, oauth2.S256ChallengeOption(verifier))
 	}
+	authOpts = append(authOpts, extraAuthOpts...)
 
 	state := randomState()
 	authURL := oauthCfg.AuthCodeURL(state, authOpts...)
@@ -144,14 +146,14 @@ func runAuthorizationCodeFlow(ctx context.Context, cfg *Config, meta *ProviderMe
 		if needCloseLn {
 			_ = lb.Listener.Close()
 		}
-		return "", nil, &BrowserSkippedError{AuthURL: authURL}
+		return nil, &BrowserSkippedError{AuthURL: authURL}
 	}
 
 	if err := openURL(authURL); err != nil {
 		if needCloseLn {
 			_ = lb.Listener.Close()
 		}
-		return "", nil, fmt.Errorf("oidc: open browser: %w", err)
+		return nil, fmt.Errorf("oauth: open browser: %w", err)
 	}
 
 	resultCh := make(chan tokenResult, 1)
@@ -167,12 +169,12 @@ func runAuthorizationCodeFlow(ctx context.Context, cfg *Config, meta *ProviderMe
 	select {
 	case <-flowCtx.Done():
 		shutdownServer(srv)
-		return "", nil, fmt.Errorf("oidc: %w", flowCtx.Err())
+		return nil, fmt.Errorf("oauth: %w", flowCtx.Err())
 	case res = <-resultCh:
 		shutdownServer(srv)
 		if res.err != nil {
-			return "", nil, res.err
+			return nil, res.err
 		}
-		return res.idToken, res.tok, nil
+		return res.tok, nil
 	}
 }

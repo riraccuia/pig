@@ -22,20 +22,18 @@ import (
 	"sync"
 
 	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/riraccuia/pig/pkg/auth/oauth"
 	"github.com/riraccuia/pig/pkg/common"
 )
 
 // ServerAuthenticator verifies an OIDC id_token sent with the same framing as pkg/auth/jwt.
-// For providers that enable opaqueTokenFallback (e.g. GitHub), a non-JWT framed value is treated
-// as an OAuth access_token and validated with provider-specific logic.
 type ServerAuthenticator struct {
-	cfg            Config
-	expectedIss    string
-	meta           *ProviderMetadata
-	opaqueVerifier opaqueTokenVerifier
-	claimRules     []claimRule
-	mu             sync.RWMutex
-	keySet         jwk.Set
+	cfg         Config
+	expectedIss string
+	meta        *ProviderMetadata
+	claimRules  []oauth.ClaimRule
+	mu          sync.RWMutex
+	keySet      jwk.Set
 }
 
 // NewServerAuthenticator loads provider metadata and JWKS for cfg.IssuerURL.
@@ -58,39 +56,22 @@ func NewServerAuthenticator(cfg Config) (common.Authenticator, error) {
 	if err != nil {
 		return nil, err
 	}
-	rules, err := parseClaimMatchers(cfg.ClaimMatchers)
+	rules, err := oauth.ParseClaimMatchers(cfg.ClaimMatchers)
 	if err != nil {
 		return nil, err
 	}
 	return &ServerAuthenticator{
-		cfg:            cfg,
-		expectedIss:    meta.Issuer,
-		meta:           meta,
-		opaqueVerifier: newOpaqueTokenVerifier(cfg, meta),
-		claimRules:     rules,
-		keySet:         ks,
+		cfg:         cfg,
+		expectedIss: meta.Issuer,
+		meta:        meta,
+		claimRules:  rules,
+		keySet:      ks,
 	}, nil
-}
-
-func readFramedToken(r io.Reader) (string, error) {
-	lenBuf := make([]byte, 2)
-	if _, err := io.ReadFull(r, lenBuf); err != nil {
-		return "", fmt.Errorf("read token length: %w", err)
-	}
-	n := int(lenBuf[0])<<8 | int(lenBuf[1])
-	if n < 0 || n > 1<<16 {
-		return "", fmt.Errorf("invalid token length %d", n)
-	}
-	buf := make([]byte, n)
-	if _, err := io.ReadFull(r, buf); err != nil {
-		return "", fmt.Errorf("read token: %w", err)
-	}
-	return string(buf), nil
 }
 
 // Authenticate reads a framed id_token and verifies it against the configured issuer and audience.
 func (a *ServerAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter) error {
-	raw, err := readFramedToken(rw)
+	raw, err := oauth.ReadFramedToken(rw)
 	if err != nil {
 		return err
 	}
@@ -98,15 +79,9 @@ func (a *ServerAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter
 	if raw == "" {
 		return ErrInvalidToken
 	}
-	if !tokenLooksLikeJWT(raw) {
-		if a.opaqueVerifier == nil {
-			return fmt.Errorf("%w: opaque bearer token not supported for this issuer", ErrInvalidToken)
-		}
-		return a.opaqueVerifier.verifyOpaque(ctx, a.cfg.httpClient(), raw, a.claimRules)
-	}
 
-	leeway := a.cfg.clockSkew()
-	aud := a.cfg.effectiveAudience()
+	leeway := a.cfg.ClockSkewOrDefault()
+	aud := a.cfg.EffectiveAudience()
 
 	a.mu.RLock()
 	ks := a.keySet
@@ -117,7 +92,7 @@ func (a *ServerAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter
 		if err != nil {
 			return err
 		}
-		return validateJWTClaimRules(claims, a.claimRules)
+		return oauth.ValidateJWTClaimRules(claims, a.claimRules)
 	}
 
 	firstErr := tryVerify(ks)

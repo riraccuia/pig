@@ -12,37 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package oidc
+package oauth
 
 import (
 	"context"
 	"net/http"
-	"strings"
 )
 
-// tokenLooksLikeJWT uses a minimal shape check (three non-empty dot-separated segments) so opaque
-// tokens like GitHub's gho_* are not sent through jwt.Parse.
-func tokenLooksLikeJWT(s string) bool {
-	s = strings.TrimSpace(s)
-	parts := strings.Split(s, ".")
-	if len(parts) != 3 {
-		return false
-	}
-	for _, p := range parts {
-		if p == "" {
-			return false
-		}
-	}
-	return true
-}
-
 type opaqueTokenVerifier interface {
-	verifyOpaque(ctx context.Context, hc *http.Client, token string, rules []claimRule) error
+	verifyOpaque(ctx context.Context, hc *http.Client, token string, rules []ClaimRule) error
 }
 
 func newOpaqueTokenVerifier(cfg Config, meta *ProviderMetadata) opaqueTokenVerifier {
-	if !providerSupportsOpaqueTokenFallback(cfg, meta) {
+	return opaqueVerifierForIssuer(cfg, meta)
+}
+
+func opaqueVerifierForIssuer(cfg Config, meta *ProviderMetadata) opaqueTokenVerifier {
+	if meta == nil {
 		return nil
 	}
-	return githubOpaqueVerifier{}
+	cfgIss := NormalizeIssuer(cfg.IssuerURL)
+	docIss := NormalizeIssuer(meta.Issuer)
+	if !issuerMatchesDiscovery(cfgIss, docIss) {
+		return nil
+	}
+	switch docIss {
+	case NormalizeIssuer(IssuerGitHub):
+		return githubOpaqueVerifier{}
+	case NormalizeIssuer(IssuerGoogle):
+		return googleOpaqueVerifier{audience: cfg.EffectiveAudience()}
+	default:
+		return nil
+	}
 }

@@ -1,12 +1,11 @@
 //go:build manual
 
-package oidc
+package oauth
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -14,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	jwtgo "github.com/golang-jwt/jwt/v5"
 	"golang.org/x/oauth2"
 )
 
@@ -33,9 +31,9 @@ func TestManualGitHubOAuthClientFlow(t *testing.T) {
 		ClientID:     "your-client-id",
 		ClientSecret: "your-client-secret",
 		//RedirectURL:     "http://127.0.0.1:12345/oauth2/callback",
-		Scopes: []string{"openid", "user:email"},
+		Scopes: []string{"user:email", "read:user"},
 		ClaimMatchers: map[string]any{
-			"email": []string{"user@example.com"},
+			"email": []string{"your-email@example.com"},
 		},
 	}
 
@@ -49,7 +47,6 @@ func TestManualGitHubOAuthClientFlow(t *testing.T) {
 	}
 
 	tok := ca.(*ClientAuthenticator).oauth
-	idJWT := ca.(*ClientAuthenticator).idTok
 
 	var githubAPIUser map[string]any
 	{
@@ -70,6 +67,7 @@ func TestManualGitHubOAuthClientFlow(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Log(string(body))
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("github api /user: %s: %s", resp.Status, strings.TrimSpace(string(body)))
 		}
@@ -81,7 +79,6 @@ func TestManualGitHubOAuthClientFlow(t *testing.T) {
 	}
 
 	out := map[string]any{
-		"id_token":        idJWT,
 		"access_token":    tok.AccessToken,
 		"token_type":      tok.TokenType,
 		"refresh_token":   tok.RefreshToken,
@@ -122,7 +119,7 @@ func TestManualGoogleOAuthClientFlow(t *testing.T) {
 		IssuerURL:    IssuerGoogle,
 		ClientID:     "your-client-id",
 		ClientSecret: "your-client-secret",
-		Scopes:       []string{"openid", "profile", "email"},
+		Scopes:       []string{"profile", "email"},
 		//RedirectURL:     "http://127.0.0.1:12345/oauth2/callback",
 		ClaimMatchers: map[string]any{
 			"email": []string{"user@example.com"},
@@ -139,24 +136,8 @@ func TestManualGoogleOAuthClientFlow(t *testing.T) {
 	}
 
 	tok := ca.(*ClientAuthenticator).oauth
-	idJWT := ca.(*ClientAuthenticator).idTok
-
-	tokParsed, _, err := jwtgo.NewParser().ParseUnverified(idJWT, &jwtgo.MapClaims{})
-	if err != nil {
-		fmt.Printf("Error parsing token: %s ", err.Error())
-		return
-	}
-
-	jsonBytes, err := json.MarshalIndent(tokParsed.Claims, "", "  ")
-	if err != nil {
-		fmt.Printf("Error marshalling JSON: %s ", err.Error())
-		return
-	}
-	fmt.Println(string(jsonBytes))
 
 	out := map[string]any{
-		//"id_token":      idJWT,
-		//"access_token":  tok.AccessToken,
 		"token_type":    tok.TokenType,
 		"refresh_token": tok.RefreshToken,
 	}
@@ -167,18 +148,11 @@ func TestManualGoogleOAuthClientFlow(t *testing.T) {
 		out["extra"] = extra
 	}
 
-	jsonBytes, err = json.MarshalIndent(out, "", "  ")
-	if err != nil {
-		fmt.Printf("Error marshalling JSON: %s ", err.Error())
-		return
-	}
-	fmt.Println(string(jsonBytes))
-
 	sa, err := NewServerAuthenticator(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	at := []byte(idJWT)
+	at := []byte(tok.AccessToken)
 	lenBuf := []byte{byte(len(at) >> 8), byte(len(at))}
 	err = sa.Authenticate(ctx, bytes.NewBuffer(append(lenBuf, at...)))
 	if err != nil {

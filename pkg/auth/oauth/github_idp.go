@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package oidc
+package oauth
 
 import (
 	"context"
@@ -24,64 +24,19 @@ import (
 	"strings"
 )
 
-// IssuerGitHub is the base URL used to fetch OpenID discovery at
-// https://github.com/login/oauth/.well-known/openid-configuration.
-// The document's issuer claim and ID tokens use https://github.com (see githubDiscoveryIssuer and patchGitHubProviderMetadataIfNeeded).
+// IssuerGitHub is the GitHub OAuth authorization server issuer.
+// Discovery uses RFC 8414: https://github.com/.well-known/oauth-authorization-server/login/oauth
 const IssuerGitHub = "https://github.com/login/oauth"
 
 const (
-	// GitHub's openid-configuration omits authorization_endpoint and token_endpoint.
-	// OAuth 2.0 endpoints: https://docs.github.com/en/apps/oauth-apps
-	githubDiscoveryIssuer       = "https://github.com"
-	githubAuthorizationEndpoint = "https://github.com/login/oauth/authorize"
-	githubTokenEndpoint         = "https://github.com/login/oauth/access_token"
-	githubJWKSPathPrefix        = "https://github.com/login/oauth"
-
 	// GitHub REST API (authenticated user).
 	githubAPIUserEmailsURL = "https://api.github.com/user/emails"
 	githubAPIUserURL       = "https://api.github.com/user"
 )
 
-func githubConfigIssuerMatchesDocIssuer(cfgIss, docIss string) bool {
-	return docIss == githubDiscoveryIssuer && cfgIss == NormalizeIssuer(IssuerGitHub)
-}
-
-// patchGitHubProviderMetadataIfNeeded fills OAuth endpoints when the discovery document looks like GitHub's but omits them.
-func patchGitHubProviderMetadataIfNeeded(meta *ProviderMetadata) {
-	if meta == nil {
-		return
-	}
-	iss := NormalizeIssuer(meta.Issuer)
-	jwks := strings.TrimSpace(meta.JWKSURI)
-	if iss != githubDiscoveryIssuer && !strings.HasPrefix(jwks, githubJWKSPathPrefix) {
-		return
-	}
-	if meta.AuthorizationEndpoint == "" {
-		meta.AuthorizationEndpoint = githubAuthorizationEndpoint
-	}
-	if meta.TokenEndpoint == "" {
-		meta.TokenEndpoint = githubTokenEndpoint
-	}
-}
-
-// providerSupportsOpaqueTokenFallback reports whether the client may send an OAuth access_token on the wire when
-// no id_token is present, and the server may verify it with GitHub-specific logic.
-func providerSupportsOpaqueTokenFallback(cfg Config, meta *ProviderMetadata) bool {
-	if meta == nil {
-		return false
-	}
-	cfgIss := NormalizeIssuer(cfg.IssuerURL)
-	docIss := NormalizeIssuer(meta.Issuer)
-	if !issuerMatchesDiscovery(cfgIss, docIss) {
-		return false
-	}
-	jwks := strings.TrimSpace(meta.JWKSURI)
-	return docIss == githubDiscoveryIssuer || strings.HasPrefix(jwks, githubJWKSPathPrefix)
-}
-
 type githubOpaqueVerifier struct{}
 
-func (githubOpaqueVerifier) verifyOpaque(ctx context.Context, hc *http.Client, token string, rules []claimRule) error {
+func (githubOpaqueVerifier) verifyOpaque(ctx context.Context, hc *http.Client, token string, rules []ClaimRule) error {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return fmt.Errorf("%w: empty token", ErrInvalidToken)
@@ -89,8 +44,12 @@ func (githubOpaqueVerifier) verifyOpaque(ctx context.Context, hc *http.Client, t
 	if hc == nil {
 		hc = http.DefaultClient
 	}
+	err := verifyGitHubHasVerifiedPrimaryEmail(ctx, hc, token)
+	if err != nil {
+		return err
+	}
 	if len(rules) == 0 {
-		return verifyGitHubHasVerifiedPrimaryEmail(ctx, hc, token)
+		return nil
 	}
 	var cache githubAPIClaimCache
 	return validateClaimRulesStringValues(rules, func(claim string) ([]string, bool, error) {
@@ -135,10 +94,10 @@ func githubAPIGetJSON(ctx context.Context, hc *http.Client, token, reqURL, apiLa
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "qt-oidc-server")
+	req.Header.Set("User-Agent", "pig-oauth-server")
 	resp, err := hc.Do(req)
 	if err != nil {
-		return fmt.Errorf("oidc: github %s: %w", apiLabel, err)
+		return fmt.Errorf("oauth: github %s: %w", apiLabel, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))

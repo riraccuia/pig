@@ -88,15 +88,17 @@ var SupportedTransports = map[TransportType]bool{
 type AuthType string
 
 const (
-	AuthTypeNone AuthType = "none"
-	AuthTypeJWT  AuthType = "jwt"
-	AuthTypeOIDC AuthType = "oidc"
+	AuthTypeNone  AuthType = "none"
+	AuthTypeJWT   AuthType = "jwt"
+	AuthTypeOIDC  AuthType = "oidc"
+	AuthTypeOAuth AuthType = "oauth"
 )
 
 var supportedAuthTypes = map[AuthType]bool{
-	AuthTypeNone: true,
-	AuthTypeJWT:  true,
-	AuthTypeOIDC: true,
+	AuthTypeNone:  true,
+	AuthTypeJWT:   true,
+	AuthTypeOIDC:  true,
+	AuthTypeOAuth: true,
 }
 
 func (t AuthType) IsValid() bool {
@@ -338,7 +340,7 @@ type TLSConfig struct {
 type AuthConfig struct {
 	// default=AuthTypeNone
 	// optional=true
-	// desc=One of "none", "jwt", "oidc".
+	// desc=One of "none", "jwt", "oidc", "oauth".
 	Type AuthType `toml:"type" json:"type"`
 	// optional=true
 	// desc=JWT authentication configuration.
@@ -346,6 +348,9 @@ type AuthConfig struct {
 	// optional=true
 	// desc=OIDC authentication configuration.
 	OIDC *OIDCAuth `toml:"oidc" json:"oidc"`
+	// optional=true
+	// desc=OAuth authentication configuration.
+	OAuth *OAuthAuth `toml:"oauth" json:"oauth"`
 	// optional=true
 	// desc=MTLS authentication configuration.
 	MTLS *MTLSConfig `toml:"mtls" json:"mtls"`
@@ -374,28 +379,34 @@ type JWTAuth struct {
 
 // OIDCAuth holds OpenID Connect settings matching pkg/auth/oidc.Config (TOML-friendly types).
 type OIDCAuth struct {
-	// desc=Issuer URL of the provider.
+	OAuthAuth `toml:",inline" json:",inline"`
+}
+
+// OAuthAuth holds OAuth 2.0 settings matching pkg/auth/oauth.Config (TOML-friendly types).
+type OAuthAuth struct {
+	// desc=Issuer URL of the authorization server.
 	IssuerURL string `toml:"issuer_url" json:"issuer_url"`
 	// desc=Client ID of the application.
 	ClientID string `toml:"client_id" json:"client_id"`
 	// desc=Client secret of the application.
 	ClientSecret string `toml:"client_secret" json:"client_secret"`
-	// desc=Scopes for the authorization request (optional; oidc package defaults apply when empty).
+	// desc=Scopes for the authorization request (optional). Empty: oauth sends no scope; oidc defaults to openid profile email.
 	Scopes []string `toml:"scopes" json:"scopes"`
 	// desc=RedirectURL is the full OAuth redirect URI registered at the IdP (optional; loopback ephemeral port if empty).
 	RedirectURL string `toml:"redirect_url" json:"redirect_url"`
-	// desc=RedirectPath is used only when RedirectURL is empty (default in oidc is /oauth2/callback).
+	// desc=RedirectPath is used only when RedirectURL is empty (default in oauth is /oauth2/callback).
 	RedirectPath string `toml:"redirect_path" json:"redirect_path"`
 	// desc=Skip opening the browser for the authorization code flow.
 	SkipOpenBrowser bool `toml:"skip_open_browser" json:"skip_open_browser"`
-	// desc=CallbackTimeoutSeconds bounds browser redirect wait (zero = oidc default).
-	CallbackTimeoutSeconds int    `toml:"callback_timeout_seconds" json:"callback_timeout_seconds"`
-	ExpectedAudience       string `toml:"expected_audience" json:"expected_audience"`
-	// desc=ClockSkewSeconds is leeway for id_token exp/iat (zero = oidc default).
-	ClockSkewSeconds int `toml:"clock_skew_seconds" json:"clock_skew_seconds"`
+	// desc=CallbackTimeoutSeconds bounds browser redirect wait (zero = oauth default).
+	CallbackTimeoutSeconds int `toml:"callback_timeout_seconds" json:"callback_timeout_seconds"`
 	// desc=Disable Proof Key for Code Exchange (PKCE).
 	DisablePKCE bool `toml:"disable_pkce" json:"disable_pkce"`
-	// desc=ClaimMatchers see pkg/auth/oidc.Config.ClaimMatchers.
+	// desc=ExpectedAudience overrides ClientID when validating JWT aud on the server (optional).
+	ExpectedAudience string `toml:"expected_audience" json:"expected_audience"`
+	// desc=ClockSkewSeconds is leeway for JWT exp/iat/nbf (zero = package default).
+	ClockSkewSeconds int `toml:"clock_skew_seconds" json:"clock_skew_seconds"`
+	// desc=ClaimMatchers see pkg/auth/oauth.Config.ClaimMatchers.
 	ClaimMatchers map[string]any `toml:"claim_matchers" json:"claim_matchers"`
 }
 

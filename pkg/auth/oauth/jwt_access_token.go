@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package oidc
+package oauth
 
 import (
 	"context"
@@ -23,7 +23,6 @@ import (
 	"github.com/lestrrat-go/jwx/v4/jwk"
 
 	authjwt "github.com/riraccuia/pig/pkg/auth/jwt"
-	"github.com/riraccuia/pig/pkg/auth/oauth"
 )
 
 func fetchJWKS(ctx context.Context, jwksURL string) (jwk.Set, error) {
@@ -32,7 +31,7 @@ func fetchJWKS(ctx context.Context, jwksURL string) (jwk.Set, error) {
 }
 
 func audienceContains(claims jwtgo.MapClaims, want string) bool {
-	vals, ok := oauth.ExtractJWTClaimStrings(claims, "aud")
+	vals, ok := ExtractJWTClaimStrings(claims, "aud")
 	if !ok {
 		return false
 	}
@@ -44,9 +43,8 @@ func audienceContains(claims jwtgo.MapClaims, want string) bool {
 	return false
 }
 
-// verifyIDToken parses and validates the OIDC ID token JWT using the provider issuer, JWKS, and audience.
-// It returns claims for optional claim_matchers checks.
-func verifyIDToken(raw string, issuer string, audience string, keySet jwk.Set, leeway time.Duration) (jwtgo.MapClaims, error) {
+// verifyAccessTokenJWT parses and validates a JWT access token using the AS issuer, JWKS, and audience.
+func verifyAccessTokenJWT(raw string, issuer string, audience string, keySet jwk.Set, leeway time.Duration) (jwtgo.MapClaims, error) {
 	var claims jwtgo.MapClaims
 	token, err := jwtgo.ParseWithClaims(raw, &claims, func(token *jwtgo.Token) (any, error) {
 		return authjwt.GetKey(keySet, token)

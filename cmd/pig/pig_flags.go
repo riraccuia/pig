@@ -350,18 +350,6 @@ func applyCommandLineFlags(cfg *config.Config, flags *Flags, mode Mode, logger c
 
 	tc.Proto = config.TransportType(flags.proto)
 
-	/*if flags.iceDisabled && flags.proto == "." {
-		flags.proto = DefaultICEProtocol
-	}
-	tc.Proto = config.TransportType(flags.proto)
-
-	if flags.iceDisabled || tc.Direction == config.TunnelDirectionListen {
-		err := configureEndpoint(tc, flags.address, string(tc.Direction), logger)
-		if err != nil && flags.iceDisabled {
-			logger.Fatalf("Failed to configure listen address: %v", err)
-		}
-	}*/
-
 	setConfigField(&tc.TLSConfig.Insecure, flags.insecure)
 	if tc.Direction == config.TunnelDirectionListen {
 		setConfigField(&tc.TLSConfig.CertFile, flags.certFile)

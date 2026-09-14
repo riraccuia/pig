@@ -105,9 +105,10 @@
 
 | Field | Type | Optional | Default | Description |
 | --- | --- | --- | --- | --- |
-| `type` | string? | true | none | One of "none", "jwt", "oidc". |
+| `type` | string? | true | none | One of "none", "jwt", "oidc", "oauth". |
 | `jwt` | [JWTAuth](#jwtauth)? | true | - | JWT authentication configuration. |
 | `oidc` | [OIDCAuth](#oidcauth)? | true | - | OIDC authentication configuration. |
+| `oauth` | [OAuthAuth](#oauthauth)? | true | - | OAuth authentication configuration. |
 | `mtls` | [MTLSConfig](#mtlsconfig)? | true | - | MTLS authentication configuration. |
 
 ## ICEConfig
@@ -130,18 +131,35 @@
 
 | Field | Type | Optional | Default | Description |
 | --- | --- | --- | --- | --- |
-| `issuer_url` | string | false | - | Issuer URL of the provider. |
+| `issuer_url` | string | false | - | Issuer URL of the authorization server. |
 | `client_id` | string | false | - | Client ID of the application. |
 | `client_secret` | string | false | - | Client secret of the application. |
-| `scopes` | []string | false | - | Scopes for the authorization request (optional; oidc package defaults apply when empty). |
+| `scopes` | []string | false | - | Scopes for the authorization request (optional). Empty: oauth sends no scope; oidc defaults to openid profile email. |
 | `redirect_url` | string | false | - | RedirectURL is the full OAuth redirect URI registered at the IdP (optional; loopback ephemeral port if empty). |
-| `redirect_path` | string | false | - | RedirectPath is used only when RedirectURL is empty (default in oidc is /oauth2/callback). |
+| `redirect_path` | string | false | - | RedirectPath is used only when RedirectURL is empty (default in oauth is /oauth2/callback). |
 | `skip_open_browser` | bool | false | - | Skip opening the browser for the authorization code flow. |
-| `callback_timeout_seconds` | int | false | - | CallbackTimeoutSeconds bounds browser redirect wait (zero = oidc default). |
-| `expected_audience` | string | false | - |  |
-| `clock_skew_seconds` | int | false | - | ClockSkewSeconds is leeway for id_token exp/iat (zero = oidc default). |
+| `callback_timeout_seconds` | int | false | - | CallbackTimeoutSeconds bounds browser redirect wait (zero = oauth default). |
 | `disable_pkce` | bool | false | - | Disable Proof Key for Code Exchange (PKCE). |
-| `claim_matchers` | map[string]any | false | - | ClaimMatchers see pkg/auth/oidc.Config.ClaimMatchers. |
+| `expected_audience` | string | false | - | ExpectedAudience overrides ClientID when validating JWT aud on the server (optional). |
+| `clock_skew_seconds` | int | false | - | ClockSkewSeconds is leeway for JWT exp/iat/nbf (zero = package default). |
+| `claim_matchers` | map[string]any | false | - | ClaimMatchers see pkg/auth/oauth.Config.ClaimMatchers. |
+
+## OAuthAuth
+
+| Field | Type | Optional | Default | Description |
+| --- | --- | --- | --- | --- |
+| `issuer_url` | string | false | - | Issuer URL of the authorization server. |
+| `client_id` | string | false | - | Client ID of the application. |
+| `client_secret` | string | false | - | Client secret of the application. |
+| `scopes` | []string | false | - | Scopes for the authorization request (optional). Empty: oauth sends no scope; oidc defaults to openid profile email. |
+| `redirect_url` | string | false | - | RedirectURL is the full OAuth redirect URI registered at the IdP (optional; loopback ephemeral port if empty). |
+| `redirect_path` | string | false | - | RedirectPath is used only when RedirectURL is empty (default in oauth is /oauth2/callback). |
+| `skip_open_browser` | bool | false | - | Skip opening the browser for the authorization code flow. |
+| `callback_timeout_seconds` | int | false | - | CallbackTimeoutSeconds bounds browser redirect wait (zero = oauth default). |
+| `disable_pkce` | bool | false | - | Disable Proof Key for Code Exchange (PKCE). |
+| `expected_audience` | string | false | - | ExpectedAudience overrides ClientID when validating JWT aud on the server (optional). |
+| `clock_skew_seconds` | int | false | - | ClockSkewSeconds is leeway for JWT exp/iat/nbf (zero = package default). |
+| `claim_matchers` | map[string]any | false | - | ClaimMatchers see pkg/auth/oauth.Config.ClaimMatchers. |
 
 ## MTLSConfig
 

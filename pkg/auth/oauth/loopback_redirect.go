@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package oidc
+package oauth
 
 import (
 	"crypto/tls"
@@ -37,23 +37,23 @@ type LoopbackRedirect struct {
 func ListenFixedLoopbackRedirect(cfg *Config) (LoopbackRedirect, error) {
 	raw := strings.TrimSpace(cfg.RedirectURL)
 	if raw == "" {
-		return LoopbackRedirect{}, fmt.Errorf("oidc: RedirectURL is empty")
+		return LoopbackRedirect{}, fmt.Errorf("oauth: RedirectURL is empty")
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return LoopbackRedirect{}, fmt.Errorf("oidc: RedirectURL: %w", err)
+		return LoopbackRedirect{}, fmt.Errorf("oauth: RedirectURL: %w", err)
 	}
 	scheme := strings.ToLower(strings.TrimSpace(u.Scheme))
 
 	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
 	if host != "127.0.0.1" && host != "localhost" {
-		return LoopbackRedirect{}, fmt.Errorf("oidc: RedirectURL host must be 127.0.0.1 or localhost for local callback server")
+		return LoopbackRedirect{}, fmt.Errorf("oauth: RedirectURL host must be 127.0.0.1 or localhost for local callback server")
 	}
 	if u.Port() == "" {
-		return LoopbackRedirect{}, fmt.Errorf("oidc: RedirectURL must include explicit port for loopback listener")
+		return LoopbackRedirect{}, fmt.Errorf("oauth: RedirectURL must include explicit port for loopback listener")
 	}
 	if !strings.HasPrefix(u.Path, "/") {
-		return LoopbackRedirect{}, fmt.Errorf("oidc: RedirectURL path must start with /")
+		return LoopbackRedirect{}, fmt.Errorf("oauth: RedirectURL path must start with /")
 	}
 
 	addr := net.JoinHostPort(host, u.Port())
@@ -70,18 +70,18 @@ func ListenFixedLoopbackRedirect(cfg *Config) (LoopbackRedirect, error) {
 	case "http":
 		ln, err := net.Listen("tcp", addr)
 		if err != nil {
-			return LoopbackRedirect{}, fmt.Errorf("oidc: listen redirect address: %w", err)
+			return LoopbackRedirect{}, fmt.Errorf("oauth: listen redirect address: %w", err)
 		}
 		return LoopbackRedirect{Listener: ln, RedirectURL: raw, CallbackPath: callbackPath}, nil
 	case "https":
 		tcpLn, err := net.Listen("tcp", addr)
 		if err != nil {
-			return LoopbackRedirect{}, fmt.Errorf("oidc: listen redirect address: %w", err)
+			return LoopbackRedirect{}, fmt.Errorf("oauth: listen redirect address: %w", err)
 		}
 		cert, err := certificate.GenerateCertificate()
 		if err != nil {
 			_ = tcpLn.Close()
-			return LoopbackRedirect{}, fmt.Errorf("oidc: tls certificate for loopback: %w", err)
+			return LoopbackRedirect{}, fmt.Errorf("oauth: tls certificate for loopback: %w", err)
 		}
 		tlsCfg := &tls.Config{
 			Certificates: []tls.Certificate{*cert},
@@ -90,7 +90,7 @@ func ListenFixedLoopbackRedirect(cfg *Config) (LoopbackRedirect, error) {
 		ln := tls.NewListener(tcpLn, tlsCfg)
 		return LoopbackRedirect{Listener: ln, RedirectURL: raw, CallbackPath: callbackPath}, nil
 	default:
-		return LoopbackRedirect{}, fmt.Errorf("oidc: RedirectURL scheme must be http or https, got %q", u.Scheme)
+		return LoopbackRedirect{}, fmt.Errorf("oauth: RedirectURL scheme must be http or https, got %q", u.Scheme)
 	}
 }
 
@@ -99,7 +99,7 @@ func ListenFixedLoopbackRedirect(cfg *Config) (LoopbackRedirect, error) {
 func ListenEphemeralLoopbackRedirect(cfg *Config) (LoopbackRedirect, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return LoopbackRedirect{}, fmt.Errorf("oidc: listen loopback: %w", err)
+		return LoopbackRedirect{}, fmt.Errorf("oauth: listen loopback: %w", err)
 	}
 	tcpAddr := ln.Addr().(*net.TCPAddr)
 	path := cfg.redirectPath()

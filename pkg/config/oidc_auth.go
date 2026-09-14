@@ -17,6 +17,7 @@ package config
 import (
 	"time"
 
+	"github.com/riraccuia/pig/pkg/auth/oauth"
 	"github.com/riraccuia/pig/pkg/auth/oidc"
 )
 
@@ -25,7 +26,15 @@ func (o *OIDCAuth) ToConfig() oidc.Config {
 	if o == nil {
 		return oidc.Config{}
 	}
-	cfg := oidc.Config{
+	return oidc.Config{Config: o.OAuthAuth.ToConfig()}
+}
+
+// ToConfig maps this TOML/JSON struct to pkg/auth/oauth.Config.
+func (o *OAuthAuth) ToConfig() oauth.Config {
+	if o == nil {
+		return oauth.Config{}
+	}
+	cfg := oauth.Config{
 		IssuerURL:        o.IssuerURL,
 		ClientID:         o.ClientID,
 		ClientSecret:     o.ClientSecret,
@@ -33,8 +42,8 @@ func (o *OIDCAuth) ToConfig() oidc.Config {
 		RedirectURL:      o.RedirectURL,
 		RedirectPath:     o.RedirectPath,
 		SkipOpenBrowser:  o.SkipOpenBrowser,
-		ExpectedAudience: o.ExpectedAudience,
 		DisablePKCE:      o.DisablePKCE,
+		ExpectedAudience: o.ExpectedAudience,
 		ClaimMatchers:    o.ClaimMatchers,
 	}
 	if o.CallbackTimeoutSeconds > 0 {

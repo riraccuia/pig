@@ -16,6 +16,8 @@ package oidc
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"strings"
@@ -24,22 +26,22 @@ import (
 
 	jwtgo "github.com/golang-jwt/jwt/v5"
 	"github.com/riraccuia/pig/pkg/auth/jwt"
+	"github.com/riraccuia/pig/pkg/auth/oauth"
 	"github.com/riraccuia/pig/pkg/common"
 	"golang.org/x/oauth2"
 )
 
-// ClientAuthenticator obtains an OIDC id_token (browser flow or refresh) and sends it using the same framing as pkg/auth/jwt.
-// For supported providers (e.g. GitHub) when no id_token is returned, it sends the OAuth access_token instead.
+// ClientAuthenticator obtains an OIDC id_token via the oauth package and sends it using JWT framing.
 type ClientAuthenticator struct {
-	cfg   Config
-	meta  *ProviderMetadata
-	mu    sync.Mutex
-	idTok string
-	oauth *oauth2.Token
+	cfg     Config
+	oauthCA *oauth.ClientAuthenticator
+	mu      sync.Mutex
+	idTok   string
 }
 
-// NewClientAuthenticator builds a client authenticator. It performs OIDC discovery against cfg.IssuerURL.
+// NewClientAuthenticator builds a client authenticator. It performs OIDC discovery for the code flow.
 func NewClientAuthenticator(cfg Config) (common.Authenticator, error) {
+	cfg = cfg.withClientScopes()
 	if err := cfg.ValidateForClient(); err != nil {
 		return nil, err
 	}
@@ -49,19 +51,31 @@ func NewClientAuthenticator(cfg Config) (common.Authenticator, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ClientAuthenticator{cfg: cfg, meta: meta}, nil
+	a, err := oauth.NewClientAuthenticatorFromMetadata(cfg.Config, meta)
+	if err != nil {
+		return nil, err
+	}
+	oauthCA, ok := a.(*oauth.ClientAuthenticator)
+	if !ok {
+		return nil, fmt.Errorf("oidc: unexpected oauth authenticator type")
+	}
+	return &ClientAuthenticator{cfg: cfg, oauthCA: oauthCA}, nil
 }
 
-func (a *ClientAuthenticator) oauth2Config() *oauth2.Config {
-	return &oauth2.Config{
-		ClientID:     strings.TrimSpace(a.cfg.ClientID),
-		ClientSecret: strings.TrimSpace(a.cfg.ClientSecret),
-		Endpoint: oauth2.Endpoint{
-			AuthURL:  a.meta.AuthorizationEndpoint,
-			TokenURL: a.meta.TokenEndpoint,
-		},
-		Scopes: a.cfg.scopeString(),
+func randomNonce() string {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
 	}
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func idTokenFromToken(tok *oauth2.Token) string {
+	if tok == nil {
+		return ""
+	}
+	raw, _ := tok.Extra("id_token").(string)
+	return strings.TrimSpace(raw)
 }
 
 func idTokenStillValid(raw string, leeway time.Duration) bool {
@@ -80,61 +94,59 @@ func idTokenStillValid(raw string, leeway time.Duration) bool {
 	return exp.After(time.Now().Add(leeway))
 }
 
+// requireIDTokenNonce checks that the id_token carries the nonce sent on the authorization request.
+func requireIDTokenNonce(raw, expect string) error {
+	expect = strings.TrimSpace(expect)
+	if expect == "" {
+		return fmt.Errorf("%w: empty expected nonce", ErrNonceMismatch)
+	}
+	claims := jwtgo.MapClaims{}
+	_, _, err := jwtgo.NewParser().ParseUnverified(raw, claims)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidToken, err)
+	}
+	got, _ := claims["nonce"].(string)
+	got = strings.TrimSpace(got)
+	if got == "" {
+		return fmt.Errorf("%w: id_token missing nonce", ErrNonceMismatch)
+	}
+	if got != expect {
+		return ErrNonceMismatch
+	}
+	return nil
+}
+
 // Authenticate obtains an id_token if needed, then writes it on rw using JWT framing.
 func (a *ClientAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	httpClient := a.cfg.httpClient()
-	oauthCtx := context.WithValue(ctx, oauth2.HTTPClient, httpClient)
-	leeway := a.cfg.clockSkew()
-
+	leeway := a.cfg.ClockSkewOrDefault()
 	if idTokenStillValid(a.idTok, leeway) {
 		return jwt.SendToken(rw, a.idTok)
 	}
 
-	if a.oauth != nil && a.oauth.RefreshToken != "" {
-		oauthCfg := a.oauth2Config()
-		src := oauthCfg.TokenSource(oauthCtx, a.oauth)
-		newTok, err := src.Token()
-		if err == nil {
-			if raw, ok := newTok.Extra("id_token").(string); ok && strings.TrimSpace(raw) != "" {
-				a.idTok = raw
-				a.oauth = newTok
-				return jwt.SendToken(rw, a.idTok)
-			}
-			a.oauth = newTok
-			if providerSupportsOpaqueTokenFallback(a.cfg, a.meta) {
-				if s := strings.TrimSpace(newTok.AccessToken); s != "" {
-					a.idTok = ""
-					return jwt.SendToken(rw, s)
-				}
-			}
+	// Prefer refresh so a still-valid access_token does not skip a new id_token.
+	// Refresh responses are not bound to the authorization-request nonce.
+	if tok, err := a.oauthCA.Refresh(ctx); err == nil {
+		if id := idTokenFromToken(tok); id != "" {
+			a.idTok = id
+			return jwt.SendToken(rw, a.idTok)
 		}
 	}
 
-	if providerSupportsOpaqueTokenFallback(a.cfg, a.meta) && a.oauth != nil {
-		if s := strings.TrimSpace(a.oauth.AccessToken); s != "" {
-			a.idTok = ""
-			return jwt.SendToken(rw, s)
-		}
-	}
-
-	idRaw, tok, err := runAuthorizationCodeFlow(ctx, &a.cfg, a.meta)
+	nonce := randomNonce()
+	tok, err := a.oauthCA.Authorize(ctx, oauth2.SetAuthURLParam("nonce", nonce))
 	if err != nil {
 		return err
 	}
-	a.oauth = tok
-	if s := strings.TrimSpace(idRaw); s != "" {
-		a.idTok = s
-		return jwt.SendToken(rw, a.idTok)
+	id := idTokenFromToken(tok)
+	if id == "" {
+		return ErrMissingIDToken
 	}
-	if providerSupportsOpaqueTokenFallback(a.cfg, a.meta) {
-		if s := strings.TrimSpace(tok.AccessToken); s != "" {
-			a.idTok = ""
-			return jwt.SendToken(rw, s)
-		}
-		return fmt.Errorf("oidc: no id_token and empty access_token")
+	if err := requireIDTokenNonce(id, nonce); err != nil {
+		return err
 	}
-	return ErrMissingIDToken
+	a.idTok = id
+	return jwt.SendToken(rw, a.idTok)
 }

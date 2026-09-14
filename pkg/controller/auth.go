@@ -21,6 +21,7 @@ import (
 	"os"
 
 	"github.com/riraccuia/pig/pkg/auth/jwt"
+	"github.com/riraccuia/pig/pkg/auth/oauth"
 	"github.com/riraccuia/pig/pkg/auth/oidc"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
@@ -110,6 +111,15 @@ func (c *Controller) createClientAuthenticator(cfg *config.AuthConfig) (authenti
 			return nil, fmt.Errorf("failed to create OIDC authenticator: %w", err)
 		}
 		c.logger.Infof("OIDC authentication enabled")
+	case config.AuthTypeOAuth:
+		if cfg.OAuth == nil {
+			return nil, fmt.Errorf("invalid oauth authentication config")
+		}
+		authenticator, err = oauth.NewClientAuthenticator(cfg.OAuth.ToConfig())
+		if err != nil {
+			return nil, fmt.Errorf("failed to create OAuth authenticator: %w", err)
+		}
+		c.logger.Infof("OAuth authentication enabled")
 	case config.AuthTypeJWT:
 		if cfg.JWT == nil || cfg.JWT.Token == "" {
 			return nil, fmt.Errorf("invalid jwt authentication config")
@@ -136,6 +146,15 @@ func (c *Controller) createServerAuthenticator(cfg *config.AuthConfig) (common.A
 			return nil, fmt.Errorf("failed to create OIDC authenticator: %w", err)
 		}
 		c.logger.Infof("OIDC authentication enabled")
+		return authenticator, nil
+	}
+
+	if cfg.OAuth != nil {
+		authenticator, err := oauth.NewServerAuthenticator(cfg.OAuth.ToConfig())
+		if err != nil {
+			return nil, fmt.Errorf("failed to create OAuth authenticator: %w", err)
+		}
+		c.logger.Infof("OAuth authentication enabled")
 		return authenticator, nil
 	}
 

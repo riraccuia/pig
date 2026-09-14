@@ -13,4 +13,5 @@ Table of contents for pig user documentation. New guides are added here by topic
 ## Authentication
 
 - [JWT](auth/jwt.md)
+- [OAuth](auth/oauth.md)
 - [OIDC](auth/oidc.md)

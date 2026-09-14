@@ -12,17 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package oidc
+package oauth
 
-import "errors"
+import "testing"
 
-var (
-	// ErrMissingIDToken indicates the token response did not contain id_token.
-	ErrMissingIDToken = errors.New("oidc: token response missing id_token")
-
-	// ErrNonceMismatch indicates the id_token nonce did not match the authorization request.
-	ErrNonceMismatch = errors.New("oidc: id_token nonce mismatch")
-
-	// ErrInvalidToken is returned when ID token verification fails.
-	ErrInvalidToken = errors.New("oidc: invalid id token")
-)
+func TestTokenLooksLikeJWT(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		{"a.b.c", true},
+		{" header.payload.sig ", true},
+		{"gho_xxxxxxxx", false},
+		{"a.b", false},
+		{"a.b.c.d", false},
+		{".b.c", false},
+		{"a..c", false},
+		{"a.b.", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := tokenLooksLikeJWT(tt.in); got != tt.want {
+			t.Errorf("tokenLooksLikeJWT(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}

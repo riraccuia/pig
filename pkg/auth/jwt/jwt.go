@@ -38,11 +38,19 @@ var supportedAlgorithms = map[string]func(token *jwt.Token) bool{
 	"RS256": isRSA,
 	"RS384": isRSA,
 	"RS512": isRSA,
+	"ES256": isECDSA,
+	"ES384": isECDSA,
+	"ES512": isECDSA,
 	"EdDSA": isEdDSA,
 }
 
 func isRSA(token *jwt.Token) bool {
 	_, ok := token.Method.(*jwt.SigningMethodRSA)
+	return ok
+}
+
+func isECDSA(token *jwt.Token) bool {
+	_, ok := token.Method.(*jwt.SigningMethodECDSA)
 	return ok
 }
 
@@ -145,7 +153,7 @@ func (a *ServerAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter
 
 		// Get the appropriate key for verification
 		return GetKey(a.keySet, token)
-	}, jwt.WithValidMethods([]string{"RS256", "RS384", "RS512", "EdDSA"}),
+	}, jwt.WithValidMethods([]string{"RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "EdDSA"}),
 		jwt.WithIssuedAt(),
 		jwt.WithExpirationRequired())
 

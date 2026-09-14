@@ -21,34 +21,20 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/riraccuia/pig/pkg/auth/oauth"
 )
 
 // ProviderMetadata holds the subset of OpenID Provider Metadata used by this package.
-type ProviderMetadata struct {
-	Issuer                string `json:"issuer"`
-	AuthorizationEndpoint string `json:"authorization_endpoint"`
-	TokenEndpoint         string `json:"token_endpoint"`
-	JWKSURI               string `json:"jwks_uri"`
-}
+type ProviderMetadata = oauth.ProviderMetadata
 
 // NormalizeIssuer trims space and removes a trailing slash from the configured issuer.
 func NormalizeIssuer(issuer string) string {
-	return strings.TrimSuffix(strings.TrimSpace(issuer), "/")
+	return oauth.NormalizeIssuer(issuer)
 }
 
 func wellKnownURL(issuer string) string {
 	return NormalizeIssuer(issuer) + "/.well-known/openid-configuration"
-}
-
-// patchProviderMetadataEndpoints fills OAuth endpoints when the discovery document omits them (IdP-specific).
-func patchProviderMetadataEndpoints(meta *ProviderMetadata) {
-	if meta == nil {
-		return
-	}
-	if meta.AuthorizationEndpoint != "" && meta.TokenEndpoint != "" {
-		return
-	}
-	patchGitHubProviderMetadataIfNeeded(meta)
 }
 
 func validateProviderMetadata(meta *ProviderMetadata) error {
@@ -56,10 +42,10 @@ func validateProviderMetadata(meta *ProviderMetadata) error {
 		return fmt.Errorf("oidc discovery: missing issuer")
 	}
 	if meta.AuthorizationEndpoint == "" {
-		return fmt.Errorf("oidc discovery: missing authorization_endpoint (and no known fallback for this issuer)")
+		return fmt.Errorf("oidc discovery: missing authorization_endpoint")
 	}
 	if meta.TokenEndpoint == "" {
-		return fmt.Errorf("oidc discovery: missing token_endpoint (and no known fallback for this issuer)")
+		return fmt.Errorf("oidc discovery: missing token_endpoint")
 	}
 	if meta.JWKSURI == "" {
 		return fmt.Errorf("oidc discovery: missing jwks_uri")
@@ -67,12 +53,8 @@ func validateProviderMetadata(meta *ProviderMetadata) error {
 	return nil
 }
 
-// issuerMatchesDiscovery reports whether cfg.IssuerURL is compatible with meta.Issuer from discovery.
 func issuerMatchesDiscovery(cfgIss, docIss string) bool {
-	if cfgIss == docIss {
-		return true
-	}
-	return githubConfigIssuerMatchesDocIssuer(cfgIss, docIss)
+	return cfgIss == docIss
 }
 
 // fetchProviderMetadata loads OpenID Provider Metadata from the issuer's well-known URL.
@@ -98,7 +80,6 @@ func fetchProviderMetadata(ctx context.Context, client *http.Client, issuer stri
 	if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil {
 		return nil, fmt.Errorf("oidc discovery decode: %w", err)
 	}
-	patchProviderMetadataEndpoints(&meta)
 	if err := validateProviderMetadata(&meta); err != nil {
 		return nil, err
 	}

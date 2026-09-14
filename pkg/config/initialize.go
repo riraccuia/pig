@@ -325,6 +325,21 @@ func (c *AuthConfig) Initialize(direction TunnelDirection) error {
 				return err
 			}
 		}
+	case AuthTypeOAuth:
+		if c.OAuth == nil {
+			return fmt.Errorf("OAuth auth config not specified")
+		}
+		cfg := c.OAuth.ToConfig()
+		if direction == TunnelDirectionConnect {
+			if err := cfg.ValidateForClient(); err != nil {
+				return err
+			}
+		}
+		if direction == TunnelDirectionListen {
+			if err := cfg.ValidateForServer(); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

@@ -12,17 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package oidc
+package oauth
 
-import "errors"
+import "strings"
 
-var (
-	// ErrMissingIDToken indicates the token response did not contain id_token.
-	ErrMissingIDToken = errors.New("oidc: token response missing id_token")
-
-	// ErrNonceMismatch indicates the id_token nonce did not match the authorization request.
-	ErrNonceMismatch = errors.New("oidc: id_token nonce mismatch")
-
-	// ErrInvalidToken is returned when ID token verification fails.
-	ErrInvalidToken = errors.New("oidc: invalid id token")
-)
+// tokenLooksLikeJWT uses a minimal shape check (three non-empty dot-separated segments) so opaque
+// tokens like GitHub's gho_* are not sent through jwt.Parse.
+func tokenLooksLikeJWT(s string) bool {
+	s = strings.TrimSpace(s)
+	parts := strings.Split(s, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, p := range parts {
+		if p == "" {
+			return false
+		}
+	}
+	return true
+}
