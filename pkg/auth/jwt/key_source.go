@@ -25,7 +25,7 @@ import (
 	"os"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 )
 
 // KeySource defines an interface for loading JWK sets.
@@ -80,7 +80,7 @@ func (s *FileKeySource) LoadKeys(ctx context.Context) (jwk.Set, error) {
 		}
 
 		// Import the public key as a JWK
-		k, err := jwk.Import(key)
+		k, err := jwk.Import[jwk.Key](key)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create JWK: %w", err)
 		}
@@ -181,7 +181,8 @@ func GetKey(set jwk.Set, token *jwt.Token) (any, error) {
 
 	// Extract the raw key material
 	var rawKey any
-	if err = jwk.Export(key, &rawKey); err != nil {
+	rawKey, err = jwk.Export[any](key)
+	if err != nil {
 		return nil, fmt.Errorf("failed to get raw key: %w", err)
 	}
 

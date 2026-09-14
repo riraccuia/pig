@@ -20,7 +20,7 @@ import (
 	"time"
 
 	jwtgo "github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 
 	authjwt "github.com/riraccuia/pig/pkg/auth/jwt"
 )

@@ -107,6 +107,9 @@ func (c *Controller) handleRouteAdd(routes []config.Route) {
 			c.logger.Errorf("Failed to build route %s: %v", r.Destination, err)
 			continue
 		}
+		if r.Type == config.RouteTypeTunnel {
+			c.logger.Infof("Routing %s to %s via %s", rt.Destination, rt.Gateway, rt.Interface)
+		}
 		if err := c.routeManager.AddRoute(rt); err != nil {
 			c.logger.Errorf("Failed to add route %s: %v", r.Destination, err)
 		}
@@ -196,7 +199,7 @@ func (c *Controller) buildRoute(r config.Route) (*route.Route, error) {
 		if dest == nil {
 			return nil, fmt.Errorf("no suitable tunnel address for %s", ipNet)
 		}
-		c.logger.Infof("Routing %s to %s via %s", ipNet, dest, c.clientAdapter.Name())
+		//c.logger.Infof("Routing %s to %s via %s", ipNet, dest, c.clientAdapter.Name())
 		return &route.Route{
 			Destination: ipNet,
 			Gateway:     dest,

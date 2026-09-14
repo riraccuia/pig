@@ -33,11 +33,19 @@ func (c *Client) openStreams(ctx context.Context) {
 		stream, err := c.conn.NewStream(ctx)
 		if err != nil {
 			c.logger.Errorf("failed to create stream: %v", err)
-			return
+			continue
 		}
 		stream.Flush()
 		c.streams.Add(stream)
 		go c.doStream(ctx, stream)
+	}
+
+	if c.streams.Count() == 0 {
+		select {
+		case c.connError <- fmt.Errorf("could not open streams"):
+		default:
+		}
+		return
 	}
 }
 
@@ -76,7 +84,7 @@ func (c *Client) removeStream(stream transport.Stream) {
 func (c *Client) reconnectStream(ctx context.Context, conn transport.Conn) {
 	desiredCount := c.config.StreamCount
 	if desiredCount <= 0 {
-		desiredCount = 5
+		desiredCount = runtime.NumCPU()
 	}
 	currentCount := c.streams.Count()
 
@@ -88,7 +96,7 @@ func (c *Client) reconnectStream(ctx context.Context, conn transport.Conn) {
 
 	stream, err := conn.NewStream(ctx)
 	if err != nil {
-		conn.Close()
+		//conn.Close()
 		c.logger.Errorf("failed to create stream: %v", err)
 		return
 	}

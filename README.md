@@ -4,7 +4,7 @@
 
 **pig** is a single binary that connects two computers directly and securely to each other.
 
-Using NAT traversal techniques, it can find a suitable connection path automatically in a variety of network environments, even though firewalls/routers may be in the way. In other words you shouldn't need to setup your network/s at all. In most cases.
+Using NAT traversal techniques, it finds a suitable connection path automatically in a variety of network environments, even though firewalls/routers may be in the way. In other words you shouldn't need to setup your network/s at all. In most cases.
 
 Pigs can also be chained to create mesh networks.
 
@@ -36,16 +36,6 @@ It is still a bit rough around the edges. Feel free to contribute and bring fres
 **Multi-platform.** Linux, macOS, and Windows. Would love to add mobile support, too.
 
 **STUN mode.** Pig has a [`-stun`](docs/cli-help/stun.md) subcommand to query a remote server or become one on the fly.
-
-## Nerd facts
-
-- Pig features a [WRED (weighted random early detection)](https://en.wikipedia.org/wiki/Weighted_random_early_detection) implementation to combat network bufferbloat and maintain low latency. You can even configure some of its parameters.
-- The ICMP transport protocol has a TCP style congestion control (New Reno) built on top of it. More testing and feedback would really help here.
-- Adding a new transport protocol is relatively simple and "only" requires some wrapping to honor the `transport.Conn` and `transport.Listener` interfaces.
-- If one of the connecting nodes is behind [symmetric NAT](https://en.wikipedia.org/wiki/Network_address_translation#Methods_of_translation), pig can usually still find a path using the [birthday problem](https://en.wikipedia.org/wiki/Birthday_problem).
-- Stream multiplexing support is built-in where the protocol allows it (e.g. QUIC). The number of streams to open is configurable, too.
-
-
 
 ## Getting started
 
@@ -82,6 +72,27 @@ nc 192.168.5.1 8080; killall -INT pig
 	[Alice] Hello Bob!
 
 ```
+
+To turn Alice's command into a config file, do
+```bash
+pig -l -id pig-demo-alice -P . -k -to-cfg json > alice.json
+```
+
+Check the [config file reference](docs/config.md) and customize the generated config for an advanced setup.
+Then run with it.
+
+```bash
+pig -config alice.json
+```
+
+
+## Nerd facts
+
+- Pig features a [WRED (weighted random early detection)](https://en.wikipedia.org/wiki/Weighted_random_early_detection) implementation to combat network bufferbloat and maintain low latency. It is fully configurable.
+- The ICMP transport protocol has a TCP style congestion control (New Reno) built on top of it. More testing and feedback would really help here.
+- Adding a new transport protocol is relatively simple and "only" requires some wrapping to honor the `transport.Conn` and `transport.Listener` interfaces.
+- If one of the connecting nodes is behind [symmetric NAT](https://en.wikipedia.org/wiki/Network_address_translation#Methods_of_translation), pig can usually still find a path using the [birthday problem](https://en.wikipedia.org/wiki/Birthday_problem).
+- Stream multiplexing support is built-in where the protocol allows it (e.g. QUIC). The number of streams to open is configurable, too.
 
 ## License
 

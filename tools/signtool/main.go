@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 )
 
 var (
@@ -303,7 +303,7 @@ func generateToken(key any, method jwt.SigningMethod, params *tokenParams) (stri
 		IssuedAt:  jwt.NewNumericDate(params.issuedAt),
 	}
 
-	wk, err := jwk.Import(key)
+	wk, err := jwk.Import[jwk.Key](key)
 	if err != nil {
 		return "", fmt.Errorf("failed to create JWK: %w", err)
 	}

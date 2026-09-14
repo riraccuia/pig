@@ -21,7 +21,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/riraccuia/pig/pkg/common"
 )
 

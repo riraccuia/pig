@@ -3,7 +3,8 @@ Usage: pig -c [options] [-to-cfg]
 
 OUTPUT
 
- -to-cfg Takes either 'json' or 'toml'. Outputs the config in the specified format and exits.
+ -to-cfg Takes either 'json' or 'toml'. Turns the current CLI options into a config file and
+         exits.
 
 OPTIONS
 
@@ -16,9 +17,9 @@ General options:
  -a  Address host[:port]. Or use -id in NAT traversal mode. In simple mode, this is the
      connect node's target address and the listen node's bind address.
  -I  The adapter/interface to bind to, required only when '-P' is *-ICMP.
- -P  Transport protocol for the tunnel. See 'pig -list-protos' for the list of supported ones.
-     The special '.' option selects all available protocols for candidate generation when NAT
-     traversal is used.
+ -P  Transport protocol for the tunnel. See 'pig docs protos' for the list of supported ones.
+     The special '.' option selects all available protocols for candidate generation with NAT
+     traversal.
  -p  Source port to use for the connection.
  -ta Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma
      separated CIDR values. Defaults to 172.31.254.1/29 for connect nodes and 172.31.255.1/24
@@ -28,8 +29,8 @@ General options:
      separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'.
 
 Scripting options:
- -S Takes the path to an executable file that will be called on tunnel events. See 'pig -env'
-    for the list of environment variables that are passed to the script.
+ -S Takes the path to an executable file that will be called on tunnel events. See 'pig docs
+    env' for the list of environment variables that are passed to the script.
 
 Logging options:
  -v Print more verbose output. Use 0 (default) for info, 1 for debug, 2 for trace.

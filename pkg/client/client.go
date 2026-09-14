@@ -167,6 +167,7 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func(ctx context
 
 		// Perform authentication if configured
 		if c.authenticator != nil {
+			c.logger.Infof("Authenticating connection to %s", conn.RemoteAddr())
 			if err := c.authenticator.Authenticate(ctx, conn); err != nil {
 				c.logger.Errorf("Failed to authenticate: %v", err)
 				c.signalEvent(&EventContext{State: StateConnectionFailed, Error: err})

@@ -55,7 +55,7 @@ func (c *Client) processInbound(connOrStream io.ReadWriteCloser) {
 		n, err := connOrStream.Read(buffer[len(unprocessed):])
 		if err != nil {
 			c.logger.Debugf("failed to read from connection or stream: %v", err)
-			if conn, ok := connOrStream.(transport.Conn); ok && conn.IsStreamed() {
+			if _, ok := connOrStream.(transport.Stream); ok {
 				// streams are reconnected automatically
 				return
 			}

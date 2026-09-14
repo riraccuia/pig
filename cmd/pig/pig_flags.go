@@ -78,19 +78,19 @@ var (
 	// map values for all flags: flag name, [supported mode (c=connect, l=listen, a=all), description]
 	pigFlags = map[string][3]string{
 		// output settings
-		FLAG_TO_CFG: {FLAG_TO_CFG, "a", "Takes either 'json' or 'toml'. Outputs the config in the specified format and exits."},
+		FLAG_TO_CFG: {FLAG_TO_CFG, "a", "Takes either 'json' or 'toml'. Turns the current CLI options into a config file and exits."},
 		// general settings
 		FLAG_SIMPLE: {FLAG_SIMPLE, "a", "Simple mode. Disables NAT traversal to establish direct connections, in which case ports need to be opened manually on edge routers and/or firewalls."},
 		FLAG_ID:     {FLAG_ID, "a", "ID or friendly name for a listening node. This identifier is registered for signaling during NAT traversal. When the connecting side uses it, it doesn't need to know the other node's address."},
 		FLAG_ADDR:   {FLAG_ADDR, "a", "Address host[:port]. Or use -id in NAT traversal mode. In simple mode, this is the connect node's target address and the listen node's bind address."},
 		FLAG_BIND:   {FLAG_BIND, "a", "The adapter/interface to bind to, required only when '-P' is *-ICMP."},
-		FLAG_PROTO:  {FLAG_PROTO, "a", "Transport protocol for the tunnel. See '" + binaryName + " -list-protos' for the list of supported ones. The special '.' option selects all available protocols for candidate generation when NAT traversal is used."},
+		FLAG_PROTO:  {FLAG_PROTO, "a", "Transport protocol for the tunnel. See '" + binaryName + " docs protos' for the list of supported ones. The special '.' option selects all available protocols for candidate generation with NAT traversal."},
 		FLAG_SPORT:  {FLAG_SPORT, "c", "Source port to use for the connection."},
 		FLAG_TADDR:  {FLAG_TADDR, "a", "Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR values. Defaults to 172.31.254.1/29 for connect nodes and 172.31.255.1/24 for listening nodes."},
 		FLAG_RETRY:  {FLAG_RETRY, "c", "Reconnect interval in seconds. Defaults to " + strconv.Itoa(config.DefaultRetryInterval) + "."},
 		FLAG_ROUTE:  {FLAG_ROUTE, "c", "Route subnets through the tunnel. Provide 'full' to route all traffic, or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'."},
 		// scripting settings
-		FLAG_SCRIPT: {FLAG_SCRIPT, "c", "Takes the path to an executable file that will be called on tunnel events. See '" + binaryName + " -env' for the list of environment variables that are passed to the script."},
+		FLAG_SCRIPT: {FLAG_SCRIPT, "c", "Takes the path to an executable file that will be called on tunnel events. See '" + binaryName + " docs env' for the list of environment variables that are passed to the script."},
 		// logging settings
 		FLAG_VERBOSE: {FLAG_VERBOSE, "a", "Print more verbose output. Use 0 (default) for info, 1 for debug, 2 for trace."},
 		// certificate settings
