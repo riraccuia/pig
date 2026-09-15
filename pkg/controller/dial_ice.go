@@ -136,6 +136,11 @@ func (c *Controller) processICEClientConnectPaths(ctx context.Context, connectPa
 			cp.CloseConn()
 		}
 	}*/
+
+	if selectedPath == nil {
+		err = errors.New("all ICE candidates failed")
+		return
+	}
 	return
 }
 

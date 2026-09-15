@@ -6,9 +6,13 @@ Table of contents for pig user documentation. New guides are added here by topic
 
 - [CLI Reference](cli-help/main.md)
 
-## Configuration Files
+## Configuration
 
-- [Reference](config.md)
+- [Config file reference](config.md)
+
+## NAT traversal
+
+- [NAT traversal](nat.md)
 
 ## Authentication
 

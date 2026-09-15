@@ -53,7 +53,11 @@ func (c *Controller) onTunnelConnected(tunnel *client.Client) error {
 		}
 	}*/
 	addRoutes = append(addRoutes, tunnelCfg.Routes...)
-	c.routeRequests <- routeRequest{op: routeOpAdd, routes: addRoutes}
+	select {
+	case c.routeRequests <- routeRequest{op: routeOpAdd, routes: addRoutes}:
+	default:
+		c.logger.Errorf("failed to send route add request: channel is full")
+	}
 	return nil
 }
 

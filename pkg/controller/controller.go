@@ -159,14 +159,11 @@ func (c *Controller) StartCallback(callback func(ctx context.Context)) {
 
 func (c *Controller) Start() {
 	if c.cfg == nil {
-		c.logger.Fatal("config is not loaded")
+		c.logger.Fatal("no config loaded")
 	}
-	if c.cfg.HasConnectTunnels() {
-		c.StartClient()
-	}
-	if c.cfg.HasListenTunnels() {
-		c.StartServer()
-	}
+	c.ManageRoutes()
+	c.StartClient()
+	c.StartServer()
 }
 
 func tunnelsByDirection(cfg *config.Config, direction config.TunnelDirection) []*config.TunnelConfig {

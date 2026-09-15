@@ -46,9 +46,6 @@ func (rt *routeTable) addRoutes(ta *Adapter, routes []config.Route) {
 		if err != nil {
 			continue
 		}
-		if ipNet.IP.To4() == nil {
-			//continue
-		}
 		rt.routes = append(rt.routes, tunnelRoute{network: ipNet, tunnel: ta})
 	}
 	slices.SortFunc(rt.routes, func(a, b tunnelRoute) int {

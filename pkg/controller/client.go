@@ -34,6 +34,10 @@ func (c *Controller) StartClient() {
 func (c *Controller) startClient(ctx context.Context, cfg *config.Config) {
 	defer c.Done()
 
+	if !cfg.HasConnectTunnels() {
+		return
+	}
+
 	adapterCfg := &cfg.Adapter
 	connectTunnels := tunnelsByDirection(cfg, config.TunnelDirectionConnect)
 
@@ -41,16 +45,9 @@ func (c *Controller) startClient(ctx context.Context, cfg *config.Config) {
 
 	c.scriptExecutor = script.New(c.logger, cfg.ScriptPath)
 
-	c.routeRequests = make(chan routeRequest, 16)
-
 	if err := c.setupClientAdapter(ctx, adapterCfg); err != nil {
 		c.logger.Fatalf("Failed to setup adapter: %v", err)
 	}
-
-	// Central route manager goroutine: installs global routes once, then
-	// processes per-tunnel add/remove requests for the controller lifetime.
-	c.Add(1)
-	go c.manageRoutes(ctx, cfg)
 
 	for _, tunnelCfg := range connectTunnels {
 		if err := c.AddClientTunnel(ctx, tunnelCfg); err != nil {

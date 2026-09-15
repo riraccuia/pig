@@ -24,7 +24,7 @@ import (
 
 const (
 	defaultRedirectPath = "/oauth2/callback"
-	defaultCallbackWait = 3 * time.Minute
+	defaultCallbackWait = time.Minute
 	defaultClockSkew    = 30 * time.Second
 )
 
@@ -61,7 +61,7 @@ type Config struct {
 	SkipOpenBrowser bool
 
 	// CallbackTimeout bounds how long the client waits for the redirect after opening the browser.
-	// Zero means default (3 minutes).
+	// Zero means default (1 minute).
 	CallbackTimeout time.Duration
 
 	// DisablePKCE disables PKCE (not recommended). Some confidential clients may require it off when using only client_secret.

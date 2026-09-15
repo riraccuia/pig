@@ -133,16 +133,16 @@
 | --- | --- | --- | --- | --- |
 | `issuer_url` | string | false | - | Issuer URL of the authorization server. |
 | `client_id` | string | false | - | Client ID of the application. |
-| `client_secret` | string | false | - | Client secret of the application. |
-| `scopes` | []string | false | - | Scopes for the authorization request (optional). Empty: oauth sends no scope; oidc defaults to openid profile email. |
-| `redirect_url` | string | false | - | RedirectURL is the full OAuth redirect URI registered at the IdP (optional; loopback ephemeral port if empty). |
-| `redirect_path` | string | false | - | RedirectPath is used only when RedirectURL is empty (default in oauth is /oauth2/callback). |
-| `skip_open_browser` | bool | false | - | Skip opening the browser for the authorization code flow. |
-| `callback_timeout_seconds` | int | false | - | CallbackTimeoutSeconds bounds browser redirect wait (zero = oauth default). |
-| `disable_pkce` | bool | false | - | Disable Proof Key for Code Exchange (PKCE). |
-| `expected_audience` | string | false | - | ExpectedAudience overrides ClientID when validating JWT aud on the server (optional). |
-| `clock_skew_seconds` | int | false | - | ClockSkewSeconds is leeway for JWT exp/iat/nbf (zero = package default). |
-| `claim_matchers` | map[string]any | false | - | ClaimMatchers see pkg/auth/oauth.Config.ClaimMatchers. |
+| `client_secret` | string? | true | - | Client secret of the application. |
+| `scopes` | []string? | true | - | Scopes for the authorization request (optional). Empty: oauth sends no scope; oidc defaults to openid profile email. |
+| `redirect_url` | string? | true | - | RedirectURL is the full OAuth redirect URI registered at the IdP (optional; loopback ephemeral port if empty). |
+| `redirect_path` | string? | true | - | RedirectPath is used only when RedirectURL is empty (default in oauth is /oauth2/callback). |
+| `skip_open_browser` | bool? | true | false | Skip opening the browser for the authorization code flow. |
+| `callback_timeout_seconds` | int? | true | 60 | CallbackTimeoutSeconds bounds browser redirect wait (zero = oauth default). |
+| `disable_pkce` | bool? | true | false | Disable Proof Key for Code Exchange (PKCE). |
+| `expected_audience` | string? | true | - | ExpectedAudience overrides ClientID when validating JWT aud on the server (optional). |
+| `clock_skew_seconds` | int? | true | 30 | ClockSkewSeconds is leeway for JWT exp/iat/nbf (zero = package default). |
+| `claim_matchers` | map[string]any? | true | - | ClaimMatchers see pkg/auth/oauth.Config.ClaimMatchers. |
 
 ## OAuthAuth
 
@@ -150,16 +150,16 @@
 | --- | --- | --- | --- | --- |
 | `issuer_url` | string | false | - | Issuer URL of the authorization server. |
 | `client_id` | string | false | - | Client ID of the application. |
-| `client_secret` | string | false | - | Client secret of the application. |
-| `scopes` | []string | false | - | Scopes for the authorization request (optional). Empty: oauth sends no scope; oidc defaults to openid profile email. |
-| `redirect_url` | string | false | - | RedirectURL is the full OAuth redirect URI registered at the IdP (optional; loopback ephemeral port if empty). |
-| `redirect_path` | string | false | - | RedirectPath is used only when RedirectURL is empty (default in oauth is /oauth2/callback). |
-| `skip_open_browser` | bool | false | - | Skip opening the browser for the authorization code flow. |
-| `callback_timeout_seconds` | int | false | - | CallbackTimeoutSeconds bounds browser redirect wait (zero = oauth default). |
-| `disable_pkce` | bool | false | - | Disable Proof Key for Code Exchange (PKCE). |
-| `expected_audience` | string | false | - | ExpectedAudience overrides ClientID when validating JWT aud on the server (optional). |
-| `clock_skew_seconds` | int | false | - | ClockSkewSeconds is leeway for JWT exp/iat/nbf (zero = package default). |
-| `claim_matchers` | map[string]any | false | - | ClaimMatchers see pkg/auth/oauth.Config.ClaimMatchers. |
+| `client_secret` | string? | true | - | Client secret of the application. |
+| `scopes` | []string? | true | - | Scopes for the authorization request (optional). Empty: oauth sends no scope; oidc defaults to openid profile email. |
+| `redirect_url` | string? | true | - | RedirectURL is the full OAuth redirect URI registered at the IdP (optional; loopback ephemeral port if empty). |
+| `redirect_path` | string? | true | - | RedirectPath is used only when RedirectURL is empty (default in oauth is /oauth2/callback). |
+| `skip_open_browser` | bool? | true | false | Skip opening the browser for the authorization code flow. |
+| `callback_timeout_seconds` | int? | true | 60 | CallbackTimeoutSeconds bounds browser redirect wait (zero = oauth default). |
+| `disable_pkce` | bool? | true | false | Disable Proof Key for Code Exchange (PKCE). |
+| `expected_audience` | string? | true | - | ExpectedAudience overrides ClientID when validating JWT aud on the server (optional). |
+| `clock_skew_seconds` | int? | true | 30 | ClockSkewSeconds is leeway for JWT exp/iat/nbf (zero = package default). |
+| `claim_matchers` | map[string]any? | true | - | ClaimMatchers see pkg/auth/oauth.Config.ClaimMatchers. |
 
 ## MTLSConfig
 

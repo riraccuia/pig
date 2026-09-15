@@ -32,6 +32,10 @@ func (c *Controller) StartServer() {
 func (c *Controller) startServer(ctx context.Context, cfg *config.Config) {
 	defer c.Done()
 
+	if !cfg.HasListenTunnels() {
+		return
+	}
+
 	listenTunnels := tunnelsByDirection(cfg, config.TunnelDirectionListen)
 	c.logger.Infof("Starting pig listen runtime | Tunnels: %d", len(listenTunnels))
 
