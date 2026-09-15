@@ -1,47 +1,73 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package ws
 
 import (
 	"context"
 	"net"
 	"net/http"
+	"time"
 
 	"crypto/tls"
 
 	"github.com/coder/websocket"
 )
 
-// WSListener implements transport.Listener for WebSocket connections
+// WSListener implements transport.Listener for WebSocket connections.
 type WSListener struct {
 	server   *http.Server
 	ctx      context.Context
+	cancel   context.CancelCauseFunc
 	connChan chan *WSConn
 }
 
-// NewWSListener creates a new WebSocket transport
+// NewWSListener creates a new WebSocket transport.
 func NewWSListener(ctx context.Context) *WSListener {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithCancelCause(ctx)
+
 	return &WSListener{
 		ctx:      ctx,
+		cancel:   cancel,
 		connChan: make(chan *WSConn),
 	}
 }
 
 func (t *WSListener) Accept() (net.Conn, error) {
+	if t.ctx.Err() != nil {
+		return nil, net.ErrClosed
+	}
 	select {
 	case <-t.ctx.Done():
 		return nil, t.ctx.Err()
-	case conn, ok := <-t.connChan:
-		if !ok {
-			return nil, net.ErrClosed
-		}
+	case conn := <-t.connChan:
+		conn.SetReadDeadline(time.Time{})
 		return conn, nil
 	}
 }
 
 func (t *WSListener) Close() error {
-	if t.server != nil {
-		t.server.Close()
+	if t.ctx.Err() != nil {
+		return nil
 	}
-	close(t.connChan)
+	t.cancel(net.ErrClosed)
+	if t.server != nil {
+		t.server.Close() // this will close the listener but not the websocket connection
+	}
 	return nil
 }
 
@@ -61,17 +87,25 @@ func (t *WSListener) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Listen starts the WebSocket server on the given address
+// Listen starts the WebSocket server on the given address.
 func (t *WSListener) ListenWithListener(l net.Listener, tlsConfig *tls.Config) error {
 	t.server = &http.Server{
 		Handler:   t,
 		TLSConfig: tlsConfig,
+		ConnState: func(conn net.Conn, newState http.ConnState) {
+			if newState != http.StateClosed {
+				return
+			}
+			// This was a half-open connection, because it never got hijacked
+			// so we need to close the listener to free the resources
+			t.Close()
+		},
 	}
 
 	return t.server.Serve(tls.NewListener(l, tlsConfig))
 }
 
-// Listen starts the WebSocket server on the given address
+// Listen starts the WebSocket server on the given address.
 func (t *WSListener) Listen(network, address string, tlsConfig *tls.Config) error {
 	t.server = &http.Server{
 		Addr:      address,

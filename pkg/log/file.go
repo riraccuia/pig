@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package log
 
 import (
@@ -7,7 +21,7 @@ import (
 	"time"
 )
 
-// FileWriter is a logger that writes to a file
+// FileWriter is a logger that writes to a file.
 type FileWriter struct {
 	*os.File
 	path         string
@@ -16,7 +30,7 @@ type FileWriter struct {
 	rotating     atomic.Bool
 }
 
-// NewFileWriter creates a new FileLogger
+// NewFileWriter creates a new FileLogger.
 func NewFileWriter(path string) (*FileWriter, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
 	if err != nil {
@@ -40,13 +54,13 @@ func NewFileWriter(path string) (*FileWriter, error) {
 	return fw, nil
 }
 
-// WithRotateSize sets the rotate size for the FileLogger
+// WithRotateSize sets the rotate size for the FileLogger.
 func (l *FileWriter) WithRotateSize(bytes int64) *FileWriter {
 	l.rotateSize = bytes
 	return l
 }
 
-// Write writes the log message to the file and rotates the file if it exceeds the rotate size
+// Write writes the log message to the file and rotates the file if it exceeds the rotate size.
 func (l *FileWriter) Write(p []byte) (n int, err error) {
 	for l.rotating.Load() {
 		runtime.Gosched()
@@ -62,7 +76,7 @@ func (l *FileWriter) Write(p []byte) (n int, err error) {
 	return
 }
 
-// Rotate rotates the file if it exceeds the rotate size
+// Rotate rotates the file if it exceeds the rotate size.
 func (l *FileWriter) Rotate(maxSize int64) error {
 	if l.bytesWritten.Load() < maxSize {
 		return nil
@@ -92,7 +106,7 @@ func (l *FileWriter) Rotate(maxSize int64) error {
 	return nil
 }
 
-// Close closes the file
+// Close closes the file.
 func (l *FileWriter) Close() error {
 	return l.File.Close()
 }

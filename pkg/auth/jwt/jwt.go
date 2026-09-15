@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package jwt
 
 import (
@@ -6,10 +20,9 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"sync"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/riraccuia/pig/pkg/common"
 )
 
@@ -20,11 +33,14 @@ var (
 	ErrNoValidKey     = errors.New("no valid key found")
 )
 
-// supportedAlgorithms maps JWT 'alg' values to their validation functions
+// supportedAlgorithms maps JWT 'alg' values to their validation functions.
 var supportedAlgorithms = map[string]func(token *jwt.Token) bool{
 	"RS256": isRSA,
 	"RS384": isRSA,
 	"RS512": isRSA,
+	"ES256": isECDSA,
+	"ES384": isECDSA,
+	"ES512": isECDSA,
 	"EdDSA": isEdDSA,
 }
 
@@ -33,46 +49,50 @@ func isRSA(token *jwt.Token) bool {
 	return ok
 }
 
+func isECDSA(token *jwt.Token) bool {
+	_, ok := token.Method.(*jwt.SigningMethodECDSA)
+	return ok
+}
+
 func isEdDSA(token *jwt.Token) bool {
 	_, ok := token.Method.(*jwt.SigningMethodEd25519)
 	return ok
 }
 
-// ServerAuthenticator implements JWT token authentication
+// ServerAuthenticator implements JWT token authentication.
 type ServerAuthenticator struct {
 	keySet jwk.Set
-	mu     sync.RWMutex
 }
 
-// ClientAuthenticator implements client-side JWT token authentication
+// ClientAuthenticator implements client-side JWT token authentication.
 type ClientAuthenticator struct {
 	token string
 }
 
-// NewClientAuthenticator creates a new ClientAuthenticator instance
+// NewClientAuthenticator creates a new ClientAuthenticator instance.
 func NewClientAuthenticator(token string) (common.Authenticator, error) {
 	return &ClientAuthenticator{
 		token: token,
 	}, nil
 }
 
-// Authenticate sends the JWT token to the server
+// Authenticate sends the JWT token to the server.
 func (a *ClientAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter) error {
 	return SendToken(rw, a.token)
 }
 
-// NewServerAuthenticator creates a new JWTAuthenticator instance
+// NewServerAuthenticator creates a new JWTAuthenticator instance.
 func NewServerAuthenticator(source string) (common.Authenticator, error) {
 	var keySource KeySource
 
 	// Determine the type of source based on the string format/content
 	switch {
 	case strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://"):
-		keySource = &JWKSURLSource{url: source}
+		keySource = &JWKSURLSource{Url: source}
 	case strings.HasSuffix(source, ".json"):
-		keySource = &JWKSFileSource{path: source}
+		keySource = &JWKSFileSource{Path: source}
 	default:
-		keySource = &FileKeySource{path: source}
+		keySource = &FileKeySource{Path: source}
 	}
 
 	// Load initial keys
@@ -86,7 +106,7 @@ func NewServerAuthenticator(source string) (common.Authenticator, error) {
 	}, nil
 }
 
-// validateSigningMethod checks if the token's signing method is supported
+// validateSigningMethod checks if the token's signing method is supported.
 func validateSigningMethod(token *jwt.Token) error {
 	alg, ok := token.Header["alg"].(string)
 	if !ok {
@@ -105,40 +125,7 @@ func validateSigningMethod(token *jwt.Token) error {
 	return nil
 }
 
-// getKey returns the appropriate key for token verification
-func (a *ServerAuthenticator) getKey(token *jwt.Token) (interface{}, error) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-
-	var (
-		kid string
-		key jwk.Key
-		err error
-	)
-
-	// Get key ID from token header
-	kid, _ = token.Header["kid"].(string)
-
-	key, _ = a.keySet.Key(0)
-	if a.keySet.Len() > 1 && kid != "" {
-		// If kid is specified, look for that specific key
-		key, _ = a.keySet.LookupKeyID(kid)
-	}
-
-	if key == nil {
-		return nil, ErrNoValidKey
-	}
-
-	// Extract the raw key material
-	var rawKey interface{}
-	if err = jwk.Export(key, &rawKey); err != nil {
-		return nil, fmt.Errorf("failed to get raw key: %w", err)
-	}
-
-	return rawKey, nil
-}
-
-// Authenticate performs JWT token authentication
+// Authenticate performs JWT token authentication.
 func (a *ServerAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter) error {
 	// Read token length (2 bytes)
 	lenBuf := make([]byte, 2)
@@ -158,15 +145,15 @@ func (a *ServerAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter
 
 	// Parse and validate token with standard validation
 	var claims jwt.MapClaims
-	token, err := jwt.ParseWithClaims(tokenStr, &claims, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(tokenStr, &claims, func(token *jwt.Token) (any, error) {
 		// Validate signing method
 		if err := validateSigningMethod(token); err != nil {
 			return nil, err
 		}
 
 		// Get the appropriate key for verification
-		return a.getKey(token)
-	}, jwt.WithValidMethods([]string{"RS256", "RS384", "RS512", "EdDSA"}),
+		return GetKey(a.keySet, token)
+	}, jwt.WithValidMethods([]string{"RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "EdDSA"}),
 		jwt.WithIssuedAt(),
 		jwt.WithExpirationRequired())
 
@@ -181,7 +168,7 @@ func (a *ServerAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter
 	return nil
 }
 
-// SendToken sends a JWT token over the connection
+// SendToken sends a JWT token over the connection.
 func SendToken(rw io.ReadWriter, token string) error {
 	// Convert token to bytes
 	tokenBytes := []byte(token)

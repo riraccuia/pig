@@ -1,66 +1,84 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
-	"fmt"
-	"net/http"
+	"flag"
 	"os"
-	"runtime"
-
-	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/log"
+	"path/filepath"
+	//_ "net/http/pprof"
 )
+
+var binaryName = filepath.Base(os.Args[0])
 
 func main() {
 	handleSubCommands()
 }
 
 func handleSubCommands() {
-	usage := `Usage: pig [c|l|stun] [options]
-
-	Use -h or --help to get help for a subcommand.
-
-	Client mode - Establish a tunnel to a server:
-		pig [-c|c] host:port [options] 
-
-	Server mode - Listen for incoming connections:
-		pig [-l|l] addr:port [options]
-
-	Client/Server mode - Load config from file:
-		pig -config /path/to/config.toml
-
-	STUN query tool - Query a STUN server:
-		pig [-stun|stun] [options]
-	`
-
 	if len(os.Args) < 2 {
-		fmt.Println(usage)
+		printMainUsage()
 		os.Exit(1)
 		return
 	}
 
 	switch os.Args[1] {
 	case "-h", "--help":
-		fmt.Println(usage)
+		printMainUsage()
 		os.Exit(0)
-	case "-config", "--config":
-		if len(os.Args) < 3 {
-			fmt.Println(usage)
-			os.Exit(1)
-		}
-		pig("")
-	case "c", "-c":
-		pig(config.ModeClient)
-	case "l", "-l":
-		pig(config.ModeServer)
-	case "stun", "-stun":
+	case "-" + FLAG_MAIN_CONFIG:
+		pigFromConfigFileFlag()
+	case "-" + FLAG_MAIN_CONNECT:
+		pigFromCliFlags(ModeConnect)
+	case "-" + FLAG_MAIN_LISTEN:
+		pigFromCliFlags(ModeListen)
+	case "-" + FLAG_MAIN_STUN:
 		stunMode()
+	case "-" + FLAG_MAIN_DOCS:
+		pigDocs()
 	default:
-		fmt.Println(usage)
+		printMainUsage()
 		os.Exit(1)
 	}
 }
 
-func setupPprof(logger *log.Logger) {
+func pigDocs() {
+	var (
+		section  string
+		formatMd bool
+	)
+	flag.StringVar(&section, FLAG_MAIN_DOCS, "", "Section of the documentation to print.")
+	flag.BoolVar(&formatMd, FLAG_OUT_MARKDOWN, false, "Print in markdown format.")
+	flag.Usage = printDocsUsage
+	flag.Parse()
+
+	switch section {
+	case "config":
+		printConfigDocHelp(formatMd)
+	case "env":
+		printEnvHelp()
+	case "protos":
+		printTransportProtocols()
+	default:
+		printDocsUsage()
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+/*func setupPprof(logger *log.Logger) {
 	runtime.SetBlockProfileRate(1)
 	runtime.SetMutexProfileFraction(1)
 
@@ -71,4 +89,4 @@ func setupPprof(logger *log.Logger) {
 			logger.Errorf("Failed to start pprof server: %v", err)
 		}
 	}()
-}
+}*/

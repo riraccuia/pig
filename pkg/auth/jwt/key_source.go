@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package jwt
 
 import (
@@ -10,33 +24,34 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 )
 
-// KeySource defines an interface for loading JWK sets
+// KeySource defines an interface for loading JWK sets.
 type KeySource interface {
 	LoadKeys(ctx context.Context) (jwk.Set, error)
 }
 
-// FileKeySource loads a single PEM-encoded public key
+// FileKeySource loads a single PEM-encoded public key.
 type FileKeySource struct {
-	path string
+	Path string
 }
 
-// JWKSFileSource loads JWKS from a local JSON file
+// JWKSFileSource loads JWKS from a local JSON file.
 type JWKSFileSource struct {
-	path string
+	Path string
 }
 
-// JWKSURLSource loads JWKS from a remote URL
+// JWKSURLSource loads JWKS from a remote URL.
 type JWKSURLSource struct {
-	url string
+	Url string
 }
 
-// LoadKeys loads a PEM file and converts it to a JWK set
+// LoadKeys loads a PEM file and converts it to a JWK set.
 func (s *FileKeySource) LoadKeys(ctx context.Context) (jwk.Set, error) {
 	// Read public key file
-	keyData, err := os.ReadFile(s.path)
+	keyData, err := os.ReadFile(s.Path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read public key file: %w", err)
 	}
@@ -65,7 +80,7 @@ func (s *FileKeySource) LoadKeys(ctx context.Context) (jwk.Set, error) {
 		}
 
 		// Import the public key as a JWK
-		k, err := jwk.Import(key)
+		k, err := jwk.Import[jwk.Key](key)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create JWK: %w", err)
 		}
@@ -98,9 +113,9 @@ func (s *FileKeySource) LoadKeys(ctx context.Context) (jwk.Set, error) {
 	return set, nil
 }
 
-// LoadKeys loads JWKS from a local JSON file
+// LoadKeys loads JWKS from a local JSON file.
 func (s *JWKSFileSource) LoadKeys(ctx context.Context) (jwk.Set, error) {
-	data, err := os.ReadFile(s.path)
+	data, err := os.ReadFile(s.Path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read JWKS file: %w", err)
 	}
@@ -113,9 +128,9 @@ func (s *JWKSFileSource) LoadKeys(ctx context.Context) (jwk.Set, error) {
 	return set, nil
 }
 
-// LoadKeys fetches JWKS from a remote URL
+// LoadKeys fetches JWKS from a remote URL.
 func (s *JWKSURLSource) LoadKeys(ctx context.Context) (jwk.Set, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", s.url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", s.Url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -141,4 +156,35 @@ func (s *JWKSURLSource) LoadKeys(ctx context.Context) (jwk.Set, error) {
 	}
 
 	return set, nil
+}
+
+// GetKey returns the appropriate key for token verification from a JWK set.
+func GetKey(set jwk.Set, token *jwt.Token) (any, error) {
+	var (
+		kid string
+		key jwk.Key
+		err error
+	)
+
+	// Get key ID from token header
+	kid, _ = token.Header["kid"].(string)
+
+	key, _ = set.Key(0)
+	if set.Len() > 1 && kid != "" {
+		// If kid is specified, look for that specific key
+		key, _ = set.LookupKeyID(kid)
+	}
+
+	if key == nil {
+		return nil, ErrNoValidKey
+	}
+
+	// Extract the raw key material
+	var rawKey any
+	rawKey, err = jwk.Export[any](key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get raw key: %w", err)
+	}
+
+	return rawKey, nil
 }

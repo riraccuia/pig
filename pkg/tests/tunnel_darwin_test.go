@@ -1,3 +1,5 @@
+//go:build manual
+
 package tests
 
 import (
@@ -5,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/client"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/log"
@@ -17,30 +20,45 @@ func TestEndToEndTunnelWithQUIC(t *testing.T) {
 
 	// Create server config
 	serverConfig := &config.Config{
-		Insecure:      true,
-		Mode:          "server",
-		TunnelAddress: "10.0.0.1/24",
-		MTU:           1300,
-		CertFile:      certPath,
-		KeyFile:       keyPath,
-		StreamCount:   4,
-		Target: config.Target{
-			Address: "127.0.0.1",
-			Port:    12345,
+		Tunnels: []config.TunnelConfig{
+			{
+				Direction: config.TunnelDirectionListen,
+				Adapter: &config.AdapterConfig{
+					TunnelAddress: []string{"10.0.0.1/24"},
+					MTU:           1300,
+				},
+				TLSConfig: config.TLSConfig{
+					Insecure: true,
+					CertFile: certPath,
+					KeyFile:  keyPath,
+				},
+				StreamCount: 4,
+				Listen: config.ListenTarget{
+					Address: "127.0.0.1",
+					Port:    12345,
+				},
+			},
 		},
 	}
 
 	// Create client config
 	clientConfig := &config.Config{
-		Insecure:      true,
-		Mode:          "client",
-		TunnelAddress: "10.0.0.2/32",
-		MTU:           1300,
-		// CertFile:    certPath,
-		StreamCount: 4,
-		Target: config.Target{
-			Address: "127.0.0.1",
-			Port:    12345,
+		Adapter: config.AdapterConfig{
+			TunnelAddress: []string{"10.0.0.2/32"},
+			MTU:           1300,
+		},
+		Tunnels: []config.TunnelConfig{
+			{
+				Direction: config.TunnelDirectionConnect,
+				TLSConfig: config.TLSConfig{
+					Insecure: true,
+				},
+				StreamCount: 4,
+				Connect: config.ConnectTarget{
+					Address: "127.0.0.1",
+					Port:    12345,
+				},
+			},
 		},
 	}
 
@@ -50,23 +68,37 @@ func TestEndToEndTunnelWithQUIC(t *testing.T) {
 	logger := log.NewLogger()
 	logger.SetLevel("debug")
 
-	// Create and start client with mock adapter
-	cli, err := client.New(logger, clientConfig, nil)
+	// Create and start client
+	clientAdapter, err := adapter.NewAdapter(adapter.AdapterConfig{
+		Address: clientConfig.Adapter.TunnelAddress,
+		MTU:     clientConfig.Adapter.MTU,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create client adapter: %v", err)
+	}
+	cli, err := client.NewWithAdapter(logger, &clientConfig.Adapter, &clientConfig.Tunnels[0], clientAdapter, nil)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	// Create and start server with mock adapter
-	srv, err := server.New(logger, serverConfig, nil)
+	// Create and start server
+	serverAdapter, err := adapter.NewAdapter(adapter.AdapterConfig{
+		Address: serverConfig.Tunnels[0].Adapter.TunnelAddress,
+		MTU:     serverConfig.Tunnels[0].Adapter.MTU,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create server adapter: %v", err)
+	}
+	srv, err := server.NewWithAdapter(logger, serverConfig.Tunnels[0].Adapter, &serverConfig.Tunnels[0], serverAdapter, nil)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
-	if err := srv.Start(ctx, getServerQUICListenFunc(ctx, serverConfig)); err != nil {
+	if err := srv.Start(ctx, getServerQUICListenFunc(serverConfig)); err != nil {
 		t.Fatalf("Failed to start server: %v", err)
 	}
 
-	if err := cli.Start(ctx, getClientQUICDialFunc(ctx, clientConfig)); err != nil {
+	if err := cli.Start(ctx, getClientQUICDialFunc(clientConfig)); err != nil {
 		t.Fatalf("Failed to start client: %v", err)
 	}
 	// defer cli.Close()

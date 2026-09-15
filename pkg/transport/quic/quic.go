@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package quic
 
 import (
@@ -13,7 +27,7 @@ import (
 	"golang.org/x/net/quic"
 )
 
-// A quic transport implementation that honors the transport.Listener and transport.Dialer interfaces
+// A quic transport implementation that honors the transport.Listener and transport.Dialer interfaces.
 type QuicConn struct {
 	conn *quic.Conn
 }
@@ -103,7 +117,7 @@ func (t *QuicTransport) Close() error {
 	return t.endpoint.Close(context.Background())
 }
 
-func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Conn, error) {
+func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Conn, error) {
 	return func() (transport.Conn, error) {
 		endpoint, err := quic.Listen("udp", ":0", &quic.Config{TLSConfig: tlsConfig})
 		if err != nil {
@@ -112,7 +126,7 @@ func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.C
 		conn, err := endpoint.Dial(
 			ctx,
 			"udp",
-			fmt.Sprintf("%s:%d", config.Target.Address, config.Target.Port),
+			fmt.Sprintf("%s:%d", config.Connect.Address, config.Connect.Port),
 			&quic.Config{
 				TLSConfig: tlsConfig.Clone(),
 			},
@@ -124,11 +138,11 @@ func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.C
 	}
 }
 
-func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.Config, tlsConfig *tls.Config) func() (transport.Listener, error) {
+func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func() (transport.Listener, error) {
 	return func() (transport.Listener, error) {
 		endpoint, err := quic.Listen(
 			"udp",
-			fmt.Sprintf(":%d", config.Target.Port),
+			fmt.Sprintf("%s:%d", config.Listen.Address, config.Listen.Port),
 			&quic.Config{
 				TLSConfig: tlsConfig.Clone(),
 			},

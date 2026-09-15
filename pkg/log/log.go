@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package log
 
 import (
@@ -10,36 +24,12 @@ import (
 	"github.com/rs/zerolog/diode"
 )
 
-// Logger wraps zerolog.Logger to provide simplified logging methods
+// Logger wraps zerolog.Logger to provide simplified logging methods.
 type Logger struct {
 	log zerolog.Logger
 }
 
-// parseLevel parses a log level string and returns the corresponding zerolog.Level
-func parseLevel(level string) zerolog.Level {
-	switch level {
-	case "trace":
-		return zerolog.TraceLevel
-	case "debug":
-		return zerolog.DebugLevel
-	case "info":
-		return zerolog.InfoLevel
-	case "warn":
-		return zerolog.WarnLevel
-	case "error":
-		return zerolog.ErrorLevel
-	case "fatal":
-		return zerolog.FatalLevel
-	case "panic":
-		return zerolog.PanicLevel
-	case "nolevel":
-		return zerolog.NoLevel
-	default:
-		return zerolog.InfoLevel
-	}
-}
-
-// NewLogger creates a new Logger instance
+// NewLogger creates a new Logger instance.
 func NewLogger() *Logger {
 	wr := diode.NewWriter(os.Stdout, 1024, 10*time.Millisecond, func(missed int) {
 		fmt.Printf("Logger Dropped %d messages", missed)
@@ -54,7 +44,11 @@ func NewLogger() *Logger {
 	}
 }
 
-func NewFileLogger(path string, rotateSize int64) (*Logger, error) {
+func NewFileLogger(path string, rotateSizeAny any) (*Logger, error) {
+	rotateSize, err := RotateSizeFromRotateString(rotateSizeAny)
+	if err != nil {
+		return nil, err
+	}
 	fw, err := NewFileWriter(path)
 	if err != nil {
 		return nil, err
@@ -87,52 +81,64 @@ func NewBlockingLogger() *Logger {
 }
 
 func (l *Logger) SetLevel(level string) {
-	l.log = l.log.Level(parseLevel(level))
+	lvl, err := zerolog.ParseLevel(level)
+	if err != nil {
+		panic(fmt.Sprintf("cannot parse log level %s: %v", level, err))
+	}
+	l.log = l.log.Level(lvl)
 }
 
-func (l *Logger) Info(args ...interface{}) {
+func (l *Logger) PrintLevel(level string, args ...any) {
+	lvl, err := zerolog.ParseLevel(level)
+	if err != nil {
+		panic(fmt.Sprintf("cannot parse log level %s: %v", level, err))
+	}
+	l.log.WithLevel(lvl).Msg(fmt.Sprint(args...))
+}
+
+func (l *Logger) Info(args ...any) {
 	l.log.Info().Msg(fmt.Sprint(args...))
 }
 
-func (l *Logger) Infof(format string, args ...interface{}) {
+func (l *Logger) Infof(format string, args ...any) {
 	l.log.Info().Msg(fmt.Sprintf(format, args...))
 }
 
-func (l *Logger) Error(args ...interface{}) {
+func (l *Logger) Error(args ...any) {
 	l.log.Error().Msg(fmt.Sprint(args...))
 }
 
-func (l *Logger) Errorf(format string, args ...interface{}) {
+func (l *Logger) Errorf(format string, args ...any) {
 	l.log.Error().Msg(fmt.Sprintf(format, args...))
 }
 
-func (l *Logger) Debug(args ...interface{}) {
+func (l *Logger) Debug(args ...any) {
 	l.log.Debug().Msg(fmt.Sprint(args...))
 }
 
-func (l *Logger) Debugf(format string, args ...interface{}) {
+func (l *Logger) Debugf(format string, args ...any) {
 	l.log.Debug().Msg(fmt.Sprintf(format, args...))
 }
 
-func (l *Logger) Trace(args ...interface{}) {
+func (l *Logger) Trace(args ...any) {
 	l.log.Trace().Msg(fmt.Sprint(args...))
 }
 
-func (l *Logger) Tracef(format string, args ...interface{}) {
+func (l *Logger) Tracef(format string, args ...any) {
 	l.log.Trace().Msg(fmt.Sprintf(format, args...))
 }
 
-func (l *Logger) Fatal(args ...interface{}) {
+func (l *Logger) Fatal(args ...any) {
 	l.log.Fatal().Msg(fmt.Sprint(args...))
 	os.Exit(1)
 }
 
-func (l *Logger) Fatalf(format string, args ...interface{}) {
+func (l *Logger) Fatalf(format string, args ...any) {
 	l.log.Fatal().Msg(fmt.Sprintf(format, args...))
 	//os.Exit(1)
 }
 
-// bufferedWriter is a channel that buffers log messages
+// bufferedWriter is a channel that buffers log messages.
 type bufferedWriter chan []byte
 
 func NewBufferedWriter(ctx context.Context, n int) bufferedWriter {

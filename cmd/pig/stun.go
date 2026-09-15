@@ -1,127 +1,201 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"math/rand"
 	"net"
 	"os"
 	"strconv"
 	"strings"
+	"text/tabwriter"
+	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
+	"github.com/riraccuia/pig/pkg/controller"
 	"github.com/riraccuia/pig/pkg/log"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/stun"
 )
 
 var (
-	stunProto      = [2]string{"proto", "Protocol to use for STUN queries, valid values are: udp, tcp, tls"}
-	stunServerAddr = [2]string{"c", "STUN host:port to query"}
-	stunListenAddr = [2]string{"l", "STUN host:port to listen on (default operating when no flags are provided)"}
-	stunQry        = [2]string{"p", "Source port to query, 'R' for random port"}
+	stunModeFlags = map[string][2]string{
+		"proto": {"proto", "Protocol to use, valid options are: udp, tcp."},
+		"c":     {"c", "host:port of the remote stun server to query."},
+		"l":     {"l", "The local port to listen for incoming stun requests. E.g. '" + binaryName + " -stun -l 3478'."},
+		"p":     {"p", "Source port to use to query a remote server, leave empty for random port."},
+		"v":     {"v", "Print more verbose output, only useful with -l. Use 0 (default) for info, 1 for debug, 2 for trace."},
+	}
 )
 
 type stunFlags struct {
 	stunQry        string
 	stunProto      string
 	stunServerAddr string
-	stunListenAddr string
+	stunListenPort string
+	verbose        int
 }
 
 func parseStunFlags() *stunFlags {
 	flags := &stunFlags{}
 	flagSet := flag.NewFlagSet("stun", flag.ExitOnError)
-	flagSet.StringVar(&flags.stunQry, stunQry[0], "", stunQry[1])
-	flagSet.StringVar(&flags.stunProto, stunProto[0], "udp", stunProto[1])
-	flagSet.StringVar(&flags.stunServerAddr, stunServerAddr[0], "stun.nextcloud.com:443", stunServerAddr[1])
-	flagSet.StringVar(&flags.stunListenAddr, stunListenAddr[0], ":3478", stunListenAddr[1])
+
+	flagSet.Usage = printStunUsage
+
+	flagSet.StringVar(&flags.stunQry, stunModeFlags["p"][0], "", stunModeFlags["p"][1])
+	flagSet.StringVar(&flags.stunProto, stunModeFlags["proto"][0], "udp", stunModeFlags["proto"][1])
+	flagSet.StringVar(&flags.stunServerAddr, stunModeFlags["c"][0], "", stunModeFlags["c"][1])
+	flagSet.StringVar(&flags.stunListenPort, stunModeFlags["l"][0], "", stunModeFlags["l"][1])
+	flagSet.IntVar(&flags.verbose, stunModeFlags["v"][0], 0, stunModeFlags["v"][1])
+
 	flagSet.Parse(os.Args[2:])
+
+	if !isFlagPassed(flagSet, "l") && !isFlagPassed(flagSet, "c") {
+		fmt.Fprintln(os.Stderr, "Either -l or -c is required")
+		os.Exit(1)
+	}
+
 	return flags
+}
+
+func isFlagPassed(flagSet *flag.FlagSet, name string) bool {
+	found := false
+	flagSet.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
 }
 
 func stunMode() {
 	var (
-		flags                = parseStunFlags()
-		logger common.Logger = log.NewBlockingLogger()
+		flags = parseStunFlags()
+		ctx   = context.Background()
 	)
-	if flags.stunQry != "" {
-		doStunQuery(logger, flags)
+	if flags.stunServerAddr != "" {
+		doStunQuery(flags)
 		os.Exit(0)
 	}
-	if flags.stunListenAddr == "" {
-		logger.Fatalf("Either -l or -p is required")
-		os.Exit(1)
+	logger := log.NewLogger()
+	switch flags.verbose {
+	case 0:
+		logger.SetLevel("info")
+	case 1:
+		logger.SetLevel("debug")
+	case 2:
+		logger.SetLevel("trace")
 	}
-	stunListenMode(logger, flags)
+	stunListenMode(ctx, logger, flags)
 }
 
 // doStunQuery queries the STUN server to get the public IP and port
 // and prints it to stdout.
-func doStunQuery(logger common.Logger, flags *stunFlags) {
+func doStunQuery(flags *stunFlags) {
 	var (
-		srcPort    int
-		mappedIP   net.IP
-		mappedPort int
-		err        error
+		srcPort int
+		err     error
 	)
 
 	if flags.stunQry == "" {
-		return
-	}
-
-	if flags.stunQry == "R" {
 		srcPort = rand.Intn(65535-1024) + 1024
-		logger.Infof("STUN: Using random source port: %d", srcPort)
 	}
 
 	if srcPort == 0 {
 		srcPort, err = strconv.Atoi(flags.stunQry)
 		if err != nil {
-			logger.Fatalf("Failed to parse source port: %v", err)
+			fmt.Fprintf(os.Stderr, "Failed to parse source port: %v", err)
+			os.Exit(1)
 		}
 	}
 
-	mappedIP, mappedPort, err = stun.QueryServer(
-		logger,
+	tlsConfig := &tls.Config{ServerName: strings.Split(flags.stunServerAddr, ":")[0]}
+
+	stunClient := stun.NewClient(
+		flags.stunServerAddr,
+	).WithDialer(
+		network.NewDialer(time.Second * 5),
+	)
+
+	result, err := stunClient.QueryServer(
 		flags.stunServerAddr,
 		srcPort,
 		flags.stunProto,
-		&tls.Config{ServerName: strings.Split(flags.stunServerAddr, ":")[0]},
+		tlsConfig,
 	)
 	if err != nil {
-		logger.Fatalf("Failed to query STUN server: %v", err)
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
 	}
 
-	logger.Infof("STUN server returned mapped <ip:port>: %s:%d", mappedIP, mappedPort)
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
+	fmt.Fprintf(w, "Server:\t%s\n", flags.stunServerAddr)
+	fmt.Fprintf(w, "Address:\t%s\n", result.ServerAddr)
+	fmt.Fprintf(w, "Local address:\t:%d\n", srcPort)
+	fmt.Fprintf(w, "Mapped address:\t%s:%d\n", result.IP, result.Port)
+	w.Flush()
 
 	os.Exit(0)
 }
 
 // stunListenMode listens for STUN requests on the specified protocol, address and port.
-func stunListenMode(logger common.Logger, flags *stunFlags) {
+func stunListenMode(ctx context.Context, logger common.Logger, flags *stunFlags) {
 	var (
 		listenAddr net.Addr
 		err        error
 	)
 	switch flags.stunProto {
 	case "udp":
-		listenAddr, err = net.ResolveUDPAddr("udp", flags.stunListenAddr)
+		listenAddr, err = net.ResolveUDPAddr("udp", ":"+flags.stunListenPort)
 		if err != nil {
-			logger.Fatalf("Failed to resolve STUN listen address: %v", err)
+			log.NewBlockingLogger().Fatalf("Failed to resolve STUN listen address: %v", err)
 		}
 	case "tcp":
-		listenAddr, err = net.ResolveTCPAddr("tcp", flags.stunListenAddr)
+		listenAddr, err = net.ResolveTCPAddr("tcp", flags.stunListenPort)
 		if err != nil {
-			logger.Fatalf("Failed to resolve STUN listen address: %v", err)
+			log.NewBlockingLogger().Fatalf("Failed to resolve STUN listen address: %v", err)
 		}
 	default:
-		logger.Fatalf("Unimplemented STUN protocol for listen: %s", flags.stunProto)
-	}
-	server, err := stun.NewServer(logger, listenAddr)
-	if err != nil {
-		logger.Fatalf("Failed to create STUN server: %v", err)
+		log.NewBlockingLogger().Fatalf("Unimplemented STUN protocol for listen: %s", flags.stunProto)
 	}
 
-	handleGracefulShutdown(context.Background(), logger, func() {}, server)
+	serverConfig := &stun.ServerConfig{
+		Logger: func(level string, args ...any) {
+			logger.PrintLevel(level, args...)
+		},
+		TLSConfig:     nil,
+		UDPListenFunc: network.ListenUDP,
+		TCPListenFunc: nil,
+	}
+
+	ctrl := controller.New(ctx).WithLogger(logger)
+
+	ctrl.StartCallback(func(ctx context.Context) {
+		s, err := stun.NewServer(serverConfig)
+		if err != nil {
+			log.NewBlockingLogger().Fatalf("Failed to create STUN server: %v", err)
+		}
+		err = s.Listen(ctx, listenAddr)
+		if err != nil {
+			log.NewBlockingLogger().Fatalf("Failed to listen on STUN server: %v", err)
+		}
+	})
+
+	ctrl.HandleGracefulShutdown(nil)
 }

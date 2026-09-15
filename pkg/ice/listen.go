@@ -1,54 +1,69 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package ice
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
-	"slices"
 	"time"
 
 	"github.com/riraccuia/pig/pkg/ice/message"
 	"github.com/riraccuia/pig/pkg/ice/signaling"
 	"github.com/riraccuia/pig/pkg/stun"
-	"github.com/riraccuia/pig/pkg/transport"
 )
 
-func GetListenPaths(ctx context.Context, opts *signaling.Options, listenPort uint16, pigProtos []transport.ICEProtocolDefinition) (chan []*ConnectPath, error) {
+type OfferPaths struct {
+	ScheduledAt  time.Time
+	ConnectPaths []*ConnectPath
+}
+
+func (pc *PathConnector) GetListenPaths(ctx context.Context, listenPort uint16) (chan *OfferPaths, error) {
 	var (
-		signaler *signaling.Signaler
-		err      error
+		err error
 	)
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
-			signaler, err = signaling.NewSignaler(ctx, opts)
+			pc.signaler, err = signaling.NewSignaler(ctx, pc.opts)
 		}
 		if errors.Is(err, signaling.ErrMQTTFailure) {
-			if opts.Logger != nil {
-				opts.Logger.Errorf("ICE: MQTT connection failed (will retry in 5 seconds): %v", err)
+			if pc.opts.Logger != nil {
+				pc.opts.Logger.Errorf("ICE: MQTT connection failed (will retry in 5 seconds): %v", err)
 			}
 			time.Sleep(time.Second * 5)
 			continue
 		}
 		break
 	}
-	listenPaths := make(chan []*ConnectPath, 10)
-	go receiveOffers(ctx, signaler, listenPort, listenPaths, pigProtos)
+	listenPaths := make(chan *OfferPaths, 10)
+	go pc.receiveOffers(ctx, listenPort, listenPaths)
 	return listenPaths, nil
 }
 
-func receiveOffers(ctx context.Context, signaler *signaling.Signaler, listenPort uint16, listenPaths chan []*ConnectPath, pigProtos []transport.ICEProtocolDefinition) {
+func (pc *PathConnector) receiveOffers(ctx context.Context, listenPort uint16, listenPaths chan *OfferPaths) {
 	var (
 		err        error
-		offersChan <-chan *message.ICEMessage
+		offersChan <-chan *signaling.ReceivedOffer
 		topicBase  string
 	)
 	for {
 		if offersChan == nil {
-			offersChan, topicBase, err = signaler.ReceiveICEOffers(ctx)
+			offersChan, topicBase, err = pc.signaler.ReceiveICEOffers(ctx)
 		}
 		if err != nil {
 			time.Sleep(time.Second * 5)
@@ -58,141 +73,110 @@ func receiveOffers(ctx context.Context, signaler *signaling.Signaler, listenPort
 			select {
 			case <-ctx.Done():
 				err = ctx.Err()
-				signaler.GetOptions().Logger.Errorf("ICE: stopped waiting for ICE offers: %v", err)
+				pc.opts.Logger.Errorf("ICE: stopped waiting for ICE offers: %v", err)
 				return
 			case offer, ok := <-offersChan:
 				if !ok {
 					offersChan = nil
 					break
 				}
-				signaler.GetOptions().Logger.Tracef("ICE: received ICE offer. SessionID: %s", offer.SessionID)
-				processOffer(signaler, topicBase, offer, listenPort, listenPaths, pigProtos)
+				pc.opts.Logger.Tracef("ICE: received ICE offer. SessionID: %s", offer.Offer.SessionID)
+				pc.processOffer(topicBase, offer, listenPort, listenPaths)
 			}
 		}
 	}
 }
 
-func processOffer(signaler *signaling.Signaler, topicBase string, offer *message.ICEMessage, listenPort uint16, listenPaths chan []*ConnectPath, pigProtos []transport.ICEProtocolDefinition) {
-	localNets, localIps, err := GetLocalNetworks()
+func (pc *PathConnector) processOffer(topicBase string, offer *signaling.ReceivedOffer, listenPort uint16, listenPaths chan *OfferPaths) {
+	localEndpoints, err := GetLocalEndpoints("", pc.excludedAdapters)
 	if err != nil {
 		return
 	}
 
-	type ipPort struct {
-		ip   net.IP
-		port int
-	}
+	// NAT behavior can change over time or under certain conditions, so we need to discover it again for each new negotiation
+	natType := pc.discoverNATType()
 
 	var (
 		answerCandidates []message.ICECandidate
-		cp               []*ConnectPath
-		opts             = signaler.GetOptions()
-		mappedAddrs      = make(map[string]ipPort)
+		localInfo        map[localCandidateKey]localCandidateInfo
+		connectPaths     []*ConnectPath
 	)
 
-	for _, tr := range pigProtos {
-		// local candidates
-		for i, localIp := range localIps {
-			bindAgent := stun.NewIceBindingAgent(opts.Logger, nil)
-			cp = append(cp, &ConnectPath{
-				LocalNet:  localNets[i],
-				LocalAddr: AddressFrom(tr.Network, localIp, int(listenPort)),
-				Protocol:  tr,
-				BindAgent: bindAgent,
-			})
-			candidate := CandidateFrom(tr.Network, tr.ComponentID, localIp, int(listenPort))
-			answerCandidates = append(answerCandidates, candidate)
-			bindAgent.Ice = &stun.IceAttributes{
-				Priority:      candidate.Priority,
-				IceControlled: 0x12345678,
-			}
-		}
-		// reflexive candidate
-		localAddr := AddressFrom(tr.Network, net.IPv4zero, int(listenPort))
+	answerCandidates, localInfo = buildLocalCandidates(pc.pigProtos, localEndpoints, listenPort)
+	answerCandidates = append(answerCandidates, buildReflexiveCandidates(pc.pigProtos, localEndpoints, localInfo, pc.opts)...)
+	answerCandidates = dedupCandidates(answerCandidates)
 
-		var (
-			mappingKey = fmt.Sprintf("%s:%d", tr.Network, listenPort)
-			mappedIP   net.IP
-			mappedPort int
-		)
-
-		ma, ok := mappedAddrs[mappingKey]
-		switch {
-		case ok:
-			mappedIP = ma.ip
-			mappedPort = ma.port
-		default:
-			var e error
-			mappedIP, mappedPort, e = PerformSTUNQuery(opts.Logger, opts.STUNServer, localAddr)
-			if e != nil {
-				opts.Logger.Errorf("ICE: STUN query failed: %v", e)
-				continue
-			}
-			mappedAddrs[mappingKey] = ipPort{mappedIP, mappedPort}
-		}
-
-		bindAgent := stun.NewIceBindingAgent(opts.Logger, nil)
-		cp = append(cp, &ConnectPath{
-			LocalAddr: localAddr,
-			Protocol:  tr,
-			BindAgent: bindAgent,
-		})
-		candidate := CandidateFrom(tr.Network, tr.ComponentID, mappedIP, mappedPort)
-		answerCandidates = append(answerCandidates, candidate)
-		bindAgent.Ice = &stun.IceAttributes{
-			Priority:      candidate.Priority,
-			IceControlled: 0x12345678,
-		}
-	}
-
-	opts.Logger.Tracef("ICE: preparing to send ICE answer to client. SessionID: %s", offer.SessionID)
+	pc.opts.Logger.Tracef("ICE: preparing to send ICE answer to client. SessionID: %s", offer.Offer.SessionID)
 
 	var answer *message.ICEMessage
-	answer, err = signaler.SendICEAnswer(topicBase, offer, answerCandidates)
+
+	// Create the ICE answer message
+	answer, err = message.GenerateICEMessage(message.ICEMessageTypeAnswer, answerCandidates)
 	if err != nil {
-		opts.Logger.Errorf("ICE: failed to send ICE answer: %v", err)
+		pc.opts.Logger.Errorf("ICE: failed to generate ICE answer: %v", err)
 		return
 	}
 
-	iceAuth := &stun.StunAuthConfig{
-		Username:     answer.Credentials.Username,
-		Password:     answer.Credentials.Password,
-		PeerUsername: offer.Credentials.Username,
-		PeerPassword: offer.Credentials.Password,
+	answer.Timestamp[0] = offer.ArrivalTime // T2: server arrival time of the request
+
+	answer.NATType = natType
+
+	err = pc.signaler.SendICEAnswer(topicBase, offer.Offer, answer)
+	if err != nil {
+		pc.opts.Logger.Errorf("ICE: failed to send ICE answer: %v", err)
+		return
 	}
 
-	for _, candidate := range offer.Candidates {
+	iceAuth := &stun.IceAuth{
+		LocalUfrag:     answer.Credentials.Username,
+		LocalPassword:  answer.Credentials.Password,
+		RemoteUfrag:    offer.Offer.Credentials.Username,
+		RemotePassword: offer.Offer.Credentials.Password,
+	}
+	var bindLogger stun.LoggerFunc
+	if pc.opts.Logger != nil {
+		bindLogger = pc.opts.Logger.PrintLevel
+	}
+
+	pc.opts.Logger.Tracef("ICE: raw candidates from offer: %v", offer.Offer.Candidates)
+
+	for _, candidate := range offer.Offer.Candidates {
 		targetIP := net.ParseIP(candidate.Address)
-		for _, connect := range cp {
-			if connect.Protocol.Network != candidate.Protocol {
+		for _, tr := range pc.pigProtos {
+			if tr.Network != candidate.Protocol {
 				continue
 			}
-			if connect.Protocol.ComponentID != candidate.ComponentID {
+			if tr.ComponentID != candidate.ComponentID {
 				continue
 			}
-			if connect.LocalNet != nil && !connect.LocalNet.Contains(targetIP) {
-				continue
+			for _, localEndpoint := range localEndpoints {
+				localNet := localEndpoint.Net
+				if getFamilyForIP(localEndpoint.IP) != getFamilyForIP(targetIP) {
+					continue
+				}
+				if candidate.Type == message.ICECandidateTypeHost && localNet != nil && localNet.IP.IsPrivate() && !localNet.Contains(targetIP) {
+					continue
+				}
+				info, ok := localInfo[makeLocalCandidateKey(tr, localEndpoint.IP)]
+				if !ok {
+					continue
+				}
+				cPath := getPathForProto(tr, localNet, localEndpoint.IP, nil, uint16(info.port))
+				cPath.BindAgent = stun.NewBindingAgent(stun.NewControlledICEBindingAgentConfig(bindLogger, iceAuth, info.priority))
+				cPath.ICEID = answer.SessionID
+				cPath.RemoteAddr = AddressFrom(cPath.Protocol.Network, targetIP, candidate.Port)
+				cPath.RemoteIP = targetIP
+				//cPath.ScheduledAt = time.UnixMilli(answer.Timestamp).Add(offer.ConnectOffsetDuration)
+				connectPaths = append(connectPaths, cPath)
 			}
-			connect.ICEID = answer.SessionID
-			connect.RemoteAddr = AddressFrom(connect.Protocol.Network, targetIP, candidate.Port)
-			connect.BindAgent.Auth = iceAuth
-			connect.ScheduledAt = time.UnixMilli(answer.Timestamp).Add(offer.ConnectOffsetDuration)
 		}
 	}
+	connectPaths = dedupConnectPaths(connectPaths)
+	connectPaths = sortConnectPaths(connectPaths)
 
-	// remove from the connectMap the ones that do not have a remote address
-	cp = slices.DeleteFunc(cp, func(c *ConnectPath) bool {
-		return c.RemoteAddr == nil
-	})
 	// send the connect paths to the listener
 	select {
-	case listenPaths <- cp:
+	case listenPaths <- &OfferPaths{ConnectPaths: connectPaths, ScheduledAt: time.UnixMilli(answer.Timestamp[1]).Add(offer.Offer.ConnectOffsetDuration)}:
 	default:
 	}
-	// free the memory
-	for _, m := range mappedAddrs {
-		m.ip = nil
-		m.port = 0
-	}
-	mappedAddrs = nil
 }

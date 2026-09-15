@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package bpf
 
 import (
@@ -20,7 +34,7 @@ const (
 	BIOCGDIRECTION = 0x40044276
 )
 
-// BPFDirection represents the direction of the BPF filter
+// BPFDirection represents the direction of the BPF filter.
 type BPFDirection int
 
 const (
@@ -28,7 +42,7 @@ const (
 	BPF_D_INOUT                     // capture incoming and outgoing packets
 )
 
-// IcmpEchoRequestFilter is the BPF filter for ICMP echo requests
+// IcmpEchoRequestFilter is the BPF filter for ICMP echo requests.
 var IcmpEchoRequestFilter = []unix.BpfInsn{
 	{Code: 0x28, Jt: 0, Jf: 0, K: 0x0000000c}, // ldh [12] - Load halfword (16-bit) from offset 12 (Ethernet type field)
 	{Code: 0x15, Jt: 0, Jf: 8, K: 0x00000800}, // jeq #0x800,8,0 - If equal to 0x800 (IPv4), jump 8 instructions forward, else jump 0 (reject)
@@ -43,7 +57,7 @@ var IcmpEchoRequestFilter = []unix.BpfInsn{
 	{Code: 0x6, Jt: 0, Jf: 0, K: 0x00000000},  // ret #0 - Reject packet (return 0)
 }
 
-// IcmpEchoReplyFilter is the BPF filter for ICMP echo replies
+// IcmpEchoReplyFilter is the BPF filter for ICMP echo replies.
 var IcmpEchoReplyFilter = []unix.BpfInsn{
 	{Code: 0x28, Jt: 0, Jf: 0, K: 0x0000000c}, // ldh [12] - Load halfword (16-bit) from offset 12 (Ethernet type field)
 	{Code: 0x15, Jt: 0, Jf: 8, K: 0x00000800}, // jeq #0x800,8,0 - If equal to 0x800 (IPv4), jump 8 instructions forward, else jump 0 (reject)
@@ -58,7 +72,7 @@ var IcmpEchoReplyFilter = []unix.BpfInsn{
 	{Code: 0x6, Jt: 0, Jf: 0, K: 0x00000000},  // ret #0 - Reject packet (return 0)
 }
 
-// BPFSniffer represents a BPF packet sniffer
+// BPFSniffer represents a BPF packet sniffer.
 type BPFSniffer struct {
 	bpf    *os.File
 	ifName string
@@ -108,7 +122,7 @@ func NewBPFSniffer(ifName string, filter []unix.BpfInsn, direction BPFDirection)
 	return sniffer, nil
 }
 
-// Read receives a packet from the BPF device
+// Read receives a packet from the BPF device.
 func (s *BPFSniffer) Read(p []byte) (n int, err error) {
 	s.queueMutex.Lock()
 	defer s.queueMutex.Unlock()
@@ -137,7 +151,7 @@ func (s *BPFSniffer) Read(p []byte) (n int, err error) {
 	return packetLen, nil
 }
 
-// Close implements io.Closer interface
+// Close implements io.Closer interface.
 func (s *BPFSniffer) Close() error {
 	// Signal background goroutine to stop
 	close(s.stopChan)
@@ -150,7 +164,7 @@ func (s *BPFSniffer) Close() error {
 	return s.bpf.Close()
 }
 
-// capturePackets runs in the background to continuously capture packets
+// capturePackets runs in the background to continuously capture packets.
 func (s *BPFSniffer) capturePackets() {
 	defer s.wg.Done()
 	for {
@@ -166,7 +180,7 @@ func (s *BPFSniffer) capturePackets() {
 	}
 }
 
-// readAndProcessPackets reads packets from BPF and adds them to the queue
+// readAndProcessPackets reads packets from BPF and adds them to the queue.
 func (s *BPFSniffer) readAndProcessPackets() error {
 	n, err := s.bpf.Read(s.buf)
 	if err != nil {
@@ -243,7 +257,7 @@ func (s *BPFSniffer) readAndProcessPackets() error {
 	return nil
 }
 
-// openBPF finds and opens an available BPF device
+// openBPF finds and opens an available BPF device.
 func openBPF() (*os.File, error) {
 	for i := 0; i < 255; i++ {
 		dev := fmt.Sprintf("/dev/bpf%d", i)
@@ -258,7 +272,7 @@ func openBPF() (*os.File, error) {
 	return nil, fmt.Errorf("no /dev/bpf devices available")
 }
 
-// configure sets up the BPF device with proper settings
+// configure sets up the BPF device with proper settings.
 func (s *BPFSniffer) configure(direction BPFDirection) error {
 	if err := s.setImmediateMode(); err != nil {
 		return err
@@ -292,7 +306,7 @@ func (s *BPFSniffer) setBpfDirection(fd int, direction int) error {
 	return nil
 }
 
-// setImmediateMode enables immediate packet delivery
+// setImmediateMode enables immediate packet delivery.
 func (s *BPFSniffer) setImmediateMode() error {
 	one := 1
 	err := unix.IoctlSetPointerInt(int(s.bpf.Fd()), unix.BIOCIMMEDIATE, one)
@@ -302,7 +316,7 @@ func (s *BPFSniffer) setImmediateMode() error {
 	return nil
 }
 
-// bindToInterface attaches the BPF device to the specified interface
+// bindToInterface attaches the BPF device to the specified interface.
 func (s *BPFSniffer) bindToInterface() error {
 	var ifr [16]byte
 	copy(ifr[:], s.ifName)
@@ -313,7 +327,7 @@ func (s *BPFSniffer) bindToInterface() error {
 	return nil
 }
 
-// setFilter configures the BPF filter using the stored filter
+// setFilter configures the BPF filter using the stored filter.
 func (s *BPFSniffer) setFilter() error {
 	bpfProg := unix.BpfProgram{
 		Len:   uint32(len(s.filter)),

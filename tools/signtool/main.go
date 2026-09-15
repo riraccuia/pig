@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
@@ -16,29 +30,35 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 )
 
 var (
 	keyFile    string
 	algorithm  string
 	expiration string
+	issuer     string
+	subject    string
+	unattended bool
 )
 
 const (
-	helpText = `
-JWT Token Generation Tool
+	helpText = `Usage: signtool [options]
 
 This tool generates JWT tokens signed with either RSA or ED25519 keys.
 Supported algorithms: RS256, RS384, RS512, EdDSA
 
-If no private key is provided, the tool will help you generate a new key pair.
+If no private key is provided, it will help you generate a new key pair.
+
+Runs interactively unless the -u flag is provided, in which case all other flags are required.
 
 Expiration format examples:
   15m  - 15 minutes
   2h   - 2 hours
   24h  - 1 day
   2d   - 2 days
+
+Options:
 `
 
 	minRSAKeySize = 2048
@@ -67,8 +87,11 @@ func init() {
 	flag.StringVar(&keyFile, "key", "", "Path to private key file (will be generated if it doesn't exist)")
 	flag.StringVar(&algorithm, "alg", "", "Signing algorithm (RS256, RS384, RS512, EdDSA)")
 	flag.StringVar(&expiration, "exp", "", "Token expiration (e.g., 15m, 2h, 24h)")
+	flag.StringVar(&issuer, "iss", "", "Issuer (iss) claim")
+	flag.StringVar(&subject, "sub", "", "Subject (sub) claim")
+	flag.BoolVar(&unattended, "u", false, "Run unattended. All other flags are required.")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "%s\n", helpText)
+		fmt.Fprintf(os.Stderr, "%s", helpText)
 		flag.PrintDefaults()
 	}
 }
@@ -84,20 +107,20 @@ type tokenParams struct {
 
 func readLine(prompt string) string {
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Print(prompt)
+	fmt.Fprint(os.Stderr, prompt)
 	text, _ := reader.ReadString('\n')
 	return strings.TrimSpace(text)
 }
 
 func readMultiLine(prompt string) []string {
-	fmt.Println(prompt)
-	fmt.Println("(Enter one per line, empty line to finish)")
+	fmt.Fprintln(os.Stderr, prompt)
+	fmt.Fprintln(os.Stderr, "(Enter one per line, empty line to finish)")
 
 	var lines []string
 	reader := bufio.NewReader(os.Stdin)
 
 	for {
-		fmt.Print("> ")
+		fmt.Fprint(os.Stderr, "> ")
 		text, _ := reader.ReadString('\n')
 		text = strings.TrimSpace(text)
 		if text == "" {
@@ -132,13 +155,24 @@ func parseExpiration(exp string) (time.Duration, error) {
 }
 
 func promptForExpiration() time.Duration {
+	if unattended && expiration == "" {
+		fmt.Fprintln(os.Stderr, "Error: expiration is required")
+		os.Exit(1)
+	}
+	if expiration != "" {
+		duration, err := parseExpiration(expiration)
+		if err == nil {
+			return duration
+		}
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	}
 	for {
 		exp := readLine("Enter token expiration (e.g., 15m, 2h, 24h, 2d): ")
 		duration, err := parseExpiration(exp)
 		if err == nil {
 			return duration
 		}
-		fmt.Printf("Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 	}
 }
 
@@ -155,11 +189,11 @@ func promptForAlgorithm() string {
 		if validAlgs[alg] {
 			return alg
 		}
-		fmt.Println("Error: invalid algorithm")
+		fmt.Fprintln(os.Stderr, "Error: invalid algorithm")
 	}
 }
 
-func loadPrivateKey(path string) (interface{}, error) {
+func loadPrivateKey(path string) (any, error) {
 	keyData, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read private key file: %w", err)
@@ -186,7 +220,7 @@ func loadPrivateKey(path string) (interface{}, error) {
 	}
 }
 
-func getSigningMethod(alg string, key interface{}) (jwt.SigningMethod, error) {
+func getSigningMethod(alg string, key any) (jwt.SigningMethod, error) {
 	switch alg {
 	case "RS256":
 		if _, ok := key.(*rsa.PrivateKey); !ok {
@@ -219,16 +253,39 @@ func promptForTokenParams() *tokenParams {
 	params := &tokenParams{
 		issuedAt:  now,
 		notBefore: now,
+		issuer:    issuer,
+		subject:   subject,
 	}
 
-	params.issuer = readLine("Enter issuer (iss): ")
-	params.subject = readLine("Enter subject (sub): ")
-	params.audience = readMultiLine("Enter audience values (aud)")
+	if unattended && params.issuer == "" {
+		fmt.Fprintln(os.Stderr, "Error: issuer is required")
+		os.Exit(1)
+	}
+
+	if unattended && params.subject == "" {
+		fmt.Fprintln(os.Stderr, "Error: subject is required")
+		os.Exit(1)
+	}
+
+	if params.issuer == "" {
+		params.issuer = readLine("Enter issuer (iss): ")
+	}
+
+	if params.subject == "" {
+		params.subject = readLine("Enter subject (sub): ")
+	}
+
+	if !unattended {
+		params.audience = readMultiLine("Enter audience values (aud)")
+	}
 
 	duration := promptForExpiration()
 	params.expiresAt = now.Add(duration)
 
-	nbf := readLine("Enter not-before offset in minutes (0 for now): ")
+	var nbf string
+	if !unattended {
+		nbf = readLine("Enter not-before offset in minutes (0 for now): ")
+	}
 	if offset, err := strconv.Atoi(nbf); err == nil && offset > 0 {
 		params.notBefore = now.Add(time.Duration(offset) * time.Minute)
 	}
@@ -236,7 +293,7 @@ func promptForTokenParams() *tokenParams {
 	return params
 }
 
-func generateToken(key interface{}, method jwt.SigningMethod, params *tokenParams) (string, error) {
+func generateToken(key any, method jwt.SigningMethod, params *tokenParams) (string, error) {
 	claims := jwt.RegisteredClaims{
 		Issuer:    params.issuer,
 		Subject:   params.subject,
@@ -246,7 +303,7 @@ func generateToken(key interface{}, method jwt.SigningMethod, params *tokenParam
 		IssuedAt:  jwt.NewNumericDate(params.issuedAt),
 	}
 
-	wk, err := jwk.Import(key)
+	wk, err := jwk.Import[jwk.Key](key)
 	if err != nil {
 		return "", fmt.Errorf("failed to create JWK: %w", err)
 	}
@@ -267,10 +324,29 @@ func generateToken(key interface{}, method jwt.SigningMethod, params *tokenParam
 	return token.SignedString(key)
 }
 
+func keyTypeForAlgorithm(alg string) (keyType, error) {
+	switch alg {
+	case "RS256", "RS384", "RS512":
+		return keyTypeRSA, nil
+	case "EdDSA":
+		return keyTypeED25519, nil
+	default:
+		return 0, fmt.Errorf("invalid algorithm: %s", alg)
+	}
+}
+
 func promptForKeyType() keyType {
-	fmt.Println("\nAvailable key types:")
-	fmt.Println("1. RSA    (Supports RS256, RS384, RS512)")
-	fmt.Println("2. ED25519 (Supports EdDSA)")
+	if algorithm != "" {
+		kt, err := keyTypeForAlgorithm(algorithm)
+		if err == nil {
+			return kt
+		}
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	}
+
+	fmt.Fprintln(os.Stderr, "\nAvailable key types:")
+	fmt.Fprintln(os.Stderr, "1. RSA    (Supports RS256, RS384, RS512)")
+	fmt.Fprintln(os.Stderr, "2. ED25519 (Supports EdDSA)")
 
 	for {
 		choice := readLine("\nSelect key type (1-2): ")
@@ -280,7 +356,7 @@ func promptForKeyType() keyType {
 		case "2":
 			return keyTypeED25519
 		default:
-			fmt.Println("Invalid choice. Please select 1 or 2.")
+			fmt.Fprintln(os.Stderr, "Invalid choice. Please select 1 or 2.")
 		}
 	}
 }
@@ -290,7 +366,7 @@ func promptForRSAKeySize() int {
 		sizeStr := readLine(fmt.Sprintf("Enter RSA key size (%d-%d bits): ", minRSAKeySize, maxRSAKeySize))
 		size, err := strconv.Atoi(sizeStr)
 		if err != nil || size < minRSAKeySize || size > maxRSAKeySize {
-			fmt.Printf("Invalid key size. Must be between %d and %d bits.\n", minRSAKeySize, maxRSAKeySize)
+			fmt.Fprintf(os.Stderr, "Invalid key size. Must be between %d and %d bits.\n", minRSAKeySize, maxRSAKeySize)
 			continue
 		}
 		return size
@@ -307,7 +383,7 @@ func promptForKeyPath() string {
 			path = defaultPath
 			// Only create the default directory if using the default path
 			if err := os.MkdirAll(defaultDir, 0755); err != nil {
-				fmt.Printf("Failed to create directory %s: %v\nUsing current directory instead.\n", defaultDir, err)
+				fmt.Fprintf(os.Stderr, "Failed to create directory %s: %v\nUsing current directory instead.\n", defaultDir, err)
 				path = "private.pem"
 			}
 		}
@@ -324,7 +400,7 @@ func promptForKeyPath() string {
 		dir := filepath.Dir(path)
 		if dir != "." {
 			if err := os.MkdirAll(dir, 0755); err != nil {
-				fmt.Printf("Failed to create directory %s: %v\n", dir, err)
+				fmt.Fprintf(os.Stderr, "Failed to create directory %s: %v\n", dir, err)
 				continue
 			}
 		}
@@ -333,7 +409,7 @@ func promptForKeyPath() string {
 	}
 }
 
-func generateKeyPair(kt keyType, rsaKeySize int) (interface{}, interface{}, error) {
+func generateKeyPair(kt keyType, rsaKeySize int) (any, any, error) {
 	switch kt {
 	case keyTypeRSA:
 		privateKey, err := rsa.GenerateKey(rand.Reader, rsaKeySize)
@@ -354,7 +430,7 @@ func generateKeyPair(kt keyType, rsaKeySize int) (interface{}, interface{}, erro
 	}
 }
 
-func saveKeyPair(privateKey, publicKey interface{}, privatePath string) error {
+func saveKeyPair(privateKey, publicKey any, privatePath string) error {
 	// Derive public key path
 	dir, _ := filepath.Split(privatePath)
 	publicPath := filepath.Join(dir, "public.pem")
@@ -414,7 +490,7 @@ func saveKeyPair(privateKey, publicKey interface{}, privatePath string) error {
 		return fmt.Errorf("failed to save public key: %w", err)
 	}
 
-	fmt.Printf("Key pair generated:\n  Private key: %s\n  Public key: %s\n\n", privatePath, publicPath)
+	fmt.Fprintf(os.Stderr, "Key pair generated:\n  Private key: %s\n  Public key: %s\n\n", privatePath, publicPath)
 	return nil
 }
 
@@ -427,12 +503,12 @@ func promptForKeyStorage() bool {
 		case "", "n", "no":
 			return false
 		default:
-			fmt.Println("Please answer 'y' for yes or 'n' for no")
+			fmt.Fprintln(os.Stderr, "Please answer 'y' for yes or 'n' for no")
 		}
 	}
 }
 
-func encodeKeyToPEM(key interface{}) ([]byte, error) {
+func encodeKeyToPEM(key any) ([]byte, error) {
 	var block *pem.Block
 
 	switch k := key.(type) {
@@ -481,7 +557,7 @@ func encodeKeyToPEM(key interface{}) ([]byte, error) {
 	return pem.EncodeToMemory(block), nil
 }
 
-func getOrGenerateKey(keyPath string) (interface{}, interface{}, error) {
+func getOrGenerateKey(keyPath string) (any, any, error) {
 	// Try to load existing key if path is provided
 	if keyPath != "" {
 		if key, err := loadPrivateKey(keyPath); err == nil {
@@ -490,7 +566,6 @@ func getOrGenerateKey(keyPath string) (interface{}, interface{}, error) {
 			case *rsa.PrivateKey:
 				return key, &k.PublicKey, nil
 			case ed25519.PrivateKey:
-				fmt.Println("Loaded ed25519 public key")
 				return key, k.Public(), nil
 			default:
 				return nil, nil, fmt.Errorf("unsupported key type: %T", key)
@@ -499,7 +574,7 @@ func getOrGenerateKey(keyPath string) (interface{}, interface{}, error) {
 	}
 
 	// Key doesn't exist or wasn't specified, prompt for generation
-	fmt.Println("\nNo valid private key found. Let's generate a new key pair.")
+	fmt.Fprintln(os.Stderr, "\nNo valid private key found. Let's generate a new key pair.")
 
 	// Get key type
 	kt := promptForKeyType()
@@ -535,20 +610,20 @@ func getOrGenerateKey(keyPath string) (interface{}, interface{}, error) {
 	// Display public key in PEM format
 	pubPemBytes, err := encodeKeyToPEM(publicKey)
 	if err != nil {
-		fmt.Printf("Warning: Failed to encode public key: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: Failed to encode public key: %v\n", err)
 		return nil, nil, err
 	}
 
-	fmt.Printf("\nGenerated public key (save this for verification):\n%s\n", string(pubPemBytes))
+	fmt.Fprintf(os.Stderr, "\nGenerated public key (save this for verification):\n%s\n", string(pubPemBytes))
 
 	// Display private key in PEM format
 	privPemBytes, err := encodeKeyToPEM(privateKey)
 	if err != nil {
-		fmt.Printf("Warning: Failed to encode private key: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: Failed to encode private key: %v\n", err)
 		return nil, nil, err
 	}
 
-	fmt.Printf("\nGenerated private key (save this for future use):\n%s\n", string(privPemBytes))
+	fmt.Fprintf(os.Stderr, "\nGenerated private key (save this for future use):\n%s\n", string(privPemBytes))
 
 	return privateKey, publicKey, nil
 }
@@ -560,6 +635,11 @@ func main() {
 	privateKey, _, err := getOrGenerateKey(keyFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error with private key: %v\n", err)
+		os.Exit(1)
+	}
+
+	if unattended && algorithm == "" {
+		fmt.Fprintln(os.Stderr, "Error: algorithm is required")
 		os.Exit(1)
 	}
 
@@ -581,5 +661,5 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("\nGenerated JWT Token:\n%s\n", token)
+	fmt.Fprintf(os.Stdout, "%s\n", token)
 }

@@ -1,47 +1,64 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package client
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
-	"net"
 
-	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/common"
-	"github.com/riraccuia/pig/pkg/config"
-	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/network"
 )
 
-func getAdapter(cfg *config.Config) (common.TunnelAdapter, error) {
-	adapterCfg := adapter.AdapterConfig{
-		Address: cfg.TunnelAddress,
-		MTU:     cfg.MTU,
-	}
-	return adapter.NewAdapter(adapterCfg)
-}
-
 func (c *Client) readFromAdapter(ctx context.Context) {
+	_, isOutQueuer := c.adapter.(OutQueuer)
+	if isOutQueuer {
+		c.readFromAdapterOutQueue(ctx)
+		return
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-c.done:
-			// in its current state, this channel will not receive on a reconnect attempt
-			// because the adapter.Read below will likely block until the connection is established
-			// also the current logic will recreate the done channel, rendering this check useless
-			// TODO: improve this
 			return
 		default:
-			pkt := c.bufferPool.Get().(packet.IPv4Packet)
-			_, err := c.adapter.Read(pkt[:])
+			buf := c.bufferPool.GetBuffer(c.mtu)
+			_, err := c.adapter.Read(buf[:])
 			if err != nil {
-				c.bufferPool.Put(pkt)
+				c.bufferPool.PutBuffer(buf)
 				c.logger.Errorf("failed to read from adapter: %v", err)
-				c.Close()
+				select {
+				case c.connError <- fmt.Errorf("failed to read from adapter: %w", err):
+				default:
+				}
 				return
 			}
-			if pkt.Version() != 4 {
-				c.bufferPool.Put(pkt)
+
+			var pkt network.IPPacket
+
+			switch network.IPv4Packet(buf[:]).Version() {
+			case 4:
+				pkt = network.IPv4Packet(buf[:])
+			case 6:
+				pkt = network.IPv6Packet(buf[:])
+			}
+
+			if c.outbound.IsDrop() {
+				c.dropLogger.Incr(1, uint64(pkt.TotalLength()))
+				c.bufferPool.PutBuffer(buf)
 				continue
 			}
 
@@ -49,13 +66,18 @@ func (c *Client) readFromAdapter(ctx context.Context) {
 			case c.outbound.C <- pkt:
 			default:
 				c.logger.Errorf("client outbound channel full, dropping packet")
-				c.bufferPool.Put(pkt)
+				c.bufferPool.PutBuffer(buf)
 			}
 		}
 	}
 }
 
 func (c *Client) writeToAdapter(ctx context.Context) {
+	_, isInQueuer := c.adapter.(InQueuer)
+	if isInQueuer {
+		c.writeToAdapterInQueue(ctx)
+		return
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -67,35 +89,77 @@ func (c *Client) writeToAdapter(ctx context.Context) {
 				return
 			}
 			totalLen := pkt.TotalLength()
-			if pkt.Version() != 4 {
-				c.logger.Errorf("received non-IPv4 packet, dropping")
-				c.bufferPool.Put(pkt)
-				continue
-			}
-			_, err := c.adapter.Write(pkt[:totalLen])
-			c.bufferPool.Put(pkt)
+			_, err := c.adapter.Write(pkt.Bytes()[:totalLen])
+			c.bufferPool.PutBuffer(pkt.Bytes())
 			if err != nil {
 				c.logger.Errorf("failed to write to adapter: %v", err)
-				c.Close()
+				select {
+				case c.connError <- fmt.Errorf("failed to write to adapter: %w", err):
+				default:
+				}
 				return
 			}
 		}
 	}
 }
 
-func getMasqAddress(ipNetStr string) (net.IP, error) {
-	ip, ipNet, err := net.ParseCIDR(ipNetStr)
+type OutQueuer interface {
+	OutQueue() (common.PacketQueue, error)
+}
+
+func (c *Client) readFromAdapterOutQueue(ctx context.Context) {
+	outQueue, err := c.adapter.(OutQueuer).OutQueue()
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse IP net: %w", err)
+		return
 	}
-	// get the next ip in the subnet
-	ipInt := binary.BigEndian.Uint32(ip.To4())
-	ipInt++
-	nextIP := make(net.IP, 4)
-	binary.BigEndian.PutUint32(nextIP, ipInt)
-	// check if the next ip is in the subnet
-	if !ipNet.Contains(nextIP) {
-		return nil, fmt.Errorf("no more IPs in subnet")
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.done:
+			return
+		case pkt := <-outQueue:
+			if c.outbound.IsDrop() {
+				c.dropLogger.Incr(1, uint64(pkt.TotalLength()))
+				c.bufferPool.PutBuffer(pkt.Bytes())
+				continue
+			}
+
+			select {
+			case c.outbound.C <- pkt:
+			default:
+				c.bufferPool.PutBuffer(pkt.Bytes())
+			}
+		}
 	}
-	return nextIP, nil
+}
+
+type InQueuer interface {
+	InQueue() (common.PacketQueue, error)
+}
+
+func (c *Client) writeToAdapterInQueue(ctx context.Context) {
+	inQueue, err := c.adapter.(InQueuer).InQueue()
+	if err != nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.done:
+			return
+		case pkt := <-c.inbound:
+			/*if pkt.Version() != 4 {
+				c.bufferPool.PutBuffer(pkt.Bytes())
+				continue
+			}*/
+			select {
+			case inQueue <- pkt:
+			default:
+				c.logger.Errorf("adapter inbound channel full, dropping packet")
+				c.bufferPool.PutBuffer(pkt.Bytes())
+			}
+		}
+	}
 }

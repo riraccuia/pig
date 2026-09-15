@@ -1,13 +1,28 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package client
 
 import (
 	"context"
 	"io"
 
-	"github.com/riraccuia/pig/pkg/packet"
+	"github.com/riraccuia/pig/pkg/network"
+	"github.com/riraccuia/pig/pkg/transport"
 )
 
-// handleInbound starts the appropriate packet handling based on connection type
+// handleInbound starts the appropriate packet handling based on connection type.
 func (c *Client) handleInbound(ctx context.Context) {
 	if c.conn.IsStreamed() {
 		go c.openStreams(ctx)
@@ -16,13 +31,17 @@ func (c *Client) handleInbound(ctx context.Context) {
 	go c.processInbound(c.conn)
 }
 
-// handleOutbound manages outbound packet routing based on connection type
+// handleOutbound manages outbound packet routing based on connection type.
 func (c *Client) handleOutbound(ctx context.Context) {
+	if c.conn == nil {
+		c.logger.Debugf("no connection, skipping outbound packet handling")
+		return
+	}
 	if c.conn.IsStreamed() {
 		go c.processOutboundStream(ctx)
 		return
 	}
-	go c.processOutboundConn(ctx)
+	go c.processOutboundConn(ctx, c.conn)
 }
 
 // processInbound processes incoming IPv4 packets from the connection or stream
@@ -36,7 +55,7 @@ func (c *Client) processInbound(connOrStream io.ReadWriteCloser) {
 		n, err := connOrStream.Read(buffer[len(unprocessed):])
 		if err != nil {
 			c.logger.Debugf("failed to read from connection or stream: %v", err)
-			if c.conn.IsStreamed() {
+			if _, ok := connOrStream.(transport.Stream); ok {
 				// streams are reconnected automatically
 				return
 			}
@@ -51,10 +70,18 @@ func (c *Client) processInbound(connOrStream io.ReadWriteCloser) {
 		// Process complete packets
 		processed := 0
 		for processed+20 <= len(unprocessed) {
-			pkt := packet.IPv4Packet(unprocessed[processed:])
-			totalLen := pkt.TotalLength()
+			var prePkt network.IPPacket
 
-			if totalLen < 20 || totalLen > c.config.MTU {
+			switch network.IPv4Packet(unprocessed[processed:]).Version() {
+			case 4:
+				prePkt = network.IPv4Packet(unprocessed[processed:])
+			case 6:
+				prePkt = network.IPv6Packet(unprocessed[processed:])
+			}
+
+			totalLen := prePkt.TotalLength()
+
+			if totalLen < 20 || totalLen > c.mtu {
 				c.logger.Debugf("received packet inbound with invalid length: %d", totalLen)
 				processed++
 				continue
@@ -65,23 +92,37 @@ func (c *Client) processInbound(connOrStream io.ReadWriteCloser) {
 			}
 
 			// Get new packet from pool and copy data
-			newPkt := c.bufferPool.Get().(packet.IPv4Packet)
-			copy(newPkt[:totalLen], unprocessed[processed:processed+totalLen])
-			switch newPkt.GetMark() {
-			case packet.DSCP_MARK_ADAPTER_SNAT:
-				newPkt.SetSourceIP(c.adapter.IP())
-			case packet.DSCP_MARK_ADAPTER_DNAT:
-				newPkt.SetDestinationIP(c.adapter.IP())
-			case packet.DSCP_MARK_MASQ_SNAT:
-				newPkt.SetSourceIP(c.masqAddr)
+			buf := c.bufferPool.GetBuffer(c.mtu)
+			copy(buf[:totalLen], unprocessed[processed:processed+totalLen])
+
+			var pkt network.IPPacket
+
+			switch prePkt.Version() {
+			case 4:
+				v4Pkt := network.IPv4Packet(buf[:])
+				tuple, _ := NewTuple(v4Pkt)
+				tuple.DestIP = c.adapter.IP()
+				entry, ok := c.conntrack.Load(tuple)
+				if !ok {
+					pkt = v4Pkt
+					break
+				}
+				entry.UpdateExpireAt(tuple.ProtocolData)
+				if entry.InMappedDst != nil {
+					v4Pkt.SetDestinationIP(entry.InMappedDst)
+				}
+				pkt = v4Pkt
+			case 6:
+				pkt = network.IPv6Packet(buf[:])
+				pkt.SetDestinationIP(c.adapter.IP6())
 			}
-			newPkt.ClearMark()
-			newPkt.UpdateChecksum()
+
+			pkt.UpdateChecksum()
 			select {
-			case c.inbound <- newPkt:
+			case c.inbound <- pkt:
 			default:
 				c.logger.Errorf("adapter inbound channel full, dropping packet")
-				c.bufferPool.Put(newPkt)
+				c.bufferPool.PutBuffer(pkt.Bytes())
 			}
 
 			processed += totalLen
@@ -100,7 +141,7 @@ func (c *Client) processInbound(connOrStream io.ReadWriteCloser) {
 }
 
 // processOutboundStream processes outbound packets for streamed connections,
-// selecting appropriate streams based on destination IP
+// selecting appropriate streams based on destination IP.
 func (c *Client) processOutboundStream(ctx context.Context) {
 	for {
 		select {
@@ -112,33 +153,42 @@ func (c *Client) processOutboundStream(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if c.outbound.IsDrop() {
-				c.dropLogger.Incr(1, uint64(pkt.TotalLength()))
-				c.bufferPool.Put(pkt)
-				continue
-			}
 			stream := c.streams.SelectByIPAndPort(pkt.DestinationIP(), pkt.DestinationPort())
 			if stream == nil {
-				c.bufferPool.Put(pkt)
+				c.bufferPool.PutBuffer(pkt.Bytes())
 				continue
 			}
 
 			totalLen := pkt.TotalLength()
-			if totalLen <= 0 || totalLen > len(pkt) {
-				c.bufferPool.Put(pkt)
+			if totalLen <= 0 || totalLen > len(pkt.Bytes()) {
+				c.bufferPool.PutBuffer(pkt.Bytes())
 				continue
 			}
 
-			switch {
-			case c.adapter.IP().Equal(pkt.SourceIP()):
-				pkt.Mark(packet.DSCP_MARK_MASQ_SNAT)
-			case c.masqAddr.Equal(pkt.DestinationIP()):
-				pkt.Mark(packet.DSCP_MARK_ADAPTER_DNAT)
+			switch realPkt := pkt.(type) {
+			case network.IPv4Packet:
+				tuple, _ := NewTuple(realPkt)
+				entry, ok := c.conntrack.Load(tuple)
+				if !ok {
+					entry = &ConnTrackEntry{
+						InMappedDst: tuple.SrcIP,
+					}
+					entry.UpdateExpireAt(tuple.ProtocolData)
+
+					invertedTuple := tuple.Inverted()
+					invertedTuple.DestIP = c.adapter.IP()
+
+					c.conntrack.Store(tuple, entry)
+					c.conntrack.Store(invertedTuple, entry)
+					break
+				}
+				entry.UpdateExpireAt(tuple.ProtocolData)
+			case network.IPv6Packet:
 			}
 
-			_, err := stream.Write(pkt[:totalLen])
+			_, err := stream.Write(pkt.Bytes()[:totalLen])
 			stream.Flush()
-			c.bufferPool.Put(pkt)
+			c.bufferPool.PutBuffer(pkt.Bytes())
 			if err == nil {
 				continue
 			}
@@ -149,8 +199,8 @@ func (c *Client) processOutboundStream(ctx context.Context) {
 	}
 }
 
-// processOutboundConn processes outbound packets for non-streamed connections
-func (c *Client) processOutboundConn(ctx context.Context) {
+// processOutboundConn processes outbound packets for non-streamed connections.
+func (c *Client) processOutboundConn(ctx context.Context, conn transport.Conn) {
 	// Create a buffer to hold multiple packets
 	const maxBatchSize = 64 * 1024 // 64KB batch size
 	buffer := make([]byte, 0, maxBatchSize)
@@ -159,7 +209,7 @@ func (c *Client) processOutboundConn(ctx context.Context) {
 	// Helper function to write and reset batch
 	writeBatch := func() error {
 		for len(batch) > 0 {
-			n, err := c.conn.Write(batch)
+			n, err := conn.Write(batch)
 			batch = batch[n:]
 			if err != nil && err != io.ErrShortWrite {
 				return err
@@ -169,37 +219,46 @@ func (c *Client) processOutboundConn(ctx context.Context) {
 		return nil
 	}
 
-	processPacket := func(pkt packet.IPv4Packet) error {
-		if c.outbound.IsDrop() {
-			c.dropLogger.Incr(1, uint64(pkt.TotalLength()))
-			c.bufferPool.Put(pkt)
-			return nil
-		}
+	processPacket := func(pkt network.IPPacket) error {
 		totalLen := pkt.TotalLength()
-		if totalLen <= 0 || totalLen > len(pkt) {
-			c.bufferPool.Put(pkt)
+		if totalLen <= 0 || totalLen > len(pkt.Bytes()) {
+			c.bufferPool.PutBuffer(pkt.Bytes())
 			return nil
 		}
 
-		switch {
-		case c.adapter.IP().Equal(pkt.SourceIP()):
-			pkt.Mark(packet.DSCP_MARK_MASQ_SNAT)
-		case c.masqAddr.Equal(pkt.DestinationIP()):
-			pkt.Mark(packet.DSCP_MARK_ADAPTER_DNAT)
+		switch realPkt := pkt.(type) {
+		case network.IPv4Packet:
+			tuple, _ := NewTuple(realPkt)
+			entry, ok := c.conntrack.Load(tuple)
+			if !ok {
+				entry = &ConnTrackEntry{
+					InMappedDst: tuple.SrcIP,
+				}
+				entry.UpdateExpireAt(tuple.ProtocolData)
+
+				invertedTuple := tuple.Inverted()
+				invertedTuple.DestIP = c.adapter.IP()
+
+				c.conntrack.Store(tuple, entry)
+				c.conntrack.Store(invertedTuple, entry)
+				break
+			}
+			entry.UpdateExpireAt(tuple.ProtocolData)
+		case network.IPv6Packet:
 		}
 
 		// If adding this packet would exceed batch size, flush current batch first
 		if len(batch)+totalLen > maxBatchSize {
 			if err := writeBatch(); err != nil {
-				c.bufferPool.Put(pkt)
+				c.bufferPool.PutBuffer(pkt.Bytes())
 				c.logger.Debugf("failed to write batch to connection: %v", err)
 				return err
 			}
 		}
 
 		// Append packet to batch
-		batch = append(batch, pkt[:totalLen]...)
-		c.bufferPool.Put(pkt)
+		batch = append(batch, pkt.Bytes()[:totalLen]...)
+		c.bufferPool.PutBuffer(pkt.Bytes())
 
 		// If batch is full, write immediately
 		if len(batch) >= maxBatchSize {
@@ -212,31 +271,38 @@ func (c *Client) processOutboundConn(ctx context.Context) {
 	}
 
 	for {
+		var (
+			pkt network.IPPacket
+			ok  bool
+		)
 		select {
 		case <-ctx.Done():
 			return
 		case <-c.done:
 			return
-		case pkt, ok := <-c.outbound.C:
-			if !ok {
-				return
+		case pkt, ok = <-c.outbound.C:
+		default:
+			// write the data quickly when the channel has no more packets
+			writeBatch()
+			// then block again until a new packet is available
+			select {
+			case <-ctx.Done():
+			case <-c.done:
+			case pkt, ok = <-c.outbound.C:
 			}
-			// process all queued packets fast
-			for {
-				if err := processPacket(pkt); err != nil {
-					c.logger.Debugf("failed to process packet: %v", err)
-					return
-				}
-				if len(c.outbound.C) == 0 {
-					break
-				}
-				pkt = <-c.outbound.C
-			}
-			// write any remaining data
-			if err := writeBatch(); err != nil {
-				c.logger.Errorf("failed to send outbound data: %v", err)
-				return
-			}
+		}
+		if !ok {
+			writeBatch()
+			return
+		}
+		if pkt == nil {
+			writeBatch()
+			continue
+		}
+		err := processPacket(pkt)
+		if err != nil {
+			c.logger.Debugf("failed to process packet: %v", err)
+			return
 		}
 	}
 }

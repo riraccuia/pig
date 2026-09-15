@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package ws
 
 import (
@@ -11,7 +25,7 @@ import (
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-// WSConn wraps a websocket connection to implement the transport.Conn interface
+// WSConn wraps a websocket connection to implement the transport.Conn interface.
 type WSConn struct {
 	net.Conn
 	localAddr  net.Addr
@@ -74,11 +88,13 @@ func DialConn(ctx context.Context, conn net.Conn, address string, tlsConfig *tls
 		return nil, fmt.Errorf("failed to dial websocket: %w", err)
 	}
 
+	remoteAddr, _ := net.ResolveTCPAddr("tcp", address)
+
 	netConn := websocket.NetConn(context.Background(), wsConn, websocket.MessageBinary)
 	return &WSConn{
 		Conn:       netConn,
 		localAddr:  conn.LocalAddr(),
-		remoteAddr: conn.RemoteAddr(),
+		remoteAddr: remoteAddr, //conn.RemoteAddr(),
 	}, nil
 }
 
@@ -105,8 +121,11 @@ func Dial(ctx context.Context, address string, tlsConfig *tls.Config) (transport
 		return nil, fmt.Errorf("failed to dial websocket: %w", err)
 	}
 
+	remoteAddr, _ := net.ResolveTCPAddr("tcp", address)
+
 	netConn := websocket.NetConn(context.Background(), wsConn, websocket.MessageBinary)
 	return &WSConn{
-		Conn: netConn,
+		Conn:       netConn,
+		remoteAddr: remoteAddr,
 	}, nil
 }

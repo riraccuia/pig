@@ -1,136 +1,120 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package stun
 
 import (
+	"context"
 	"fmt"
 	"net"
+	"net/netip"
 	"time"
-
-	"github.com/riraccuia/pig/pkg/common"
-	"github.com/riraccuia/pig/pkg/ice/conn"
 )
 
-// QueryServerUDP is a convenience function that uses a StunClient under the hood.
-func QueryServerUDP(logger common.Logger, stunServerAddr string, connOrSrcPort any) (mappedIP net.IP, mappedPort int, err error) {
-	client := NewStunClient(logger, stunServerAddr, nil)
-	return client.QueryStunServerUDP(connOrSrcPort)
+// QueryServerUDP is a convenience function that queries a STUN server over UDP.
+// It discovers the IP address and port as seen from the public internet.
+func QueryServerUDP(stunServerAddr string, connOrLocalAddr any) (*BindingResult, error) {
+	client := NewClient(stunServerAddr)
+	return client.QueryStunServerUDP(connOrLocalAddr)
 }
 
-// QueryStunServerUDP takes a UDP connection or a source port and queries the STUN server.
-func (c *StunClient) QueryStunServerUDP(connOrSrcPort any) (mappedIP net.IP, mappedPort int, err error) {
-	conn, ok := connOrSrcPort.(*net.UDPConn)
+// QueryStunServerUDP takes a UDP connection or a source port and queries the STUN server over UDP.
+// This method discovers your public IP address and port as seen from the internet.
+// It accepts either an existing UDP connection (*net.UDPConn) or a local address (*net.UDPAddr).
+// If a source port is provided, a new UDP connection will be established and closed after the query.
+func (c *Client) QueryStunServerUDP(connOrLocalAddr any) (*BindingResult, error) {
+	conn, ok := connOrLocalAddr.(*net.UDPConn)
 	if ok {
-		return c.queryStunServerUDP(conn)
+		network := "udp4"
+		if conn.LocalAddr().(*net.UDPAddr).IP.To4() == nil {
+			network = "udp6"
+		}
+		serverAddr, err := net.ResolveUDPAddr(network, c.ServerAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve STUN server address (%s) %s: %w", network, c.ServerAddr, err)
+		}
+		return c.queryStunServerUDP(serverAddr, conn)
 	}
-	srcPort, ok := connOrSrcPort.(int)
+	localAddr, ok := connOrLocalAddr.(*net.UDPAddr)
 	if !ok {
-		return nil, 0, fmt.Errorf("invalid source port: %v", connOrSrcPort)
+		return nil, fmt.Errorf("invalid local address: %v", connOrLocalAddr)
 	}
-	return c.queryStunServerUDP(srcPort)
+	var network string
+	switch {
+	case localAddr.IP == nil:
+		network = "udp"
+	case localAddr.IP.To4() == nil:
+		network = "udp6"
+	default:
+		network = "udp4"
+	}
+	serverAddr, err := net.ResolveUDPAddr(network, c.ServerAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve STUN server address (%s) %s: %w", network, c.ServerAddr, err)
+	}
+	return c.queryStunServerUDP(serverAddr, localAddr)
 }
 
 // QueryStunServerUDP sends a STUN Binding Request and returns the mapped IP and port.
-// It uses the client's configured ServerAddr. connOrSrcPort is the UDP connection or the source port to send from.
-func (c *StunClient) queryStunServerUDP(connOrSrcPort any) (mappedIP net.IP, mappedPort int, err error) {
-	// Resolve server address
-	serverAddr, err := net.ResolveUDPAddr("udp", c.ServerAddr)
+// It uses the client's configured ServerAddr. connOrLocalAddr is the UDP connection or the local address to send from.
+func (c *Client) queryStunServerUDP(serverAddr *net.UDPAddr, connOrLocalAddr any) (*BindingResult, error) {
+	request, err := BuildBindingRequest(c.bindingOptions)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to resolve STUN server address %s: %w", c.ServerAddr, err)
-	}
-
-	// Create STUN message
-	msg, err := CreateStunMessage(stunBindingRequest, nil)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create STUN request: %w", err)
-	}
-
-	err = AddFingerprint(msg)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to add fingerprint: %w", err)
+		return nil, err
 	}
 
 	// Send request and receive response
-	responseBytes, err := c.sendStunRequestUDP(serverAddr, connOrSrcPort, msg.Raw, msg.Header.TransactionID)
+	response, err := c.sendStunRequestUDP(serverAddr, connOrLocalAddr, request, request.Header.TransactionID)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 
-	// Parse and validate response
-	response, err := ParseStunMessage(responseBytes)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to parse STUN response: %w", err)
-	}
-
-	if err := ValidateStunMessage(response, stunBindingResponse, msg.Header.TransactionID); err != nil {
-		return nil, 0, fmt.Errorf("invalid STUN response: %w", err)
-	}
-
-	// Check for error response first
-	if response.Header.Type == stunBindingErrorResponse {
-		errorCode, errorReason := ParseStunError(response.Attributes)
-		return nil, 0, fmt.Errorf("STUN error %d: %s", errorCode, errorReason)
-	}
-
-	// Verify FINGERPRINT attribute (RFC 5389 Section 15.5)
-	/*if !VerifyFingerprint(response) {
-		return nil, 0, fmt.Errorf("invalid STUN response: fingerprint verification failed")
-	}*/
-
-	// Extract mapped address
-	mappedIP, mappedPort, err = ExtractMappedAddress(response.Attributes)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to extract mapped address: %w", err)
-	}
-
-	if c.logger != nil {
-		c.logger.Infof("STUN: Found mapped address %s:%d (UDP)", mappedIP, mappedPort)
-	}
-
-	return mappedIP, mappedPort, nil
+	result, err := ProcessBindingResponse(response, request.Header.TransactionID, c.bindingOptions)
+	result.ServerAddr = serverAddr.String()
+	return result, err
 }
 
 // sendStunRequestUDP sends a STUN UDP request and receives the response.
 // connOrSrcPort is the UDP connection or the source port to send from.
-func (c *StunClient) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrSrcPort any, requestBytes []byte, txID [12]byte) (responseBytes []byte, err error) {
-	udpConn, ok := connOrSrcPort.(net.Conn)
+func (c *Client) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrLocalAddr any, request *Message, txID [12]byte) (response *Message, err error) {
+	udpConn, ok := connOrLocalAddr.(net.Conn)
 	if !ok {
-		srcPort, ok := connOrSrcPort.(int)
+		laddr, ok := connOrLocalAddr.(*net.UDPAddr)
 		if !ok {
-			return nil, fmt.Errorf("invalid source port: %v", connOrSrcPort)
+			return nil, fmt.Errorf("invalid local address: %v", connOrLocalAddr)
 		}
-		laddr := &net.UDPAddr{
-			IP:   net.IPv4zero, // Listen on all available IPs
-			Port: srcPort,
-		}
-		/*udpConn, err = net.ListenUDP("udp4", laddr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to listen on UDP port %d: %w", srcPort, err)
-		}*/
-		var _udpConn *net.UDPConn
-		_udpConn, err = conn.DialUDP("udp4", laddr, serverAddr)
+		udpConn, err = c.createUDPConnection(serverAddr, laddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to dial UDP: %w", err)
 		}
-		udpConn = conn.NewUDPPacketConn(_udpConn)
 		// only close the connection if we created it
 		defer udpConn.Close()
 	}
 
 	srcPort := udpConn.LocalAddr().(*net.UDPAddr).Port
 
-	if c.logger != nil {
-		c.logger.Infof("STUN: Sending Binding Request over UDP from :%d to %s (TX ID: %x)", srcPort, serverAddr, txID[:4])
-	}
+	c.logger("info", fmt.Sprintf("STUN: Sending Binding Request over UDP from :%d to %s (TX ID: %x)", srcPort, serverAddr, txID[:4]))
 
 	// Send request
-	_, err = udpConn.Write(requestBytes)
-	//_, err = udpConn.WriteToUDP(requestBytes, serverAddr)
+	_, err = request.WriteTo(udpConn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send STUN request over UDP: %w", err)
 	}
 
 	// Receive response with timeout
-	responseBytes = make([]byte, 1500) // MTU size buffer
-	udpConn.SetReadDeadline(time.Now().Add(stunTimeout))
+	responseBytes := make([]byte, 1500) // MTU size buffer
+	udpConn.SetReadDeadline(time.Now().Add(c.receiveTimeout))
 	defer udpConn.SetReadDeadline(time.Time{})
 	n, err := udpConn.Read(responseBytes)
 	//n, remoteAddr, err := udpConn.ReadFromUDP(responseBytes)
@@ -144,9 +128,33 @@ func (c *StunClient) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrSrcPort a
 	// Trim buffer to actual received size
 	responseBytes = responseBytes[:n]
 
-	if c.logger != nil {
-		c.logger.Debugf("STUN: Received %d bytes response over UDP from %s", n, serverAddr)
-	}
+	c.logger("debug", fmt.Sprintf("STUN: Received %d bytes response over UDP from %s", n, serverAddr))
 
-	return responseBytes, nil
+	return DecodeMessage(responseBytes)
+}
+
+func (c *Client) createUDPConnection(serverAddr *net.UDPAddr, laddr *net.UDPAddr) (*net.UDPConn, error) {
+	if laddr.IP == nil {
+		// if the local address is nil, use the zero address
+		// buf first we have to check if the server address is IPv4 or IPv6
+		laddr.IP = net.IPv4zero
+		if serverAddr.IP != nil && serverAddr.IP.To4() == nil {
+			laddr.IP = net.IPv6zero
+		}
+	}
+	dialLaddr, ok := netip.AddrFromSlice(laddr.IP)
+	if !ok {
+		return nil, fmt.Errorf("failed to convert local address to netip.Addr")
+	}
+	if serverAddr.IP == nil {
+		serverAddr.IP = net.IPv4zero
+		if laddr.IP.To4() == nil {
+			serverAddr.IP = net.IPv6zero
+		}
+	}
+	dialRaddr, ok := netip.AddrFromSlice(serverAddr.IP)
+	if !ok {
+		return nil, fmt.Errorf("failed to convert server address %s to netip.Addr", serverAddr.IP)
+	}
+	return c.dialer.DialUDP(context.Background(), "udp", netip.AddrPortFrom(dialLaddr, uint16(laddr.Port)), netip.AddrPortFrom(dialRaddr, uint16(serverAddr.Port)))
 }

@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package message
 
 import (
@@ -8,38 +22,44 @@ import (
 	"time"
 )
 
-// ICEMessageType defines the type of ICE message
+// ICEMessageType defines the type of ICE message.
 type ICEMessageType string
 
 const (
-	// ICEMessageTypeOffer indicates an offer message from the client
+	// ICEMessageTypeOffer indicates an offer message from the client.
 	ICEMessageTypeOffer ICEMessageType = "offer"
 
-	// ICEMessageTypeAnswer indicates an answer message from the server
+	// ICEMessageTypeAnswer indicates an answer message from the server.
 	ICEMessageTypeAnswer ICEMessageType = "answer"
 )
 
-// ICECandidateType defines the type of ICE candidate
+// ICECandidateType defines the type of ICE candidate.
 type ICECandidateType string
 
 const (
-	// ICECandidateTypeHost indicates a host candidate (local address)
+	// ICECandidateTypeHost indicates a host candidate (local address).
 	ICECandidateTypeHost ICECandidateType = "host"
 
-	// ICECandidateTypeSrflx indicates a server reflexive candidate (from STUN)
+	// ICECandidateTypeSrflx indicates a server reflexive candidate (from STUN).
 	ICECandidateTypeSrflx ICECandidateType = "srflx"
 )
 
-// ICEMessage represents an ICE protocol message
+// ICEMessage represents an ICE protocol message.
 type ICEMessage struct {
-	// SessionID is the ID of the session
+	// SessionID is the ID of the session.
 	SessionID string `json:"session_id"`
 
-	// Type of the message (offer, answer, candidate)
+	// Type of the message (offer, answer, candidate).
 	Type ICEMessageType `json:"type"`
 
-	// Timestamp of when the message was created
-	Timestamp int64 `json:"timestamp"`
+	// Timestamps for clock offset calculation.
+	// For an offer message:
+	// [0] = T1: the time that the offer was sent
+	// [1] = T4: the time that the offering side received the answer
+	// For an answer message:
+	// [0] = T2: the time that the offer was received
+	// [1] = T3: the time that the answering side sent the answer
+	Timestamp [2]int64 `json:"timestamp"`
 
 	// ConnectOffsetDuration represents the duration that will be added to the
 	// timestamp of the answer to make it the scheduled time. The value for this
@@ -48,74 +68,67 @@ type ICEMessage struct {
 	// the answer message.
 	ConnectOffsetDuration time.Duration `json:"connect_offset_duration,omitempty"`
 
-	// Candidates for this message
+	// NATType represents the NAT type of the remote peer.
+	// 0: endpoint-independent mapping
+	// 1: address-dependent mapping
+	NATType int `json:"nat_type,omitempty"`
+
+	// Candidates for this message.
 	Candidates []ICECandidate `json:"candidates"`
 
-	// Credentials for authentication
+	// Credentials for authentication.
 	Credentials ICECredentials `json:"credentials"`
 }
 
-// ICECandidate represents an ICE candidate
+// ICECandidate represents an ICE candidate.
 type ICECandidate struct {
-	// Foundation is a unique identifier for the candidate
+	// Foundation is a unique identifier for the candidate.
 	Foundation string `json:"foundation"`
 
-	// Component ID of the candidate
+	// Component ID of the candidate.
 	ComponentID int `json:"componentId"`
 
-	// Priority of the candidate (higher is better)
+	// Priority of the candidate (higher is better).
 	Priority uint32 `json:"priority"`
 
-	// Protocol (udp, tcp)
+	// Protocol (udp, tcp).
 	Protocol string `json:"protocol"`
 
-	// Address of the candidate
+	// Address of the candidate.
 	Address string `json:"address"`
 
-	// Port of the candidate
+	// Port of the candidate.
 	Port int `json:"port"`
 
-	// Type of the candidate (host, srflx)
+	// Type of the candidate (host, srflx).
 	Type ICECandidateType `json:"type"`
 
-	// RelatedAddress for derived candidates (like srflx)
+	// RelatedAddress for derived candidates (like srflx).
 	RelatedAddr string `json:"relatedAddr,omitempty"`
 
-	// RelatedPort for derived candidates
+	// RelatedPort for derived candidates.
 	RelatedPort int `json:"relatedPort,omitempty"`
 }
 
-// ICECredentials contains authentication information
+// ICECredentials contains authentication information.
 type ICECredentials struct {
-	// Username for ICE authentication
+	// Username for ICE authentication.
 	Username string `json:"username"`
 
-	// Password for ICE authentication
+	// Password for ICE authentication.
 	Password string `json:"password"`
 }
 
-// GenerateICEOffer creates an ICE offer message with host and STUN-derived candidates
-func GenerateICEOffer(candidates []ICECandidate) (*ICEMessage, error) {
-	// Create the message
+// GenerateICEMessage creates an ICE message with host and STUN-derived candidates.
+func GenerateICEMessage(messageType ICEMessageType, candidates []ICECandidate) (*ICEMessage, error) {
 	message := &ICEMessage{
-		Type:        ICEMessageTypeOffer,
-		Timestamp:   time.Now().UnixMilli(),
+		Type:        messageType,
 		Candidates:  candidates,
 		Credentials: generateCredentials(),
 	}
 
-	message.GenerateSessionID()
-
-	return message, nil
-}
-
-// GenerateICEAnswer creates an ICE answer message with host and STUN-derived candidates
-func GenerateICEAnswer(candidates []ICECandidate) (*ICEMessage, error) {
-	message := &ICEMessage{
-		Type:        ICEMessageTypeAnswer,
-		Timestamp:   time.Now().UnixMilli(),
-		Candidates:  candidates,
-		Credentials: generateCredentials(),
+	if messageType == ICEMessageTypeOffer {
+		message.GenerateSessionID()
 	}
 
 	return message, nil
@@ -132,25 +145,13 @@ func (msg *ICEMessage) String() string {
 
 // Helper functions
 
-// GenerateFoundation creates a unique foundation string for the candidate
+// GenerateFoundation creates a unique foundation string for the candidate.
 func GenerateFoundation(addr string) string {
 	hash := sha256.Sum256([]byte(addr))
 	return base64.StdEncoding.EncodeToString(hash[:8])[:8] // First 8 chars of hash
 }
 
-// CalculateHostPriority returns the priority for host candidates
-func CalculateHostPriority() uint32 {
-	// Per ICE RFC: type preference (126) << 24 | local preference (65535) << 8 | 255
-	return (126 << 24) | (65535 << 8) | 255
-}
-
-// CalculateSrflxPriority returns the priority for server reflexive candidates
-func CalculateSrflxPriority() uint32 {
-	// Per ICE RFC: type preference (100) << 24 | local preference (65535) << 8 | 255
-	return (100 << 24) | (65535 << 8) | 255
-}
-
-// generateCredentials creates ICE credentials from the encryption key
+// generateCredentials creates ICE credentials from the encryption key.
 func generateCredentials() ICECredentials {
 	// Create a random username
 	username := RandStringFromRunes(12, az09Runes)

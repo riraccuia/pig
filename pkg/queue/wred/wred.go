@@ -1,3 +1,17 @@
+// Copyright 2026 Riccardo Raccuia
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Package wred implements Weighted Random Early Detection queue management algorithm.
 package wred
 
@@ -10,13 +24,13 @@ import (
 // It maintains an exponentially weighted moving average of the queue length
 // to make decisions about packet drops.
 type WRED struct {
-	// avgQueueLen stores the exponentially weighted moving average queue length
+	// avgQueueLen stores the exponentially weighted moving average queue length.
 	avgQueueLen float64
 
-	// factor is the weight factor used in the WRED calculation
+	// factor is the weight factor used in the WRED calculation.
 	factor float64
 
-	// w is the derived weight used in the exponential moving average calculation
+	// w is the derived weight used in the exponential moving average calculation.
 	// w = 2^(-weight)
 	w float64
 }
