@@ -350,13 +350,7 @@ func getAdapterAddress(ifName string, family int) (net.IP, *net.IPNet, error) {
 		return nil, nil, fmt.Errorf("no address found for interface: %s", ifName)
 	}
 	rank := func(addr ifAddr) int {
-		var r int
-		if !addr.IP.IsLinkLocalUnicast() {
-			r++
-		}
-		if !addr.IP.IsPrivate() {
-			r++
-		}
+		r := rankIPAddr(addr.IP)
 		copy(rawSockaddrInet6.Addr[:], addr.IP.To16())
 		flagsA, err := IoctlGetIfaFlagInet6(ioctlFd, ifName, rawSockaddrInet6)
 		if err != nil {
@@ -367,7 +361,7 @@ func getAdapterAddress(ifName string, family int) (net.IP, *net.IPNet, error) {
 		}
 		return r
 	}
-	slices.SortFunc(ipv6Addrs, func(a, b ifAddr) int {
+	slices.SortStableFunc(ipv6Addrs, func(a, b ifAddr) int {
 		return rank(b) - rank(a)
 	})
 	return ipv6Addrs[0].IP, ipv6Addrs[0].IpNet, nil

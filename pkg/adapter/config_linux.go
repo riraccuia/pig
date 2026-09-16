@@ -264,19 +264,13 @@ func getAdapterAddress(ifName string, family int) (net.IP, *net.IPNet, error) {
 		return addrs[0].IP, ipNet, err
 	}
 	rank := func(a ifAddr) int {
-		var r int
-		if !a.IP.IsLinkLocalUnicast() {
-			r++
-		}
-		if !a.IP.IsPrivate() {
-			r++
-		}
+		r := rankIPAddr(a.IP)
 		if uint32(a.Flags)&unix.IFA_F_TEMPORARY != 0 {
 			r++
 		}
 		return r
 	}
-	slices.SortFunc(addrs, func(a, b ifAddr) int {
+	slices.SortStableFunc(addrs, func(a, b ifAddr) int {
 		return rank(b) - rank(a)
 	})
 

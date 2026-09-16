@@ -43,6 +43,8 @@ It is still a bit rough around the edges. Feel free to contribute and bring fres
 - Use the [`-to-cfg`](docs/cli-help/connect.md) option with both `-c` and `-l` subcommands to quickly generate a config file to use as baseline for an advanced setup. See the [config file format documentation](docs/config.md).
 - Read the [user guide](docs/guide.md).
 
+
+
 ### Example
 
 ```
@@ -74,6 +76,7 @@ nc 192.168.5.1 8080; killall -INT pig
 ```
 
 To turn Alice's command into a config file, do
+
 ```bash
 pig -l -id pig-demo-alice -P . -k -to-cfg json > alice.json
 ```
@@ -85,6 +88,8 @@ Then run with it.
 pig -config alice.json
 ```
 
+
+
 ## Nerd facts
 
 - Pig features a [WRED (weighted random early detection)](https://en.wikipedia.org/wiki/Weighted_random_early_detection) implementation to combat network bufferbloat and maintain low latency. It is fully configurable.
@@ -93,6 +98,8 @@ pig -config alice.json
 - If one of the connecting nodes is behind [symmetric NAT](https://en.wikipedia.org/wiki/Network_address_translation#Methods_of_translation), pig can usually still find a path using the [birthday problem](https://en.wikipedia.org/wiki/Birthday_problem).
 - Stream multiplexing support is built-in where the protocol allows it (e.g. QUIC). The number of streams to open is configurable, too.
 
+
+
 ## Acknowledgments
 
 Packages that make this project possible. Thanks to the authors for their work!
@@ -100,13 +107,15 @@ Packages that make this project possible. Thanks to the authors for their work!
 - [BurntSushi/toml](https://github.com/BurntSushi/toml) - toml config parsing
 - [cespare/xxhash](https://github.com/cespare/xxhash) - hashing
 - [coder/websocket](https://github.com/coder/websocket) - WebSocket transport
-- [eclipse/paho.mqtt.golang](https://github.com/eclipse/paho.mqtt.golang) — MQTT ICE signaling
+- [eclipse/paho.mqtt.golang](https://github.com/eclipse/paho.mqtt.golang) - MQTT ICE signaling
 - [golang-jwt/jwt](https://github.com/golang-jwt/jwt) - JWT auth
 - [lestrrat-go/jwx](https://github.com/lestrrat-go/jwx) - JWK/JWKS for OIDC/OAuth
 - [pion/dtls](https://github.com/pion/dtls) - DTLS transport
 - [quic-go/quic-go](https://github.com/quic-go/quic-go) - QUIC transport
 - [rs/zerolog](https://github.com/rs/zerolog) - logging
 - [WireGuard/wintun](https://golang.zx2c4.com/wintun) - Windows TUN driver
+
+
 
 ## License
 

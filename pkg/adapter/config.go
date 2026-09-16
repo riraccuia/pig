@@ -21,3 +21,20 @@ import "net"
 func GetAdapterAddress(ifName string, family int) (net.IP, *net.IPNet, error) {
 	return getAdapterAddress(ifName, family)
 }
+
+// rankIPAddr ranks an IP address based on its type.
+// From highest to lowest: public, private (including IPv6 ULA), link-local, everything else.
+func rankIPAddr(ip net.IP) int {
+	var r int
+	switch {
+	case ip.IsGlobalUnicast() && !ip.IsPrivate():
+		r = 3 // public
+	case ip.IsPrivate():
+		r = 2 // including IPv6 ULA
+	case ip.IsLinkLocalUnicast():
+		r = 1
+	default:
+		r = 0 // multicast, loopback, unspecified, …
+	}
+	return r
+}
