@@ -1,0 +1,37 @@
+# Pig exit-node / full-tunnel gateway.
+# Handles both IPv4 and IPv6 tunnel traffic.
+#
+# From this directory:
+#   docker compose up --build
+#
+# Change the output interface for NAT:
+#   PIG_NAT_OIF=eth0 docker compose up --build
+
+services:
+  pig:
+    build:
+      context: ../../../..
+      dockerfile: build/docker/Dockerfile
+    container_name: pig-exit-node
+    cap_add:
+      - NET_ADMIN
+    environment:
+      PIG_CONFIG: /etc/pig/pig.config
+      PIG_MASQUERADE: 1
+      PIG_NAT_OIF: ${PIG_NAT_OIF:-eth0}
+    volumes:
+      - ./pig.config:/etc/pig/pig.config:ro
+      - ./logs:/var/log/pig:rw
+    sysctls:
+      net.ipv4.ip_forward: 1
+      net.ipv6.conf.all.forwarding: 1
+    networks:
+      - ip6net
+    restart: unless-stopped
+
+networks:
+  ip6net:
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: fd4c:9645:9404::/48
