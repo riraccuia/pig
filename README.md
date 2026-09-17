@@ -1,4 +1,4 @@
-![pig gopher](assets/pig-gopher.png)
+![pig gopher](assets/pig-gopher-shovel.png)
 
 # pig - packet insertion gear
 
