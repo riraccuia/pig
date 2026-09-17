@@ -20,8 +20,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
+	"reflect"
 
 	"github.com/BurntSushi/toml"
 	"github.com/riraccuia/pig/pkg/transport"
@@ -469,22 +468,17 @@ type RouteConfig struct {
 }
 
 func LoadConfigFromFile(path string) (*Config, error) {
-	// determine the config type based on the file extension
-	// if the extension is .toml, decode as toml
-	// if the extension is .json, decode as json
-	extension := strings.ToLower(filepath.Ext(path))
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %v", err)
 	}
-	switch extension {
-	case ".toml":
-		return LoadConfigFromBytes(data, "toml")
-	case ".json":
+	if IsJSON(string(data)) {
 		return LoadConfigFromBytes(data, "json")
-	default:
-		return nil, fmt.Errorf("unsupported config format: %s", extension)
 	}
+	if IsTOML(string(data)) {
+		return LoadConfigFromBytes(data, "toml")
+	}
+	return nil, fmt.Errorf("unsupported config format")
 }
 
 func LoadConfigFromBytes(data []byte, decodeAs string) (*Config, error) {
@@ -501,11 +495,24 @@ func LoadConfigFromBytes(data []byte, decodeAs string) (*Config, error) {
 	default:
 		return nil, fmt.Errorf("unsupported config format: %s", decodeAs)
 	}
+	if reflect.ValueOf(*config).IsZero() {
+		return nil, fmt.Errorf("config is empty or invalid")
+	}
 	err := config.Initialize()
 	if err != nil {
 		return nil, err
 	}
 	return config, nil
+}
+
+func IsJSON(str string) bool {
+	var js any
+	return json.Unmarshal([]byte(str), &js) == nil
+}
+
+func IsTOML(str string) bool {
+	var tm any
+	return toml.Unmarshal([]byte(str), &tm) == nil
 }
 
 func (c AdapterConfig) IsZero() bool {

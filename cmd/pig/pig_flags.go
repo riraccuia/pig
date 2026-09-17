@@ -227,7 +227,7 @@ func initPigConfig() *config.Config {
 	var configPath string
 	flag.StringVar(&configPath, "config", "", "Path to configuration file to load settings from, in json or toml format.")
 	flag.Parse()
-	cfg, err := loadConfigFile(configPath)
+	cfg, err := config.LoadConfigFromFile(configPath)
 	if err != nil {
 		log.NewBlockingLogger().Fatalf("Failed to load config file: %v", err)
 	}
@@ -236,17 +236,6 @@ func initPigConfig() *config.Config {
 		log.NewBlockingLogger().Fatalf("Failed to initialize config: %v", err)
 	}
 	return cfg
-}
-
-func loadConfigFile(configPath string) (*config.Config, error) {
-	if configPath == "" {
-		return nil, nil
-	}
-	cfg, err := config.LoadConfigFromFile(configPath)
-	if err != nil {
-		return nil, err
-	}
-	return cfg, nil
 }
 
 func outputConfig(cfg *config.Config, format string) {
