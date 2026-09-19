@@ -36,7 +36,7 @@ Use the **same** signaling `server_id` and `encryption_key` on both sides.
 
 ## Run
 
-**A** (exit node) — Docker with masquerade is typical:
+**A** (exit node). Docker with masquerade is typical:
 
 ```bash
 # from repo, using the generic compose + this config
