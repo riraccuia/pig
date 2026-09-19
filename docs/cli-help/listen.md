@@ -1,5 +1,5 @@
 ```
-Usage: pig -l [options] [-to-cfg]
+Usage: pig -l [options] [-to-cfg <json|toml>]
 
 OUTPUT
 

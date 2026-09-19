@@ -1,7 +1,3 @@
-# Replace this block before running. Generate a baseline with:
-#   pig -c ... -to-cfg toml
-#   pig -l ... -to-cfg toml
-
 stun_global = "stun.mixvoip.com:3478"
 
 [mqtt_global]
@@ -12,13 +8,14 @@ file = "/var/log/pig/pig.log"
 level = "info"
 rotate_size = "1m"
 
-[adapter]
-tunnel_address = ["172.31.254.1/29", "fd8c:0a47:f698::/64"]
-
+# Listen / exit node: adapter is per-tunnel.
 [[tunnels]]
-name = "example"
+name = "exit"
 direction = "listen"
 proto = "."
+
+[tunnels.adapter]
+tunnel_address = ["172.31.255.1/24", "fd8c:0a47:f698::1/64"]
 
 [tunnels.tls]
 insecure = true
@@ -30,4 +27,5 @@ address = "0.0.0.0"
 enabled = true
 
 [tunnels.ice.signaling]
-id = "replace-me"
+server_id = "replace-me"
+encryption_key = "secret-signaling-key"
