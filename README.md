@@ -39,9 +39,10 @@ It is still a bit rough around the edges. Feel free to contribute and bring fres
 ## Getting started
 
 - Download the [latest release](https://github.com/riraccuia/pig/releases) or build from source using the [makefile](Makefile).
+- Read the [user gude](docs/guide.md), check out the [examples](examples/) and [Docker](docs/docker.md) files.
 - Run [`pig -h`](docs/cli-help/main.md) to see the available options.
-- Use the [`-to-cfg`](docs/cli-help/connect.md) option with both `-c` and `-l` subcommands to quickly generate a config file to use as baseline for an advanced setup. See the [config file format documentation](docs/config.md).
-- Read the [user guide](docs/guide.md).
+- Use the [`-to-cfg`](docs/cli-help/connect.md) option to quickly generate a baseline config for advanced setups.
+- See the [config file reference](docs/config.md).
 
 
 
@@ -81,8 +82,7 @@ To turn Alice's command into a config file, do
 pig -l -id pig-demo-alice -P . -k -to-cfg json > alice.json
 ```
 
-Check the [config file reference](docs/config.md) and customize the generated config for an advanced setup.
-Then run with it.
+Customize and run with it.
 
 ```bash
 pig -config alice.json
