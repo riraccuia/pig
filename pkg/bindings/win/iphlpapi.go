@@ -18,6 +18,7 @@
 package win
 
 import (
+	"errors"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -103,4 +104,67 @@ func GetBestRoute2(
 		return newReturnCodeError("GetBestRoute2", ret)
 	}
 	return nil
+}
+
+// GetIpForwardTable2 retrieves the IP routing table for the given address family.
+// The caller must free the returned table with FreeMibTable.
+// See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipforwardtable2.
+func GetIpForwardTable2(family uint16) (*windows.MibIpForwardTable2, error) {
+	var table *windows.MibIpForwardTable2
+	err := windows.GetIpForwardTable2(family, &table)
+	if err != nil {
+		return nil, apiErrorFromErr("GetIpForwardTable2", err)
+	}
+	return table, nil
+}
+
+// FreeMibTable frees memory allocated by GetIpForwardTable2 and related MIB APIs.
+// See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-freemibtable.
+func FreeMibTable(table *windows.MibIpForwardTable2) {
+	if table == nil {
+		return
+	}
+	windows.FreeMibTable(unsafe.Pointer(table))
+}
+
+// NotifyRouteChange2 registers a callback for IPv4/IPv6 route table changes.
+// See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-notifyroutechange2.
+func NotifyRouteChange2(
+	family uint16,
+	callback uintptr,
+	callerContext unsafe.Pointer,
+	initialNotification bool,
+) (windows.Handle, error) {
+	var notificationHandle windows.Handle
+	err := windows.NotifyRouteChange2(family, callback, callerContext, initialNotification, &notificationHandle)
+	if err != nil {
+		return 0, apiErrorFromErr("NotifyRouteChange2", err)
+	}
+	return notificationHandle, nil
+}
+
+// CancelMibChangeNotify2 cancels a notification registered with NotifyRouteChange2.
+// See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-cancelmibchangenotify2.
+func CancelMibChangeNotify2(notificationHandle windows.Handle) error {
+	if notificationHandle == 0 {
+		return nil
+	}
+	err := windows.CancelMibChangeNotify2(notificationHandle)
+	if err != nil {
+		return apiErrorFromErr("CancelMibChangeNotify2", err)
+	}
+	return nil
+}
+
+func apiErrorFromErr(apiName string, err error) error {
+	var errno windows.Errno
+	var returnCode uintptr
+	if errors.As(err, &errno) {
+		returnCode = uintptr(errno)
+	}
+	return &APIError{
+		APIName:    apiName,
+		ReturnCode: returnCode,
+		Cause:      err,
+	}
 }

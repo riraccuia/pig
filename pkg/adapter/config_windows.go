@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	"runtime"
+	"slices"
 	"time"
 	"unsafe"
 
@@ -339,4 +340,124 @@ func clearNotificationHandle(notificationHandle windows.Handle) {
 		return
 	}
 	procCancelMibChangeNotify2.Call(uintptr(notificationHandle))
+}
+
+type ifAddr struct {
+	IP        net.IP
+	PrefixLen uint8
+	Temporary bool
+}
+
+// getAdapterAddress retrieves the best adapter address for the given family, to be used
+// immediately in order to establish an outbound connection.
+func getAdapterAddress(ifName string, family int) (net.IP, *net.IPNet, error) {
+	addrs, err := getIfAddrs(ifName, family)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(addrs) == 0 {
+		return nil, nil, fmt.Errorf("no address found for interface: %s", ifName)
+	}
+	if family == int(windows.AF_INET) {
+		return addrs[0].IP, ipNetFromAddr(addrs[0]), nil
+	}
+	rank := func(a ifAddr) int {
+		r := rankIPAddr(a.IP)
+		if a.Temporary {
+			r++
+		}
+		return r
+	}
+	slices.SortStableFunc(addrs, func(a, b ifAddr) int {
+		return rank(b) - rank(a)
+	})
+	return addrs[0].IP, ipNetFromAddr(addrs[0]), nil
+}
+
+func ipNetFromAddr(a ifAddr) *net.IPNet {
+	bits := 128
+	if a.IP.To4() != nil {
+		bits = 32
+	}
+	return &net.IPNet{
+		IP:   a.IP,
+		Mask: net.CIDRMask(int(a.PrefixLen), bits),
+	}
+}
+
+func getIfAddrs(ifName string, family int) ([]ifAddr, error) {
+	aas, err := adapterAddresses(uint32(family))
+	if err != nil {
+		return nil, err
+	}
+	var addrs []ifAddr
+	for _, aa := range aas {
+		friendly := windows.UTF16PtrToString(aa.FriendlyName)
+		adapterName := ""
+		if aa.AdapterName != nil {
+			adapterName = windows.BytePtrToString(aa.AdapterName)
+		}
+		if friendly != ifName && adapterName != ifName {
+			continue
+		}
+		for u := aa.FirstUnicastAddress; u != nil; u = u.Next {
+			if u.DadState == windows.IpDadStateTentative || u.DadState == windows.IpDadStateDuplicate || u.DadState == windows.IpDadStateInvalid {
+				continue
+			}
+			ip := u.Address.IP()
+			if ip == nil {
+				continue
+			}
+			switch family {
+			case int(windows.AF_INET):
+				if ip.To4() == nil {
+					continue
+				}
+				ip = ip.To4()
+			case int(windows.AF_INET6):
+				if ip.To4() != nil || ip.To16() == nil {
+					continue
+				}
+				ip = ip.To16()
+			default:
+				continue
+			}
+			copied := make(net.IP, len(ip))
+			copy(copied, ip)
+			addrs = append(addrs, ifAddr{
+				IP:        copied,
+				PrefixLen: u.OnLinkPrefixLength,
+				Temporary: u.SuffixOrigin == windows.IpSuffixOriginRandom,
+			})
+		}
+		break
+	}
+	return addrs, nil
+}
+
+func adapterAddresses(family uint32) ([]*windows.IpAdapterAddresses, error) {
+	var b []byte
+	l := uint32(15000) // recommended initial size
+	flags := uint32(windows.GAA_FLAG_INCLUDE_PREFIX | windows.GAA_FLAG_SKIP_ANYCAST | windows.GAA_FLAG_SKIP_MULTICAST | windows.GAA_FLAG_SKIP_DNS_SERVER)
+	for {
+		b = make([]byte, l)
+		err := windows.GetAdaptersAddresses(family, flags, 0, (*windows.IpAdapterAddresses)(unsafe.Pointer(&b[0])), &l)
+		if err == nil {
+			if l == 0 {
+				return nil, nil
+			}
+			break
+		}
+		if err != windows.ERROR_BUFFER_OVERFLOW {
+			return nil, fmt.Errorf("GetAdaptersAddresses: %w", err)
+		}
+		if l <= uint32(len(b)) {
+			return nil, fmt.Errorf("GetAdaptersAddresses: %w", err)
+		}
+	}
+	var aas []*windows.IpAdapterAddresses
+	for aa := (*windows.IpAdapterAddresses)(unsafe.Pointer(&b[0])); aa != nil; aa = aa.Next {
+		aas = append(aas, aa)
+	}
+	return aas, nil
 }
