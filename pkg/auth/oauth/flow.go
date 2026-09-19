@@ -149,7 +149,7 @@ func runAuthorizationCodeFlow(ctx context.Context, cfg *Config, meta *ProviderMe
 		return nil, &BrowserSkippedError{AuthURL: authURL}
 	}
 
-	if err := openURL(authURL); err != nil {
+	if err := OpenURL(authURL); err != nil {
 		if needCloseLn {
 			_ = lb.Listener.Close()
 		}
