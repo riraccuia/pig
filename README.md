@@ -1,4 +1,4 @@
-![pig gopher](assets/pig-gopher.png)
+![pig gopher](assets/pig-gopher-shovel.png)
 
 # pig - packet insertion gear
 
@@ -39,9 +39,12 @@ It is still a bit rough around the edges. Feel free to contribute and bring fres
 ## Getting started
 
 - Download the [latest release](https://github.com/riraccuia/pig/releases) or build from source using the [makefile](Makefile).
+- Read the [user gude](docs/guide.md), check out the [examples](examples/) and [Docker](docs/docker.md) files.
 - Run [`pig -h`](docs/cli-help/main.md) to see the available options.
-- Use the [`-to-cfg`](docs/cli-help/connect.md) option with both `-c` and `-l` subcommands to quickly generate a config file to use as baseline for an advanced setup. See the [config file format documentation](docs/config.md).
-- Read the [user guide](docs/guide.md).
+- Use the [`-to-cfg`](docs/cli-help/connect.md) option to quickly generate a baseline config for advanced setups.
+- See the [config file reference](docs/config.md).
+
+
 
 ### Example
 
@@ -74,16 +77,18 @@ nc 192.168.5.1 8080; killall -INT pig
 ```
 
 To turn Alice's command into a config file, do
+
 ```bash
 pig -l -id pig-demo-alice -P . -k -to-cfg json > alice.json
 ```
 
-Check the [config file reference](docs/config.md) and customize the generated config for an advanced setup.
-Then run with it.
+Customize and run with it.
 
 ```bash
 pig -config alice.json
 ```
+
+
 
 ## Nerd facts
 
@@ -93,6 +98,8 @@ pig -config alice.json
 - If one of the connecting nodes is behind [symmetric NAT](https://en.wikipedia.org/wiki/Network_address_translation#Methods_of_translation), pig can usually still find a path using the [birthday problem](https://en.wikipedia.org/wiki/Birthday_problem).
 - Stream multiplexing support is built-in where the protocol allows it (e.g. QUIC). The number of streams to open is configurable, too.
 
+
+
 ## Acknowledgments
 
 Packages that make this project possible. Thanks to the authors for their work!
@@ -100,13 +107,15 @@ Packages that make this project possible. Thanks to the authors for their work!
 - [BurntSushi/toml](https://github.com/BurntSushi/toml) - toml config parsing
 - [cespare/xxhash](https://github.com/cespare/xxhash) - hashing
 - [coder/websocket](https://github.com/coder/websocket) - WebSocket transport
-- [eclipse/paho.mqtt.golang](https://github.com/eclipse/paho.mqtt.golang) — MQTT ICE signaling
+- [eclipse/paho.mqtt.golang](https://github.com/eclipse/paho.mqtt.golang) - MQTT ICE signaling
 - [golang-jwt/jwt](https://github.com/golang-jwt/jwt) - JWT auth
 - [lestrrat-go/jwx](https://github.com/lestrrat-go/jwx) - JWK/JWKS for OIDC/OAuth
 - [pion/dtls](https://github.com/pion/dtls) - DTLS transport
 - [quic-go/quic-go](https://github.com/quic-go/quic-go) - QUIC transport
 - [rs/zerolog](https://github.com/rs/zerolog) - logging
 - [WireGuard/wintun](https://golang.zx2c4.com/wintun) - Windows TUN driver
+
+
 
 ## License
 

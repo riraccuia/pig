@@ -19,3 +19,11 @@ Table of contents for pig user documentation. New guides are added here by topic
 - [JWT](auth/jwt.md)
 - [OAuth](auth/oauth.md)
 - [OIDC](auth/oidc.md)
+
+## Docker
+
+- [Docker](docker.md)
+
+## Examples
+
+- [Exit node](../examples/exit-node/README.md)

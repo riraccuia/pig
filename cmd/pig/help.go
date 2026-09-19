@@ -42,7 +42,7 @@ func printMainUsage() {
 
 func printListenConnectUsage(mode Mode) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
-	fmt.Fprintf(w, "Usage: %s %s [options] [-%s]\n", binaryName, os.Args[1], FLAG_TO_CFG)
+	fmt.Fprintf(w, "Usage: %s %s [options] [-%s <json|toml>]\n", binaryName, os.Args[1], FLAG_TO_CFG)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "OUTPUT")
 	fmt.Fprintln(w)
@@ -111,9 +111,10 @@ func printStunUsage() {
 
 func printConfigUsage() {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
-	fmt.Fprintf(w, "Usage: %s -%s\n", binaryName, FLAG_MAIN_CONFIG)
+	fmt.Fprintf(w, "Usage: %s -%s <path> [-%s <json|toml>]\n", binaryName, FLAG_MAIN_CONFIG, FLAG_TO_CFG)
 	fmt.Fprintln(w)
 	printFlag(w, "-"+FLAG_MAIN_CONFIG, "json or toml config file path.")
+	printFlag(w, "-"+FLAG_TO_CFG, "'json' or 'toml'. Prints the configuration in the desired format and exits.")
 	w.Flush()
 }
 

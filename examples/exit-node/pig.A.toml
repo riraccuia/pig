@@ -1,0 +1,31 @@
+stun_global = "stun.mixvoip.com:3478"
+
+[mqtt_global]
+address = "ssl://broker.hivemq.com:8883"
+
+[log]
+file = "/var/log/pig/pig.log"
+level = "info"
+rotate_size = "1m"
+
+# Listen / exit node: adapter is per-tunnel.
+[[tunnels]]
+name = "exit"
+direction = "listen"
+proto = "."
+
+[tunnels.adapter]
+tunnel_address = ["172.31.255.1/24", "fd8c:0a47:f698::1/64"]
+
+[tunnels.tls]
+insecure = true
+
+[tunnels.listen]
+address = "0.0.0.0"
+
+[tunnels.ice]
+enabled = true
+
+[tunnels.ice.signaling]
+server_id = "replace-me"
+encryption_key = "secret-signaling-key"

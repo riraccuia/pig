@@ -1,0 +1,34 @@
+stun_global = "stun.mixvoip.com:3478"
+
+[mqtt_global]
+address = "ssl://broker.hivemq.com:8883"
+
+[log]
+# logging to stdout
+level = "info"
+
+# Connect client: adapter is top-level.
+[adapter]
+tunnel_address = ["172.31.254.1/29", "fde6:c530:8426::/64"]
+
+[[tunnels]]
+name = "to-exit"
+direction = "connect"
+proto = "."
+routes = [ # Full tunnel through A (exit node).
+  { destination = "0.0.0.0/1", type = "tunnel" },
+  { destination = "128.0.0.0/1", type = "tunnel" },
+  { destination = "2000::/3", type = "tunnel" },
+  { destination = "64:ff9b::/96", type = "tunnel" }
+]
+
+[tunnels.tls]
+insecure = true
+
+[tunnels.ice]
+enabled = true
+
+[tunnels.ice.signaling]
+# Must match A.
+server_id = "replace-me"
+encryption_key = "secret-signaling-key"

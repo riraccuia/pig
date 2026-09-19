@@ -34,11 +34,15 @@ help-docs:
 		sed -e 's/ -c / \<a href="connect.md"\>-c\<\/a\>/g' \
 		    -e 's/ -l / \<a href="listen.md"\>-l\<\/a\>/g' \
 		    -e 's/ -stun / \<a href="stun.md"\>-stun\<\/a\>/g' \
-		    -e 's/ -config / \<a href="..\/config.md"\>-config\<\/a\>/g' \
+		    -e 's/ -config / \<a href="config.md"\>-config\<\/a\>/g' \
 		    -e 's/ -docs / \<a href="docs.md"\>-docs\<\/a\>/g' \
 		> $(CLIHELP_DIR)/main.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -c -h; echo '```'; } > $(CLIHELP_DIR)/connect.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -l -h; echo '```'; } > $(CLIHELP_DIR)/listen.md; \
+	{ echo '<pre><code>'; $(GO) run ./$(PIG_DIR) -config invalid -h; echo '</code></pre>'; } | \
+		sed -e 's/ -config / \<a href="config-ref.md"\>-config\<\/a\>/g' \
+		> $(CLIHELP_DIR)/config.md; \
+	{ echo '```'; $(GO) run ./$(PIG_DIR) -docs config; echo '```'; } > $(CLIHELP_DIR)/config-ref.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -stun -h; echo '```'; } > $(CLIHELP_DIR)/stun.md; \
 	{ echo '<pre><code>'; $(GO) run ./$(PIG_DIR) -docs -h 2>/dev/null; echo '</code></pre>'; } | \
 		sed -e 's/ config / \<a href="..\/config.md"\>config\<\/a\>/g' \
@@ -46,8 +50,7 @@ help-docs:
 		    -e 's/ protos / \<a href="protos.md"\>protos\<\/a\>/g' \
 		> $(CLIHELP_DIR)/docs.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -docs env; echo '```'; } > $(CLIHELP_DIR)/env.md; \
-	{ echo '```'; $(GO) run ./$(PIG_DIR) -docs protos; echo '```'; } > $(CLIHELP_DIR)/protos.md; \
-	{ echo '```'; $(GO) run ./$(PIG_DIR) -docs config; echo '```'; } > $(CLIHELP_DIR)/config.md
+	{ echo '```'; $(GO) run ./$(PIG_DIR) -docs protos; echo '```'; } > $(CLIHELP_DIR)/protos.md
 
 # Create bin directory if it doesn't exist
 $(BINDIR):

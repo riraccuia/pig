@@ -1,0 +1,42 @@
+# Generic Docker Compose file for Pig.
+# Handles both IPv4 and IPv6 tunnel traffic.
+#
+# Variables:
+#   PIG_MASQUERADE: 1 to enable IP forwarding, 0 to disable
+#   PIG_NAT_OIF: the output interface for NAT
+#   PIG_CONFIG: the path to the configuration file
+#
+# From this directory:
+#   docker compose up --build
+#
+# Change the output interface for NAT:
+#   PIG_NAT_OIF=eth0 docker compose up --build
+
+services:
+  pig:
+    build:
+      context: ../..
+      dockerfile: build/docker/Dockerfile
+    container_name: pig
+    cap_add:
+      - NET_ADMIN
+    environment:
+      PIG_CONFIG: /etc/pig/pig.config
+      PIG_MASQUERADE: ${PIG_MASQUERADE:-1}
+      PIG_NAT_OIF: ${PIG_NAT_OIF:-eth0}
+    volumes:
+      - ./pig.config:/etc/pig/pig.config:ro
+      - ./logs:/var/log/pig:rw
+    sysctls:
+      net.ipv4.ip_forward: ${PIG_MASQUERADE:-1}
+      net.ipv6.conf.all.forwarding: ${PIG_MASQUERADE:-1}
+    networks:
+      - ip6net
+    restart: unless-stopped
+
+networks:
+  ip6net:
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: fd4c:9645:9404::/48
