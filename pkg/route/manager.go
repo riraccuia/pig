@@ -112,13 +112,13 @@ func newBaseManager(ctx context.Context) (*baseManager, error) {
 		return nil, err
 	}
 
-	type routeFinder interface {
+	/*type routeFinder interface {
 		findBestRoute(dst net.IP) (*Route, error)
 	}
 	rf, ok := backend.(routeFinder)
 	if ok {
 		bm.findBestRouteFn = rf.findBestRoute
-	}
+	}*/
 
 	bm.backend = backend
 
