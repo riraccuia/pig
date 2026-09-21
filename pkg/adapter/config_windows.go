@@ -138,12 +138,6 @@ func configureWinTun(adapter *NativeTun, config AdapterConfig) error {
 		return fmt.Errorf("configureWinTun: adapter cannot be nil")
 	}
 
-	// Get interface index
-	iface, err := net.InterfaceByIndex(adapter.Index())
-	if err != nil {
-		return fmt.Errorf("configureWinTun: failed to get interface: %v", err)
-	}
-
 	for _, address := range config.Address {
 		// Parse IP and network
 		ip, ipNet, err := net.ParseCIDR(address)
@@ -159,7 +153,7 @@ func configureWinTun(adapter *NativeTun, config AdapterConfig) error {
 		}
 	}
 
-	if err := setMTU(iface.Index, config.MTU); err != nil {
+	if err := setMTU(adapter.Index(), config.MTU); err != nil {
 		return fmt.Errorf("configureWinTun: %v", err)
 	}
 
@@ -304,15 +298,14 @@ func getIPAddressReadyChan(luid uint64, ip net.IP, family int, timeout time.Dura
 		case int(windows.AF_INET6):
 			addrBytes = (*windows.RawSockaddrInet6)(unsafe.Pointer(&row.Address)).Addr[:]
 		}
-		_ = addrBytes
 		// Compare with our target IP
-		// if net.IP(addrBytes).Equal(ip) {
-		// Signal that the address is ready
-		doneChan <- nil
-		if af != nil {
-			af.Stop()
+		if net.IP(addrBytes).Equal(ip) {
+			// Signal that the address is ready
+			doneChan <- nil
+			if af != nil {
+				af.Stop()
+			}
 		}
-		// }
 		return 0
 	})
 

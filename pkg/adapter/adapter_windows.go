@@ -16,9 +16,9 @@ package adapter
 
 import (
 	"fmt"
-	"net"
 
 	"github.com/riraccuia/pig/pkg/common"
+	"golang.org/x/sys/windows"
 )
 
 const tunName = "pig"
@@ -31,41 +31,23 @@ func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
 		return nil, fmt.Errorf("failed to create wintun adapter: %v", err)
 	}
 
-	if err := configureWinTun(adapter, config); err != nil {
+	err = configureWinTun(adapter, config)
+	if err != nil {
 		adapter.Close()
 		return nil, fmt.Errorf("failed to configure adapter: %v", err)
 	}
 
-	iface, err := net.InterfaceByName(adapter.Name())
+	_, ipNet, err := getAdapterAddress(adapter.Name(), windows.AF_INET)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get interface: %w", err)
+		return nil, fmt.Errorf("failed to get INET adapter address: %v", err)
 	}
-	addrs, err := iface.Addrs()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get interface addresses: %w", err)
-	}
+	adapter.ip = ipNet
 
-	for _, addr := range addrs {
-		ipnet, ok := addr.(*net.IPNet)
-		if !ok {
-			continue
-		}
-		if ipnet.IP.To4() != nil {
-			adapter.ip = ipnet
-			continue
-		}
-		if ipnet.IP.To16() == nil {
-			continue
-		}
-		if adapter.ipv6 == nil {
-			adapter.ipv6 = ipnet
-			continue
-		}
-		// Prefer non-link-local IPv6 address when available
-		if !ipnet.IP.IsLinkLocalUnicast() && adapter.ipv6.IP.IsLinkLocalUnicast() {
-			adapter.ipv6 = ipnet
-		}
+	_, ipNet, err = getAdapterAddress(adapter.Name(), windows.AF_INET6)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get INET6 adapter address: %v", err)
 	}
+	adapter.ipv6 = ipNet
 
 	return adapter, nil
 }
