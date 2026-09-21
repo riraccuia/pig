@@ -36,6 +36,7 @@ func NewLogger() *Logger {
 	})
 	output := zerolog.ConsoleWriter{
 		Out:        wr, //zerolog.SyncWriter(NewBufferedWriter(ctx, 1024)),
+		NoColor:    noColor,
 		TimeFormat: time.RFC3339,
 	}
 	zl := zerolog.New(output).Level(zerolog.InfoLevel).With().Timestamp().Logger()
