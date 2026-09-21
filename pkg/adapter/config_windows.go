@@ -184,7 +184,7 @@ func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
 	defer runtime.UnlockOSThread()
 
 	// Create and initialize the IP address row
-	row := &MibUnicastipaddressRow{}
+	row := &windows.MibUnicastIpAddressRow{}
 
 	procInitializeUnicastIpAddressEntry.Call(uintptr(unsafe.Pointer(row)))
 
@@ -193,13 +193,13 @@ func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
 
 	switch {
 	case ip.To4() != nil:
-		addr := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address[0]))
+		addr := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address))
 		// Set the IP address family and value
 		addr.Family = windows.AF_INET
 		// Copy the IP address to the address buffer
 		copy(addr.Addr[:], ip.To4())
 	case ip.To16() != nil:
-		addr := (*windows.RawSockaddrInet6)(unsafe.Pointer(&row.Address[0]))
+		addr := (*windows.RawSockaddrInet6)(unsafe.Pointer(&row.Address))
 		// Set the IP address family and value
 		addr.Family = windows.AF_INET6
 		// Copy the IP address to the address buffer
@@ -211,7 +211,7 @@ func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
 	// Set the subnet prefix length
 	row.OnLinkPrefixLength = prefixLength
 
-	readyChan, notificationHandle, err := getIPAddressReadyChan(ifIndex, ip, 5*time.Second)
+	readyChan, notificationHandle, err := getIPAddressReadyChan(ifIndex, ip, int(row.Address.Family), 5*time.Second)
 	defer clearNotificationHandle(notificationHandle)
 	if err != nil {
 		return fmt.Errorf("setIPAddressUnicast: %v", err)
@@ -270,7 +270,7 @@ func setMTU(ifIndex int, mtu int) error {
 //   - doneChan: A channel that will be signaled when the IP address is ready
 //   - notificationHandle: A handle to the notification
 //   - error: nil if successful, otherwise an error describing what went wrong
-func getIPAddressReadyChan(ifIndex int, ip net.IP, timeout time.Duration) (<-chan error, windows.Handle, error) {
+func getIPAddressReadyChan(ifIndex int, ip net.IP, family int, timeout time.Duration) (<-chan error, windows.Handle, error) {
 	// Create a channel to signal when the address is ready
 	doneChan := make(chan error, 1)
 	var af *time.Timer
@@ -284,7 +284,7 @@ func getIPAddressReadyChan(ifIndex int, ip net.IP, timeout time.Duration) (<-cha
 	var notificationHandle windows.Handle
 
 	// Define the callback function using windows.NewCallback
-	callback := windows.NewCallback(func(callerContext unsafe.Pointer, row *MibUnicastipaddressRow, notificationType uint32) uintptr {
+	callback := windows.NewCallback(func(callerContext unsafe.Pointer, row *windows.MibUnicastIpAddressRow, notificationType uint32) uintptr {
 		if notificationType != windows.MibAddInstance {
 			return 0
 		}
@@ -301,7 +301,13 @@ func getIPAddressReadyChan(ifIndex int, ip net.IP, timeout time.Duration) (<-cha
 			return 0
 		}
 		// Get the IP address from the notification
-		addrBytes := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address[0])).Addr[:]
+		var addrBytes []byte
+		switch family {
+		case int(windows.AF_INET):
+			addrBytes = (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address)).Addr[:]
+		case int(windows.AF_INET6):
+			addrBytes = (*windows.RawSockaddrInet6)(unsafe.Pointer(&row.Address)).Addr[:]
+		}
 		_ = addrBytes
 		// Compare with our target IP
 		// if net.IP(addrBytes).Equal(ip) {
