@@ -62,32 +62,11 @@ type ifreqMTU struct {
 	pad  [8]byte
 }
 
-// findAvailableTUNName tries to find an available TUN interface name.
-func findAvailableTUNName() (string, error) {
-	// Try tun0 through tun9
-	for i := 0; i < 10; i++ {
-		name := fmt.Sprintf("tun%d", i)
-		// Check if interface exists
-		if _, err := net.InterfaceByName(name); err != nil {
-			// Interface doesn't exist, we can use this name
-			return name, nil
-		}
-	}
-	return "", fmt.Errorf("no available TUN interface names found")
-}
-
 // configureTUN creates and configures a TUN interface on Linux.
 // It sets up the interface with the specified name, IP address, MTU, and brings it up.
 // Supports multi-queue for better performance: https://www.kernel.org/doc/Documentation/networking/tuntap.txt
 func configureTUN(config AdapterConfig) (ifName string, adapter *tunAdapter, err error) {
-	// Find available TUN interface name
-	ifName, err = findAvailableTUNName()
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to find available TUN name: %w", err)
-	}
-
 	var ifr ifreq
-	copy(ifr.Name[:], ifName)
 	ifr.Flags = IFF_TUN | IFF_NO_PI
 
 	var numQueues int = 1
@@ -96,21 +75,26 @@ func configureTUN(config AdapterConfig) (ifName string, adapter *tunAdapter, err
 		numQueues = runtime.NumCPU()
 	}
 
-	adapter = &tunAdapter{
-		devName: ifName,
+	adapter = &tunAdapter{}
+
+	qfd, err := adapter.NewQueue(&ifr, len(adapter.queues))
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to open tun device: %w", err)
 	}
 
-	for i := 0; i < numQueues; i++ {
-		var fd io.ReadWriteCloser
-		fd, err = adapter.NewQueue(ifr, len(adapter.queues))
-		if err != nil {
-			return "", nil, err
-		}
-		adapter.queues = append(adapter.queues, fd)
-	}
-
-	// Get interface name (in case kernel modified it)
+	// Get interface name
 	ifName = unix.ByteSliceToString(ifr.Name[:])
+	adapter.devName = ifName
+
+	adapter.queues = append(adapter.queues, qfd)
+	for i := 1; i < numQueues; i++ {
+		var qfd io.ReadWriteCloser
+		qfd, err = adapter.NewQueue(&ifr, len(adapter.queues))
+		if err != nil {
+			return "", nil, fmt.Errorf("queue index %d for %s: %w", i, ifName, err)
+		}
+		adapter.queues = append(adapter.queues, qfd)
+	}
 
 	for _, address := range config.Address {
 		ip, ipNet, err := net.ParseCIDR(address)
