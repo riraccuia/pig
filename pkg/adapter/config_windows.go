@@ -28,71 +28,13 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// MibIpinterfaceRow represents the Windows MIB_IPINTERFACE_ROW structure.
-// It contains configuration parameters for an IP interface.
-// See: https://learn.microsoft.com/en-us/windows-hardware/drivers/network/mib-ipinterface-row
-type MibIpinterfaceRow struct {
-	Family                               uint16
-	InterfaceLuid                        uint64
-	InterfaceIndex                       uint32
-	MaxReassemblySize                    uint32
-	InterfaceIdentifier                  uint64
-	MinRouterAdvertisementInterval       uint32
-	MaxRouterAdvertisementInterval       uint32
-	AdvertisingEnabled                   uint8
-	ForwardingEnabled                    uint8
-	WeakHostSend                         uint8
-	WeakHostReceive                      uint8
-	UseAutomaticMetric                   uint8
-	UseNeighborUnreachabilityDetection   uint8
-	ManagedAddressConfigurationSupported uint8
-	OtherStatefulConfigurationSupported  uint8
-	AdvertiseDefaultRoute                uint8
-	RouterDiscoveryBehavior              uint32
-	DadTransmits                         uint32
-	BaseReachableTime                    uint32
-	RetransmitTime                       uint32
-	PathMtuDiscoveryTimeout              uint32
-	LinkLocalAddressBehavior             uint32
-	LinkLocalAddressTimeout              uint32
-	ZoneIndices                          [16]uint32
-	SitePrefixLength                     uint32
-	Metric                               uint32
-	NlMtu                                uint32
-	Connected                            uint8
-	SupportsWakeUpPatterns               uint8
-	SupportsNeighborDiscovery            uint8
-	SupportsRouterDiscovery              uint8
-	ReachableTime                        uint32
-	TransmitOffload                      uint32
-	ReceiveOffload                       uint32
-	DisableDefaultRoutes                 uint8
-}
-
-// MibUnicastipaddressRow represents the Windows MIB_UNICASTIPADDRESS_ROW structure.
-// It contains information about a unicast IP address assigned to an interface.
-// See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-mib_unicastipaddress_row
-type MibUnicastipaddressRow struct {
-	Address            [28]byte // SOCKADDR_INET
-	InterfaceLuid      uint64
-	InterfaceIndex     uint32
-	PrefixOrigin       uint32
-	SuffixOrigin       uint32
-	ValidLifetime      uint32
-	PreferredLifetime  uint32
-	OnLinkPrefixLength uint8
-	SkipAsSource       uint8
-	DadState           uint32
-	ScopeId            uint32
-	CreationTimeStamp  int64
-}
-
 var (
 	// modiphlpapi provides access to the Windows IP Helper API.
 	modiphlpapi = windows.NewLazySystemDLL("iphlpapi.dll")
 
 	// Windows API function pointers for network configuration.
 	procInitializeIpInterfaceEntry      = modiphlpapi.NewProc("InitializeIpInterfaceEntry")
+	procGetIpInterfaceEntry             = modiphlpapi.NewProc("GetIpInterfaceEntry")
 	procSetIpInterfaceEntry             = modiphlpapi.NewProc("SetIpInterfaceEntry")
 	procInitializeUnicastIpAddressEntry = modiphlpapi.NewProc("InitializeUnicastIpAddressEntry")
 	procCreateUnicastIpAddressEntry     = modiphlpapi.NewProc("CreateUnicastIpAddressEntry")
@@ -153,7 +95,7 @@ func configureWinTun(adapter *NativeTun, config AdapterConfig) error {
 		}
 	}
 
-	if err := setMTU(adapter.Index(), config.MTU); err != nil {
+	if err := setMTU(adapter.LUID(), config.MTU); err != nil {
 		return fmt.Errorf("configureWinTun: %v", err)
 	}
 
@@ -230,8 +172,8 @@ func setIPAddressUnicast(adapter *NativeTun, ip net.IP, prefixLength uint8) erro
 	return nil
 }
 
-// setMTU configures the Maximum Transmission Unit (MTU) for a network interface.
-// It uses the Windows SetIpInterfaceEntry API to set the MTU value.
+// setMTU configures the Maximum Transmission Unit (MTU) for a network interface
+// for both IPv4 and IPv6 using GetIpInterfaceEntry + SetIpInterfaceEntry.
 //
 // Parameters:
 //   - ifIndex: The interface index to configure
@@ -239,20 +181,36 @@ func setIPAddressUnicast(adapter *NativeTun, ip net.IP, prefixLength uint8) erro
 //
 // Returns:
 //   - error: nil if successful, otherwise an error describing what went wrong
-func setMTU(ifIndex int, mtu int) error {
-	row := &MibIpinterfaceRow{}
+func setMTU(luid uint64, mtu int) error {
+	if err := setMTUForFamily(luid, windows.AF_INET, mtu); err != nil {
+		return err
+	}
+	if err := setMTUForFamily(luid, windows.AF_INET6, mtu); err != nil {
+		return err
+	}
+	return nil
+}
 
+func setMTUForFamily(luid uint64, family uint16, mtu int) error {
+	row := &windows.MibIpInterfaceRow{}
 	procInitializeIpInterfaceEntry.Call(uintptr(unsafe.Pointer(row)))
 
-	row.Family = windows.AF_INET
-	row.InterfaceIndex = uint32(ifIndex)
-	row.NlMtu = uint32(mtu)
+	row.Family = family
+	row.InterfaceLuid = luid
 
-	ret, _, err := procSetIpInterfaceEntry.Call(uintptr(unsafe.Pointer(row)))
+	ret, _, err := procGetIpInterfaceEntry.Call(uintptr(unsafe.Pointer(row)))
 	if ret != windows.NO_ERROR {
-		return fmt.Errorf("setMTU: SetIpInterfaceEntry failed (ret: %d): %v", ret, err)
+		return fmt.Errorf("setMTU: GetIpInterfaceEntry (family %d) failed (ret: %d): %v", family, ret, err)
 	}
 
+	row.NlMtu = uint32(mtu)
+	// SitePrefixLength must be 0 when calling SetIpInterfaceEntry.
+	row.SitePrefixLength = 0
+
+	ret, _, err = procSetIpInterfaceEntry.Call(uintptr(unsafe.Pointer(row)))
+	if ret != windows.NO_ERROR {
+		return fmt.Errorf("setMTU: SetIpInterfaceEntry (family %d) failed (ret: %d): %v", family, ret, err)
+	}
 	return nil
 }
 
