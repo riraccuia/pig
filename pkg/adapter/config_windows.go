@@ -132,14 +132,14 @@ func bytesToIPv4(ip net.IP) uint32 {
 //
 // Returns:
 //   - error: nil if successful, otherwise an error describing what went wrong
-func configureWinTun(ifaceName string, config AdapterConfig) error {
+func configureWinTun(adapter *NativeTun, config AdapterConfig) error {
 	// Input validation
-	if ifaceName == "" {
-		return fmt.Errorf("configureWinTun: interface name cannot be empty")
+	if adapter == nil {
+		return fmt.Errorf("configureWinTun: adapter cannot be nil")
 	}
 
 	// Get interface index
-	iface, err := net.InterfaceByName(ifaceName)
+	iface, err := net.InterfaceByIndex(adapter.Index())
 	if err != nil {
 		return fmt.Errorf("configureWinTun: failed to get interface: %v", err)
 	}
@@ -154,7 +154,7 @@ func configureWinTun(ifaceName string, config AdapterConfig) error {
 		// Calculate prefix length from subnet mask
 		prefixLen, _ := ipNet.Mask.Size()
 
-		if err := setIPAddressUnicast(iface.Index, ip, uint8(prefixLen)); err != nil {
+		if err := setIPAddressUnicast(adapter, ip, uint8(prefixLen)); err != nil {
 			return fmt.Errorf("configureWinTun: %v", err)
 		}
 	}
@@ -176,7 +176,7 @@ func configureWinTun(ifaceName string, config AdapterConfig) error {
 //
 // Returns:
 //   - error: nil if successful, otherwise an error describing what went wrong
-func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
+func setIPAddressUnicast(adapter *NativeTun, ip net.IP, prefixLength uint8) error {
 	// The callback function specified in the Callback parameter must be implemented in the
 	// same process as the application calling the NotifyUnicastIpAddressChange function
 	// see: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-notifyunicastipaddresschange
@@ -187,9 +187,6 @@ func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
 	row := &windows.MibUnicastIpAddressRow{}
 
 	procInitializeUnicastIpAddressEntry.Call(uintptr(unsafe.Pointer(row)))
-
-	// Set the interface index
-	row.InterfaceIndex = uint32(ifIndex)
 
 	switch {
 	case ip.To4() != nil:
@@ -208,10 +205,17 @@ func setIPAddressUnicast(ifIndex int, ip net.IP, prefixLength uint8) error {
 		return fmt.Errorf("setIPAddressUnicast: invalid IP address: %s", ip)
 	}
 
+	// Set the interface index
+	row.InterfaceIndex = uint32(adapter.Index())
+	row.InterfaceLuid = adapter.LUID()
 	// Set the subnet prefix length
 	row.OnLinkPrefixLength = prefixLength
+	// Set the DAD state
+	row.DadState = windows.IpDadStatePreferred
+	row.ValidLifetime = 0xffffffff
+	row.PreferredLifetime = 0xffffffff
 
-	readyChan, notificationHandle, err := getIPAddressReadyChan(ifIndex, ip, int(row.Address.Family), 5*time.Second)
+	readyChan, notificationHandle, err := getIPAddressReadyChan(adapter.LUID(), ip, int(row.Address.Family), 5*time.Second)
 	defer clearNotificationHandle(notificationHandle)
 	if err != nil {
 		return fmt.Errorf("setIPAddressUnicast: %v", err)
@@ -270,7 +274,7 @@ func setMTU(ifIndex int, mtu int) error {
 //   - doneChan: A channel that will be signaled when the IP address is ready
 //   - notificationHandle: A handle to the notification
 //   - error: nil if successful, otherwise an error describing what went wrong
-func getIPAddressReadyChan(ifIndex int, ip net.IP, family int, timeout time.Duration) (<-chan error, windows.Handle, error) {
+func getIPAddressReadyChan(luid uint64, ip net.IP, family int, timeout time.Duration) (<-chan error, windows.Handle, error) {
 	// Create a channel to signal when the address is ready
 	doneChan := make(chan error, 1)
 	var af *time.Timer
@@ -288,16 +292,8 @@ func getIPAddressReadyChan(ifIndex int, ip net.IP, family int, timeout time.Dura
 		if notificationType != windows.MibAddInstance {
 			return 0
 		}
-		var gotIndex uint32
-		ret, _, _ := procConvertInterfaceLuidToIndex.Call(
-			uintptr(unsafe.Pointer(&row.InterfaceLuid)),
-			uintptr(unsafe.Pointer(&gotIndex)),
-		)
-		if ret != windows.NO_ERROR {
-			return 0
-		}
 		// Check if this is an address add notification for our interface
-		if gotIndex != uint32(ifIndex) {
+		if row.InterfaceLuid != luid {
 			return 0
 		}
 		// Get the IP address from the notification

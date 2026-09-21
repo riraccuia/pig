@@ -31,7 +31,7 @@ func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
 		return nil, fmt.Errorf("failed to create wintun adapter: %v", err)
 	}
 
-	if err := configureWinTun(tunName, config); err != nil {
+	if err := configureWinTun(adapter, config); err != nil {
 		adapter.Close()
 		return nil, fmt.Errorf("failed to configure adapter: %v", err)
 	}
