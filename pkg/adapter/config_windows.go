@@ -318,10 +318,10 @@ func getIPAddressReadyChan(luid uint64, ip net.IP, family int, timeout time.Dura
 
 	// Register for IP address change notifications
 	ret, _, err := procNotifyUnicastIpAddressChange.Call(
-		uintptr(windows.AF_INET), // Family (IPv4)
-		callback,                 // Callback function
-		0,                        // CallerContext
-		uintptr(0),               // InitialNotification (FALSE)
+		uintptr(family), // Family
+		callback,        // Callback function
+		0,               // CallerContext
+		uintptr(0),      // InitialNotification (FALSE)
 		uintptr(unsafe.Pointer(&notificationHandle)), // NotificationHandle
 	)
 
