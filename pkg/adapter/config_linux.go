@@ -104,7 +104,7 @@ func configureTUN(config AdapterConfig) (ifName string, adapter *tunAdapter, err
 		var fd io.ReadWriteCloser
 		fd, err = adapter.NewQueue(ifr, len(adapter.queues))
 		if err != nil {
-			return "", nil, fmt.Errorf("failed to create TUN queue: %w", err)
+			return "", nil, err
 		}
 		adapter.queues = append(adapter.queues, fd)
 	}

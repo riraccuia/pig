@@ -38,16 +38,14 @@ func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
 	}
 
 	_, ipNet, err := getAdapterAddress(adapter.Name(), windows.AF_INET)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get INET adapter address: %v", err)
+	if err == nil {
+		adapter.ip = ipNet
 	}
-	adapter.ip = ipNet
 
 	_, ipNet, err = getAdapterAddress(adapter.Name(), windows.AF_INET6)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get INET6 adapter address: %v", err)
+	if err == nil {
+		adapter.ipv6 = ipNet
 	}
-	adapter.ipv6 = ipNet
 
 	return adapter, nil
 }

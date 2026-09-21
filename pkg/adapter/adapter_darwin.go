@@ -16,7 +16,6 @@ package adapter
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"sync/atomic"
 
@@ -35,35 +34,16 @@ func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
 		ifName: ifName,
 	}
 
-	iface, err := net.InterfaceByName(ifName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get interface: %w", err)
-	}
-	addrs, err := iface.Addrs()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get interface addresses: %w", err)
+	ip, ipNet, err := getAdapterAddress(ifName, unix.AF_INET)
+	if err == nil {
+		adapter.ip = ip
+		adapter.ipNet = ipNet
 	}
 
-	for _, addr := range addrs {
-		ipnet, ok := addr.(*net.IPNet)
-		if !ok {
-			continue
-		}
-		if ipnet.IP.To4() != nil {
-			adapter.ip = ipnet
-			continue
-		}
-		if ipnet.IP.To16() == nil {
-			continue
-		}
-		if adapter.ipv6 == nil {
-			adapter.ipv6 = ipnet
-			continue
-		}
-		// Prefer non-link-local IPv6 address when available
-		if !ipnet.IP.IsLinkLocalUnicast() && adapter.ipv6.IP.IsLinkLocalUnicast() {
-			adapter.ipv6 = ipnet
-		}
+	ip, ipNet, err = getAdapterAddress(ifName, unix.AF_INET6)
+	if err == nil {
+		adapter.ipv6 = ip
+		adapter.ipv6Net = ipNet
 	}
 
 	return adapter, nil
