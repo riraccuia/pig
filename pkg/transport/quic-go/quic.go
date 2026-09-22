@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	"runtime"
+	"time"
 
 	"github.com/quic-go/quic-go"
 	"github.com/riraccuia/pig/pkg/common"
@@ -54,6 +55,7 @@ func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, tlsC
 			&quic.Config{
 				MaxIncomingStreams: maxStreams,
 				EnableDatagrams:    true,
+				MaxIdleTimeout:     time.Minute,
 			},
 		)
 		if err != nil {
@@ -76,6 +78,8 @@ func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Tunnel
 		tlsConfig.Clone(),
 		&quic.Config{
 			EnableDatagrams: true,
+			MaxIdleTimeout:  time.Minute,
+			KeepAlivePeriod: time.Second * 30,
 		},
 	)
 	if err != nil {
