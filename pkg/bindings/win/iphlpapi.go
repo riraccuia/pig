@@ -30,7 +30,20 @@ var (
 	procCreateIpForwardEntry2  = modiphlpapi.NewProc("CreateIpForwardEntry2")
 	procDeleteIpForwardEntry2  = modiphlpapi.NewProc("DeleteIpForwardEntry2")
 	procGetBestRoute2          = modiphlpapi.NewProc("GetBestRoute2")
+	procGetIpNetEntry2         = modiphlpapi.NewProc("GetIpNetEntry2")
 )
+
+type MibIpNetRow2 struct {
+	Address               windows.RawSockaddrInet6
+	InterfaceIndex        uint32
+	InterfaceLuid         uint64
+	PhysicalAddress       [32]byte
+	PhysicalAddressLength uint32
+	State                 uint32
+	Flags                 uint8
+	_                     [3]byte
+	ReachabilityTime      uint32
+}
 
 // InitializeIpForwardEntry initializes a MIB_IPFORWARD_ROW2 structure with default values.
 // See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-initializeipforwardentry.
@@ -167,4 +180,12 @@ func apiErrorFromErr(apiName string, err error) error {
 		ReturnCode: returnCode,
 		Cause:      err,
 	}
+}
+
+func GetIpNetEntry2(row *MibIpNetRow2) error {
+	ret, _, _ := procGetIpNetEntry2.Call(uintptr(unsafe.Pointer(row)))
+	if ret != 0 {
+		return newReturnCodeError("GetIpNetEntry2", ret)
+	}
+	return nil
 }

@@ -363,7 +363,19 @@ func routeFromRow2(row *windows.MibIpForwardRow2) (*Route, error) {
 		IP:   dstIP,
 		Mask: mask,
 	}
-	route.Gateway = ipFromSockaddr(row.NextHop)
+
+	nextHop := ipFromSockaddr(row.NextHop)
+	if nextHop.Equal(net.IPv4zero) || nextHop.Equal(net.IPv6zero) {
+		nextHop = nil
+	}
+
+	switch {
+	case nextHop == nil || row.Loopback == 1:
+		route.LinkAddr = getLinkAddr(row.InterfaceLuid, dstIP)
+		route.Gateway = nil
+	default:
+		route.Gateway = nextHop
+	}
 
 	if row.InterfaceIndex != 0 {
 		iface, err := net.InterfaceByIndex(int(row.InterfaceIndex))
@@ -373,6 +385,27 @@ func routeFromRow2(row *windows.MibIpForwardRow2) (*Route, error) {
 	}
 
 	return &route, nil
+}
+
+func getLinkAddr(luid uint64, target net.IP) net.HardwareAddr {
+	row := &win.MibIpNetRow2{
+		InterfaceLuid: luid,
+	}
+	switch {
+	case target.To4() != nil:
+		addr4 := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address))
+		addr4.Family = windows.AF_INET
+		copy(addr4.Addr[:], target.To4())
+	case target.To16() != nil:
+		addr6 := (*windows.RawSockaddrInet6)(unsafe.Pointer(&row.Address))
+		addr6.Family = windows.AF_INET6
+		copy(addr6.Addr[:], target.To16())
+	}
+	err := win.GetIpNetEntry2(row)
+	if err != nil {
+		return nil
+	}
+	return net.HardwareAddr(row.PhysicalAddress[:])
 }
 
 // ipFromSockaddr converts a Windows sockaddr to net.IP.
