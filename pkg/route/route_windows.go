@@ -28,6 +28,9 @@ import (
 )
 
 type windowsBackend struct {
+	onChange     func()
+	notifyHandle windows.Handle
+	callback     uintptr // kept alive for NotifyRouteChange2
 }
 
 func newBackend() (platformBackend, error) {
@@ -35,7 +38,70 @@ func newBackend() (platformBackend, error) {
 }
 
 func (b *windowsBackend) startWatch(ctx context.Context, onChange func(), routeTableV4, routeTableV6 *Table) error {
+	b.onChange = onChange
+
+	b.callback = windows.NewCallback(func(callerContext unsafe.Pointer, row *windows.MibIpForwardRow2, notificationType uint32) uintptr {
+		return b.routeChangeCallback(callerContext, row, notificationType, routeTableV4, routeTableV6)
+	})
+	handle, err := win.NotifyRouteChange2(windows.AF_UNSPEC, b.callback, nil, false)
+	if err != nil {
+		return err
+	}
+	b.notifyHandle = handle
 	return nil
+}
+
+func (b *windowsBackend) routeChangeCallback(callerContext unsafe.Pointer, row *windows.MibIpForwardRow2, notificationType uint32, routeTableV4, routeTableV6 *Table) uintptr {
+	if row == nil {
+		return 0
+	}
+	switch notificationType {
+	case windows.MibInitialNotification:
+		return 0
+	case windows.MibAddInstance, windows.MibParameterNotification:
+		b.handleRouteAddOrUpdate(row, routeTableV4, routeTableV6)
+	case windows.MibDeleteInstance:
+		b.handleRouteDelete(row, routeTableV4, routeTableV6)
+	}
+	return 0
+}
+
+func (b *windowsBackend) handleRouteAddOrUpdate(row *windows.MibIpForwardRow2, routeTableV4, routeTableV6 *Table) {
+	// NotifyRouteChange2 passes an incomplete row; query full details first.
+	// See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-notifyroutechange2
+	full := windows.MibIpForwardRow2{
+		InterfaceLuid:     row.InterfaceLuid,
+		InterfaceIndex:    row.InterfaceIndex,
+		DestinationPrefix: row.DestinationPrefix,
+		NextHop:           row.NextHop,
+	}
+	if err := windows.GetIpForwardEntry2(&full); err != nil {
+		return
+	}
+	rt, err := routeFromForwardRow(&full)
+	if err != nil {
+		return
+	}
+	routeTable := routeTableV4
+	if !rt.Is4() {
+		routeTable = routeTableV6
+	}
+	routeTable.Insert(rt)
+	b.onChange()
+}
+
+func (b *windowsBackend) handleRouteDelete(row *windows.MibIpForwardRow2, routeTableV4, routeTableV6 *Table) {
+	// Route is already gone from the OS table; use the callback key fields only.
+	rt, err := routeFromForwardRow(row)
+	if err != nil {
+		return
+	}
+	routeTable := routeTableV4
+	if !rt.Is4() {
+		routeTable = routeTableV6
+	}
+	routeTable.Remove(rt)
+	b.onChange()
 }
 
 func (b *windowsBackend) applyRoute(route *Route) error {
@@ -91,47 +157,35 @@ func (b *windowsBackend) deleteRoute(route *Route) error {
 }
 
 func (b *windowsBackend) loadRoutes() ([]*Route, error) {
-	return nil, nil
+	table, err := win.GetIpForwardTable2(windows.AF_UNSPEC)
+	if err != nil {
+		return nil, err
+	}
+	defer win.FreeMibTable(unsafe.Pointer(table))
+
+	var routes []*Route
+	rows := table.Rows()
+	for i := range rows {
+		rt, err := routeFromForwardRow(&rows[i])
+		if err != nil {
+			continue
+		}
+		if rt.Destination == nil {
+			continue
+		}
+		routes = append(routes, rt)
+	}
+	return routes, nil
 }
 
 func (b *windowsBackend) close() error {
-	return nil
-}
-
-func (b *windowsBackend) findBestRoute(dst net.IP) (*Route, error) {
-	if dst == nil {
-		return nil, fmt.Errorf("destination IP is nil")
+	if b.notifyHandle == 0 {
+		return nil
 	}
-
-	// Normalize to canonical family representation.
-	dst = normalizeIP(dst)
-	if dst == nil {
-		return nil, fmt.Errorf("invalid destination IP")
-	}
-
-	// Build destination sockaddr for the lookup.
-	var dstSock windows.RawSockaddrInet
-	var err error
-
-	dstSock, err = sockaddrInetFromIP(dst)
-	if err != nil {
-		return nil, err
-	}
-
-	var bestRoute windows.MibIpForwardRow2
-	err = win.GetBestRoute2(nil, 0, nil, &dstSock, 0, &bestRoute, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert the native row to our Route representation.
-	var rt *Route
-	rt, err = routeFromRow2(&bestRoute)
-	if err != nil {
-		return nil, err
-	}
-
-	return rt, nil
+	// Must not be called from the NotifyRouteChange2 callback thread (deadlock).
+	err := win.CancelMibChangeNotify2(b.notifyHandle)
+	b.notifyHandle = 0
+	return err
 }
 
 func (b *windowsBackend) buildForwardRow(row *windows.MibIpForwardRow2, destination *net.IPNet, ifaceName string, gateway net.IP, metric uint32) error {
@@ -246,8 +300,8 @@ func sockaddrInetFromIP(ip net.IP) (windows.RawSockaddrInet, error) {
 	return addr, nil
 }
 
-// routeFromRow2 converts a Windows route row to a Route.
-func routeFromRow2(row *windows.MibIpForwardRow2) (*Route, error) {
+// routeFromForwardRow converts a Windows route row to a Route.
+func routeFromForwardRow(row *windows.MibIpForwardRow2) (*Route, error) {
 	if row == nil {
 		return nil, fmt.Errorf("route row is nil")
 	}
@@ -273,7 +327,19 @@ func routeFromRow2(row *windows.MibIpForwardRow2) (*Route, error) {
 		IP:   dstIP,
 		Mask: mask,
 	}
-	route.Gateway = ipFromSockaddr(row.NextHop)
+
+	nextHop := ipFromSockaddr(row.NextHop)
+	if nextHop.Equal(net.IPv4zero) || nextHop.Equal(net.IPv6zero) {
+		nextHop = nil
+	}
+
+	switch {
+	case nextHop == nil || row.Loopback == 1:
+		//route.LinkAddr = getLinkAddr(row.InterfaceLuid, row.InterfaceIndex, dstIP)
+		route.Gateway = nil
+	default:
+		route.Gateway = nextHop
+	}
 
 	if row.InterfaceIndex != 0 {
 		iface, err := net.InterfaceByIndex(int(row.InterfaceIndex))
@@ -285,6 +351,56 @@ func routeFromRow2(row *windows.MibIpForwardRow2) (*Route, error) {
 	return &route, nil
 }
 
+func routeFromNeighbor(target net.IP) (*Route, error) {
+	var (
+		row                = &win.MibIpNetRow2{}
+		prefixLength, bits int
+	)
+	switch {
+	case target.To4() != nil:
+		addr4 := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address))
+		addr4.Family = windows.AF_INET
+		copy(addr4.Addr[:], target.To4())
+		prefixLength, bits = 32, 32
+	case target.To16() != nil:
+		addr6 := (*windows.RawSockaddrInet6)(unsafe.Pointer(&row.Address))
+		addr6.Family = windows.AF_INET6
+		copy(addr6.Addr[:], target.To16())
+		prefixLength, bits = 128, 128
+	}
+	err := win.GetIpNetEntry2(row)
+	if err != nil {
+		return nil, err
+	}
+
+	switch row.State {
+	case win.NlnsUnreachable, win.NlnsStale, win.NlnsIncomplete:
+		return nil, fmt.Errorf("neighbor is unreachable, stale, or incomplete")
+	default:
+		// go on
+	}
+
+	rt := &Route{
+		Destination: &net.IPNet{
+			IP:   target,
+			Mask: net.CIDRMask(prefixLength, bits),
+		},
+		LinkAddr: net.HardwareAddr(row.PhysicalAddress[:row.PhysicalAddressLength]),
+	}
+
+	if rt.LinkAddr == nil {
+		return nil, fmt.Errorf("link address is nil")
+	}
+
+	ifName, err := win.ConvertInterfaceLuidToAlias(row.InterfaceLuid)
+	if err != nil {
+		return nil, err
+	}
+
+	rt.Interface = ifName
+	return rt, nil
+}
+
 // ipFromSockaddr converts a Windows sockaddr to net.IP.
 func ipFromSockaddr(addr windows.RawSockaddrInet) net.IP {
 	if addr.Family == windows.AF_INET {
@@ -294,7 +410,8 @@ func ipFromSockaddr(addr windows.RawSockaddrInet) net.IP {
 
 	if addr.Family == windows.AF_INET6 {
 		addr6 := (*windows.RawSockaddrInet6)(unsafe.Pointer(&addr))
-		return net.IP(addr6.Addr[:]).To16()
+		// Copy: To16() on a 16-byte IP returns the same slice, which would alias addr.
+		return append(net.IP(nil), addr6.Addr[:]...)
 	}
 
 	return nil

@@ -33,10 +33,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
 	_ "unsafe"
 
+	"github.com/riraccuia/pig/pkg/bindings/win"
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wintun"
 )
@@ -135,16 +135,9 @@ func (tun *NativeTun) IPNet6() *net.IPNet {
 }
 
 func (tun *NativeTun) Index() int {
-	var (
-		index uint32
-		luid  uint64 = tun.wt.LUID()
-		ret   uintptr
-	)
-	ret, _, _ = procConvertInterfaceLuidToIndex.Call(
-		uintptr(unsafe.Pointer(&luid)),
-		uintptr(unsafe.Pointer(&index)),
-	)
-	if ret != windows.NO_ERROR {
+	luid := tun.wt.LUID()
+	index, err := win.ConvertInterfaceLuidToIndex(luid)
+	if err != nil {
 		return -1
 	}
 	return int(index)

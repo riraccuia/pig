@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package oauth
+package log
 
-func OpenURL(url string) error {
-	return openURL(url)
-}
+const noColor = true

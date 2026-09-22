@@ -17,14 +17,15 @@ package route
 import (
 	"math/big"
 	"net"
+	"syscall"
 )
 
 // bitWidth returns the address width in bits for the table's family.
 func (t *Table) bitWidth() int {
 	switch t.family {
-	case FamilyInet:
+	case syscall.AF_INET:
 		return 32
-	case FamilyInet6:
+	case syscall.AF_INET6:
 		return 128
 	default:
 		panic("invalid family")
@@ -90,9 +91,9 @@ func routeToPrefixBits(route *Route) uint32 {
 func (t *Table) getBit(prefix *big.Int, pos int) uint8 {
 	var length int
 	switch t.family {
-	case FamilyInet:
+	case syscall.AF_INET:
 		length = 32
-	case FamilyInet6:
+	case syscall.AF_INET6:
 		length = 128
 	default:
 		panic("invalid family")

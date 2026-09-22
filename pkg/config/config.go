@@ -193,7 +193,7 @@ type TunnelConfig struct {
 	// default=DefaultICEProtocol
 	// optional=true
 	// desc=Transport protocol to use for the tunnel.
-	Proto TransportType `toml:"proto" json:"proto"`
+	Proto TransportType `toml:"proto,omitempty" json:"proto,omitzero"`
 	// default=DefaultRetryInterval
 	// optional=true
 	// desc=Reconnect interval in seconds.
@@ -215,7 +215,7 @@ type TunnelConfig struct {
 type LogConfig struct {
 	// optional=true
 	// desc=Path to the log file to write to. Otherwise logs to stdout.
-	File string `toml:"file" json:"file"`
+	File string `toml:"file,omitempty" json:"file,omitzero"`
 	// default="info"
 	// optional=true
 	// desc=Log level. Use one of "trace", "debug", "info", "warn", "error".
@@ -330,10 +330,10 @@ type TLSConfig struct {
 	Insecure bool `toml:"insecure" json:"insecure"`
 	// optional=true
 	// desc=CertFile is the local certificate presented by listen tunnels.
-	CertFile string `toml:"cert_file" json:"cert_file"`
+	CertFile string `toml:"cert_file,omitempty" json:"cert_file,omitzero"`
 	// optional=true
 	// desc=KeyFile is the private key for CertFile.
-	KeyFile string `toml:"key_file" json:"key_file"`
+	KeyFile string `toml:"key_file,omitempty" json:"key_file,omitzero"`
 }
 
 type AuthConfig struct {

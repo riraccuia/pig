@@ -12,8 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build !darwin && !windows
+
 package oauth
 
-func OpenURL(url string) error {
-	return openURL(url)
+import (
+	"os/exec"
+)
+
+func openURL(url string) error {
+	var cmd *exec.Cmd
+	cmd = exec.Command("xdg-open", url)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() {
+		_ = cmd.Wait()
+	}()
+	return nil
 }

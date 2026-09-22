@@ -17,7 +17,6 @@ package adapter
 import (
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"unsafe"
 
@@ -36,35 +35,16 @@ func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
 		ifName: ifName,
 	}
 
-	iface, err := net.InterfaceByName(ifName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get interface: %w", err)
-	}
-	addrs, err := iface.Addrs()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get interface addresses: %w", err)
+	ip, ipNet, err := getAdapterAddress(ifName, unix.AF_INET)
+	if err == nil {
+		adapter.ip = ip
+		adapter.ipNet = ipNet
 	}
 
-	for _, addr := range addrs {
-		ipnet, ok := addr.(*net.IPNet)
-		if !ok {
-			continue
-		}
-		if ipnet.IP.To4() != nil {
-			adapter.ip = ipnet
-			continue
-		}
-		if ipnet.IP.To16() == nil {
-			continue
-		}
-		if adapter.ipv6 == nil {
-			adapter.ipv6 = ipnet
-			continue
-		}
-		// Prefer non-link-local IPv6 address when available
-		if !ipnet.IP.IsLinkLocalUnicast() && adapter.ipv6.IP.IsLinkLocalUnicast() {
-			adapter.ipv6 = ipnet
-		}
+	ip, ipNet, err = getAdapterAddress(ifName, unix.AF_INET6)
+	if err == nil {
+		adapter.ipv6 = ip
+		adapter.ipv6Net = ipNet
 	}
 
 	return adapter, nil
@@ -79,22 +59,22 @@ type tunAdapter struct {
 	devName string
 }
 
-func (a *tunAdapter) NewQueue(ifr ifreq, id int) (io.ReadWriteCloser, error) {
-	queueFd, err := unix.Open("/dev/net/tun", unix.O_RDWR|unix.O_NONBLOCK, 0)
+func (a *tunAdapter) NewQueue(ifr *ifreq, id int) (io.ReadWriteCloser, error) {
+	queueFd, err := unix.Open("/dev/net/tun", unix.O_RDWR, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open /dev/net/tun: %w", err)
 	}
 
-	if err = unix.IoctlSetInt(queueFd, TUNSETIFF, int(uintptr(unsafe.Pointer(&ifr)))); err != nil {
-		return nil, fmt.Errorf("failed to create TUN queue: %w", err)
+	if err = unix.IoctlSetInt(queueFd, TUNSETIFF, int(uintptr(unsafe.Pointer(ifr)))); err != nil {
+		return nil, fmt.Errorf("failed to create TUN queue for %s: %w", a.devName, err)
 	}
 
 	err = unix.SetNonblock(queueFd, true)
 	if err != nil {
-		return nil, fmt.Errorf("failed to set non-blocking mode: %w", err)
+		return nil, fmt.Errorf("failed to set non-blocking mode for %s: %w", a.devName, err)
 	}
 
-	return os.NewFile(uintptr(queueFd), fmt.Sprintf("/dev/net/tun/%v-queue%v", a.devName, id)), nil
+	return os.NewFile(uintptr(queueFd), fmt.Sprintf("/dev/net/tun/%s-%d", a.devName, id)), nil
 }
 
 func (a *tunAdapter) Write(p []byte) (n int, err error) {

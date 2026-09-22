@@ -89,13 +89,19 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 			}
 			totalLen := prePkt.TotalLength()
 
-			if totalLen < 20 || totalLen > s.adapterCfg.MTU {
-				processed++
-				continue
-			}
-
 			if processed+totalLen > len(unprocessed) {
 				break // Partial packet, wait for more data
+			}
+
+			if totalLen > s.adapterCfg.MTU {
+				s.logger.Debugf("IPv=%d,len=%d,proto=%d | %d%s->%s:%d | discarded, too long",
+					prePkt.Version(), totalLen, prePkt.Protocol(),
+					prePkt.SourcePort(), prePkt.SourceIP(),
+					prePkt.DestinationIP(), prePkt.DestinationPort(),
+				)
+				// discard packet
+				processed += totalLen
+				continue
 			}
 
 			// Get new packet from pool and copy data

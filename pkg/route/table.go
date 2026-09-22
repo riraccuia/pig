@@ -18,6 +18,7 @@ import (
 	"math/big"
 	"net"
 	"sync"
+	"syscall"
 )
 
 // Table is a path-compressed binary prefix trie (PATRICIA) used as a route
@@ -63,7 +64,7 @@ func (n *rtNode) addRoute(route *Route) {
 // This determines the types of routes and addresses handled by the table.
 // A table can only handle one family at a time.
 func NewTable(family int) *Table {
-	if family != FamilyInet && family != FamilyInet6 {
+	if family != syscall.AF_INET && family != syscall.AF_INET6 {
 		return nil
 	}
 	return &Table{
@@ -131,7 +132,7 @@ func (t *Table) walk(node *rtNode, fn func(route *Route)) {
 // family, returning false if the address does not belong to that family.
 func (t *Table) destinationKey(dst net.IP) (*big.Int, bool) {
 	switch t.family {
-	case FamilyInet:
+	case syscall.AF_INET:
 		ip4 := dst.To4()
 		if ip4 == nil {
 			return nil, false

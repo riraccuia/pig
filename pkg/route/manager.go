@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"syscall"
 )
 
 // Manager handles static route operations.
@@ -71,7 +72,7 @@ type baseManager struct {
 	defGwCond       *sync.Cond
 	backend         platformBackend
 
-	findBestRouteFn func(dst net.IP) (*Route, error)
+	//findBestRouteFn func(dst net.IP) (*Route, error)
 	waitDefaultGwFn func(v4, v6 bool) <-chan struct{}
 }
 
@@ -100,8 +101,8 @@ func newBaseManager(ctx context.Context) (*baseManager, error) {
 	}
 	mCtx, cancel := context.WithCancel(mCtx)
 	bm := &baseManager{
-		routeTableV4: NewTable(FamilyInet),
-		routeTableV6: NewTable(FamilyInet6),
+		routeTableV4: NewTable(syscall.AF_INET),
+		routeTableV6: NewTable(syscall.AF_INET6),
 		ctx:          mCtx,
 		cancel:       cancel,
 		defGwCond:    sync.NewCond(&sync.Mutex{}),
@@ -112,13 +113,13 @@ func newBaseManager(ctx context.Context) (*baseManager, error) {
 		return nil, err
 	}
 
-	type routeFinder interface {
+	/*type routeFinder interface {
 		findBestRoute(dst net.IP) (*Route, error)
 	}
 	rf, ok := backend.(routeFinder)
 	if ok {
 		bm.findBestRouteFn = rf.findBestRoute
-	}
+	}*/
 
 	bm.backend = backend
 
@@ -157,24 +158,17 @@ func (m *baseManager) trackedRoutesForRoute(rt *Route) *sync.Map {
 
 func (m *baseManager) routeTableForFamily(family int) *Table {
 	switch family {
-	case FamilyInet:
+	case syscall.AF_INET:
 		return m.routeTableV4
-	case FamilyInet6:
+	case syscall.AF_INET6:
 		return m.routeTableV6
 	}
 	return nil
 }
 
-func (m *baseManager) getFindBestRouteFn() func(dst net.IP) (*Route, error) {
-	if m.findBestRouteFn != nil {
-		return m.findBestRouteFn
-	}
-	return m.FindBestRoute
-}
-
 // AddRouteToBestRoute finds the best route for a destination IP and adds a static route to it.
 func (m *baseManager) AddRouteToBestRoute(destination *net.IPNet) error {
-	route, err := m.getFindBestRouteFn()(destination.IP)
+	route, err := m.FindBestRoute(destination.IP)
 	if err != nil {
 		return fmt.Errorf("failed to find best route for %s: %w", destination.IP.String(), err)
 	}
@@ -194,7 +188,7 @@ func (m *baseManager) AddRouteToBestRoute(destination *net.IPNet) error {
 
 func (m *baseManager) AddRoute(rt *Route) error {
 	if rt.Gateway == nil {
-		bestRoute, err := m.getFindBestRouteFn()(rt.Destination.IP)
+		bestRoute, err := m.FindBestRoute(rt.Destination.IP)
 		if err != nil {
 			return err
 		}
@@ -254,19 +248,13 @@ func (m *baseManager) cleanup(trackedRoutes *sync.Map) error {
 }
 
 func (m *baseManager) FindBestRoute(dst net.IP) (*Route, error) {
-	if m.findBestRouteFn != nil {
-		// we have an override for finding the best route
-		rt, err := m.findBestRouteFn(dst)
-		if err != nil {
-			return nil, err
-		}
-		// create hard copy of the route
-		rtCopy := *rt
-		return &rtCopy, nil
-	}
-
 	if dst == nil {
 		return nil, fmt.Errorf("destination IP is nil")
+	}
+
+	rt, err := routeFromNeighbor(dst)
+	if rt != nil && err == nil {
+		return rt, nil
 	}
 
 	isV4 := dst.To4() != nil
@@ -280,9 +268,9 @@ func (m *baseManager) FindBestRoute(dst net.IP) (*Route, error) {
 		return nil, fmt.Errorf("invalid destination IP")
 	}
 
-	family := FamilyInet6
+	family := syscall.AF_INET6
 	if isV4 {
-		family = FamilyInet
+		family = syscall.AF_INET
 	}
 
 	table := m.routeTableForFamily(family)
@@ -290,7 +278,7 @@ func (m *baseManager) FindBestRoute(dst net.IP) (*Route, error) {
 		return nil, fmt.Errorf("no route table for family %d", family)
 	}
 
-	rt := table.Lookup(dst)
+	rt = table.Lookup(dst)
 	// create hard copy of the route
 	rtCopy := *rt
 	return &rtCopy, nil

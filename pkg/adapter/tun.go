@@ -13,7 +13,6 @@
 // limitations under the License.
 
 //go:build !windows
-// +build !windows
 
 package adapter
 
@@ -29,10 +28,12 @@ type Interface interface {
 }
 
 type TUNAdapter struct {
-	iface  Interface
-	ip     *net.IPNet
-	ipv6   *net.IPNet
-	ifName string
+	iface   Interface
+	ip      net.IP
+	ipv6    net.IP
+	ipNet   *net.IPNet
+	ipv6Net *net.IPNet
+	ifName  string
 }
 
 func (t *TUNAdapter) Read(b []byte) (int, error) {
@@ -48,25 +49,19 @@ func (t *TUNAdapter) Close() error {
 }
 
 func (t *TUNAdapter) IP() net.IP {
-	if t.ip != nil {
-		return t.ip.IP
-	}
-	return nil
-}
-
-func (t *TUNAdapter) IPNet() *net.IPNet {
 	return t.ip
 }
 
+func (t *TUNAdapter) IPNet() *net.IPNet {
+	return t.ipNet
+}
+
 func (t *TUNAdapter) IP6() net.IP {
-	if t.ipv6 != nil {
-		return t.ipv6.IP
-	}
-	return nil
+	return t.ipv6
 }
 
 func (t *TUNAdapter) IPNet6() *net.IPNet {
-	return t.ipv6
+	return t.ipv6Net
 }
 
 func (t *TUNAdapter) Name() string {

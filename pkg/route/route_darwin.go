@@ -16,6 +16,7 @@ package route
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -550,4 +551,8 @@ func (b *darwinBackend) getSystemRoute(dst net.IP) (*Route, error) {
 	}
 
 	return nil, fmt.Errorf("no route response for %s", dst.String())
+}
+
+func routeFromNeighbor(target net.IP) (*Route, error) {
+	return nil, errors.New("not implemented")
 }

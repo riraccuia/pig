@@ -147,11 +147,17 @@ func (s *Server) WaitClose() {
 
 func (s *Server) buildIPPool(adapter common.TunnelAdapter) {
 	ipNet := adapter.IPNet()
-	s.logger.Infof("Building IP pool for IPv4 network: %s", ipNet.String())
-	s.ipPool = newIPPool(ipNet)
+	if ipNet != nil {
+		s.logger.Infof("Building IP pool for IPv4 network: %s", ipNet.String())
+		s.ipPool = newIPPool(ipNet)
+		s.ipPool.SetUsed(adapter.IP())
+	}
 	ipNet6 := adapter.IPNet6()
-	s.logger.Infof("Building IP pool for IPv6 network: %s", ipNet6.String())
-	s.ipPool6 = newIPPool(ipNet6)
+	if ipNet6 != nil {
+		s.logger.Infof("Building IP pool for IPv6 network: %s", ipNet6.String())
+		s.ipPool6 = newIPPool(ipNet6)
+		s.ipPool6.SetUsed(adapter.IP6())
+	}
 }
 
 func (s *Server) AllocateIP() (net.IP, error) {

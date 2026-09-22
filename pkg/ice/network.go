@@ -19,6 +19,7 @@ import (
 	"math/rand"
 	"net"
 	"sync"
+	"syscall"
 
 	"github.com/riraccuia/pig/pkg/adapter"
 )
@@ -121,11 +122,11 @@ func GetLocalEndpoints(bindAdapter string, excludedAdapters *sync.Map) (endpoint
 		if iface.Flags&net.FlagUp == 0 {
 			continue
 		}
-		ipv4Addr, ipv4Net, err := adapter.GetAdapterAddress(iface.Name, 0x02) // AF_INET
+		ipv4Addr, ipv4Net, err := adapter.GetAdapterAddress(iface.Name, syscall.AF_INET)
 		if err == nil && ipIsValidForEndpoint(ipv4Addr) {
 			endpoints = append(endpoints, LocalEndpoint{IP: ipv4Addr, Net: ipv4Net})
 		}
-		ipv6Addr, ipv6Net, err := adapter.GetAdapterAddress(iface.Name, 0x1e) // AF_INET6
+		ipv6Addr, ipv6Net, err := adapter.GetAdapterAddress(iface.Name, syscall.AF_INET6)
 		if err == nil && ipIsValidForEndpoint(ipv6Addr) {
 			endpoints = append(endpoints, LocalEndpoint{IP: ipv6Addr, Net: ipv6Net})
 		}
