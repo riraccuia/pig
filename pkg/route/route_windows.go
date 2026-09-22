@@ -405,7 +405,7 @@ func getLinkAddr(luid uint64, target net.IP) net.HardwareAddr {
 	if err != nil {
 		return nil
 	}
-	return net.HardwareAddr(row.PhysicalAddress[:])
+	return net.HardwareAddr(row.PhysicalAddress[:row.PhysicalAddressLength])
 }
 
 // ipFromSockaddr converts a Windows sockaddr to net.IP.
