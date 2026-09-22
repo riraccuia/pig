@@ -371,7 +371,7 @@ func routeFromRow2(row *windows.MibIpForwardRow2) (*Route, error) {
 
 	switch {
 	case nextHop == nil || row.Loopback == 1:
-		route.LinkAddr = getLinkAddr(row.InterfaceLuid, dstIP)
+		route.LinkAddr = getLinkAddr(row.InterfaceLuid, row.InterfaceIndex, dstIP)
 		route.Gateway = nil
 	default:
 		route.Gateway = nextHop
@@ -387,9 +387,10 @@ func routeFromRow2(row *windows.MibIpForwardRow2) (*Route, error) {
 	return &route, nil
 }
 
-func getLinkAddr(luid uint64, target net.IP) net.HardwareAddr {
+func getLinkAddr(luid uint64, index uint32, target net.IP) net.HardwareAddr {
 	row := &win.MibIpNetRow2{
-		InterfaceLuid: luid,
+		InterfaceLuid:  luid,
+		InterfaceIndex: index,
 	}
 	switch {
 	case target.To4() != nil:
