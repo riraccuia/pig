@@ -41,7 +41,6 @@ var (
 	procGetUnicastIpAddressEntry        = modiphlpapi.NewProc("GetUnicastIpAddressEntry")
 	procNotifyUnicastIpAddressChange    = modiphlpapi.NewProc("NotifyUnicastIpAddressChange")
 	procCancelMibChangeNotify2          = modiphlpapi.NewProc("CancelMibChangeNotify2")
-	procConvertInterfaceLuidToIndex     = modiphlpapi.NewProc("ConvertInterfaceLuidToIndex")
 )
 
 // ipv4ToBytes converts a uint32 IP address in network byte order to a byte slice.

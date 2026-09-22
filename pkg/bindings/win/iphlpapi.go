@@ -25,12 +25,14 @@ import (
 )
 
 var (
-	modiphlpapi                = windows.NewLazySystemDLL("iphlpapi.dll")
-	procInitializeIpForwardRow = modiphlpapi.NewProc("InitializeIpForwardEntry")
-	procCreateIpForwardEntry2  = modiphlpapi.NewProc("CreateIpForwardEntry2")
-	procDeleteIpForwardEntry2  = modiphlpapi.NewProc("DeleteIpForwardEntry2")
-	procGetBestRoute2          = modiphlpapi.NewProc("GetBestRoute2")
-	procGetIpNetEntry2         = modiphlpapi.NewProc("GetIpNetEntry2")
+	modiphlpapi                     = windows.NewLazySystemDLL("iphlpapi.dll")
+	procInitializeIpForwardRow      = modiphlpapi.NewProc("InitializeIpForwardEntry")
+	procCreateIpForwardEntry2       = modiphlpapi.NewProc("CreateIpForwardEntry2")
+	procDeleteIpForwardEntry2       = modiphlpapi.NewProc("DeleteIpForwardEntry2")
+	procGetBestRoute2               = modiphlpapi.NewProc("GetBestRoute2")
+	procGetIpNetEntry2              = modiphlpapi.NewProc("GetIpNetEntry2")
+	procConvertInterfaceLuidToIndex = modiphlpapi.NewProc("ConvertInterfaceLuidToIndex")
+	procConvertInterfaceIndexToLuid = modiphlpapi.NewProc("ConvertInterfaceIndexToLuid")
 )
 
 type MibIpNetRow2 struct {
@@ -169,6 +171,38 @@ func CancelMibChangeNotify2(notificationHandle windows.Handle) error {
 	return nil
 }
 
+// GetIpNetEntry2 retrieves information for a neighbor IP address entry on the local computer.
+// See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipnetentry2.
+func GetIpNetEntry2(row *MibIpNetRow2) error {
+	ret, _, _ := procGetIpNetEntry2.Call(uintptr(unsafe.Pointer(row)))
+	if ret != 0 {
+		return newReturnCodeError("GetIpNetEntry2", ret)
+	}
+	return nil
+}
+
+// ConvertInterfaceLuidToIndex converts a LUID to an interface index.
+// See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-convertinterfaceluidtoindex.
+func ConvertInterfaceLuidToIndex(luid uint64) (uint32, error) {
+	var index uint32
+	ret, _, _ := procConvertInterfaceLuidToIndex.Call(uintptr(unsafe.Pointer(&luid)), uintptr(unsafe.Pointer(&index)))
+	if ret != 0 {
+		return 0, newReturnCodeError("ConvertInterfaceLuidToIndex", ret)
+	}
+	return index, nil
+}
+
+// ConvertInterfaceIndexToLuid converts an interface index to a LUID.
+// See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-convertinterfaceindextoluid.
+func ConvertInterfaceIndexToLuid(index uint32) (uint64, error) {
+	var luid uint64
+	ret, _, _ := procConvertInterfaceIndexToLuid.Call(uintptr(unsafe.Pointer(&index)), uintptr(unsafe.Pointer(&luid)))
+	if ret != 0 {
+		return 0, newReturnCodeError("ConvertInterfaceIndexToLuid", ret)
+	}
+	return luid, nil
+}
+
 func apiErrorFromErr(apiName string, err error) error {
 	var errno windows.Errno
 	var returnCode uintptr
@@ -180,12 +214,4 @@ func apiErrorFromErr(apiName string, err error) error {
 		ReturnCode: returnCode,
 		Cause:      err,
 	}
-}
-
-func GetIpNetEntry2(row *MibIpNetRow2) error {
-	ret, _, _ := procGetIpNetEntry2.Call(uintptr(unsafe.Pointer(row)))
-	if ret != 0 {
-		return newReturnCodeError("GetIpNetEntry2", ret)
-	}
-	return nil
 }
