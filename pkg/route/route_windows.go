@@ -392,7 +392,7 @@ func routeFromNeighbor(target net.IP) (*Route, error) {
 		return nil, fmt.Errorf("link address is nil")
 	}
 
-	ifName, err := win.ConvertInterfaceLuidToNameW(row.InterfaceLuid)
+	ifName, err := win.ConvertInterfaceLuidToAlias(row.InterfaceLuid)
 	if err != nil {
 		return nil, err
 	}

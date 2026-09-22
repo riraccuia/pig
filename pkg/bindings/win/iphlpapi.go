@@ -35,7 +35,7 @@ var (
 	procConvertInterfaceLuidToIndex = modiphlpapi.NewProc("ConvertInterfaceLuidToIndex")
 	procConvertInterfaceIndexToLuid = modiphlpapi.NewProc("ConvertInterfaceIndexToLuid")
 	procConvertInterfaceNameToLuidW = modiphlpapi.NewProc("ConvertInterfaceNameToLuidW")
-	procConvertInterfaceLuidToNameW = modiphlpapi.NewProc("ConvertInterfaceLuidToNameW")
+	procConvertInterfaceLuidToAlias = modiphlpapi.NewProc("ConvertInterfaceLuidToAlias")
 )
 
 // MibIpNetRow2 stores information about a neighbor IP address.
@@ -257,15 +257,15 @@ func ConvertInterfaceNameToLuidW(name string) (uint64, error) {
 
 // ConvertInterfaceLuidToNameW converts a locally unique identifier (LUID) for a network interface to the Unicode interface name.
 // See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-convertinterfaceluidtonamew.
-func ConvertInterfaceLuidToNameW(luid uint64) (string, error) {
+func ConvertInterfaceLuidToAlias(luid uint64) (string, error) {
 	var name [windows.IF_MAX_STRING_SIZE + 1]uint16
-	ret, _, _ := procConvertInterfaceLuidToNameW.Call(
+	ret, _, _ := procConvertInterfaceLuidToAlias.Call(
 		uintptr(unsafe.Pointer(&luid)),
 		uintptr(unsafe.Pointer(&name[0])),
 		uintptr(len(name)),
 	)
 	if ret != 0 {
-		return "", newReturnCodeError("ConvertInterfaceLuidToNameW", ret)
+		return "", newReturnCodeError("ConvertInterfaceLuidToAlias", ret)
 	}
 	return windows.UTF16ToString(name[:]), nil
 }
