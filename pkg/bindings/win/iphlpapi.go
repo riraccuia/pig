@@ -196,7 +196,7 @@ func ConvertInterfaceLuidToIndex(luid uint64) (uint32, error) {
 // See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-convertinterfaceindextoluid.
 func ConvertInterfaceIndexToLuid(index uint32) (uint64, error) {
 	var luid uint64
-	ret, _, _ := procConvertInterfaceIndexToLuid.Call(uintptr(unsafe.Pointer(&index)), uintptr(unsafe.Pointer(&luid)))
+	ret, _, _ := procConvertInterfaceIndexToLuid.Call(uintptr(index), uintptr(unsafe.Pointer(&luid)))
 	if ret != 0 {
 		return 0, newReturnCodeError("ConvertInterfaceIndexToLuid", ret)
 	}
