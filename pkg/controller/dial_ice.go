@@ -18,8 +18,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
-	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -167,7 +167,7 @@ func (c *Controller) connectICEDialPath(ctx context.Context, cp *ice.ConnectPath
 	var routeExists bool
 
 	err = c.routeManager.AddRoute(rt)
-	if os.IsExist(err) {
+	if errors.Is(err, fs.ErrExist) {
 		err = nil
 		routeExists = true
 		c.logger.Debugf("Skipped bypass route for %s as it already exists", cp.RemoteIP.String())

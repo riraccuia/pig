@@ -19,8 +19,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
-	"os"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -472,7 +472,7 @@ func (b *linuxBackend) netlinkExchange(req []byte, seq uint32, mode netlinkWaitM
 			if m.Header.Seq != seq || m.Header.Pid != b.syncPort {
 				continue
 			}
-			if os.IsExist(err) {
+			if errors.Is(err, fs.ErrExist) {
 				return nil, err
 			}
 			if err := netlinkErrorFromMessage(m); err != nil {
