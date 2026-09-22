@@ -64,3 +64,17 @@ const (
 // Certificate system store location flags - use windows.CERT_SYSTEM_STORE_* constants
 // Certificate file store commit flags - use windows.CERT_FILE_STORE_COMMIT_ENABLE_FLAG
 // Certificate LDAP store flags - use windows.CERT_LDAP_STORE_* constants
+
+// NL_NEIGHBOR_STATE values for MIB_IPNET_ROW2.State.
+// Not available in golang.org/x/sys/windows; defined in Nldef.h.
+// See: https://learn.microsoft.com/en-us/windows/win32/api/nldef/ne-nldef-nl_neighbor_state
+const (
+	NlnsUnreachable = 0
+	NlnsIncomplete  = 1
+	NlnsProbe       = 2
+	NlnsDelay       = 3
+	NlnsStale       = 4
+	NlnsReachable   = 5
+	NlnsPermanent   = 6
+	NlnsMaximum     = 7
+)

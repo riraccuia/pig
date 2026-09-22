@@ -17,6 +17,7 @@ package route
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -663,4 +664,8 @@ func attrUint32(b []byte) uint32 {
 		return 0
 	}
 	return binary.NativeEndian.Uint32(b)
+}
+
+func routeFromNeighbor(target net.IP) (*Route, error) {
+	return nil, errors.New("not implemented")
 }

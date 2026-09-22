@@ -18,17 +18,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"syscall"
 )
 
 var (
 	ErrDirectlyConnected = errors.New("directly connected")
-)
-
-const (
-	// FamilyInet and FamilyInet6 identify route address families for the PATRICIA table.
-	// Values match unix.AF_INET / unix.AF_INET6 on Darwin and Linux.
-	FamilyInet  = 2
-	FamilyInet6 = 30
 )
 
 // Route represents a static route entry
@@ -49,10 +43,10 @@ func (r *Route) Is4() bool {
 // Otherwise, the family is one of FamilyInet or FamilyInet6.
 func (r *Route) Family() int {
 	if r.Destination.IP.To4() != nil {
-		return FamilyInet
+		return syscall.AF_INET
 	}
 	if r.Destination.IP.To16() != nil {
-		return FamilyInet6
+		return syscall.AF_INET6
 	}
 	return -1
 }

@@ -78,7 +78,7 @@ func (b *windowsBackend) handleRouteAddOrUpdate(row *windows.MibIpForwardRow2, r
 	if err := windows.GetIpForwardEntry2(&full); err != nil {
 		return
 	}
-	rt, err := routeFromRow2(&full)
+	rt, err := routeFromForwardRow(&full)
 	if err != nil {
 		return
 	}
@@ -92,7 +92,7 @@ func (b *windowsBackend) handleRouteAddOrUpdate(row *windows.MibIpForwardRow2, r
 
 func (b *windowsBackend) handleRouteDelete(row *windows.MibIpForwardRow2, routeTableV4, routeTableV6 *Table) {
 	// Route is already gone from the OS table; use the callback key fields only.
-	rt, err := routeFromRow2(row)
+	rt, err := routeFromForwardRow(row)
 	if err != nil {
 		return
 	}
@@ -161,12 +161,12 @@ func (b *windowsBackend) loadRoutes() ([]*Route, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer win.FreeMibTable(table)
+	defer win.FreeMibTable(unsafe.Pointer(table))
 
 	var routes []*Route
 	rows := table.Rows()
 	for i := range rows {
-		rt, err := routeFromRow2(&rows[i])
+		rt, err := routeFromForwardRow(&rows[i])
 		if err != nil {
 			continue
 		}
@@ -186,42 +186,6 @@ func (b *windowsBackend) close() error {
 	err := win.CancelMibChangeNotify2(b.notifyHandle)
 	b.notifyHandle = 0
 	return err
-}
-
-func (b *windowsBackend) findBestRoute(dst net.IP) (*Route, error) {
-	if dst == nil {
-		return nil, fmt.Errorf("destination IP is nil")
-	}
-
-	// Normalize to canonical family representation.
-	dst = normalizeIP(dst)
-	if dst == nil {
-		return nil, fmt.Errorf("invalid destination IP")
-	}
-
-	// Build destination sockaddr for the lookup.
-	var dstSock windows.RawSockaddrInet
-	var err error
-
-	dstSock, err = sockaddrInetFromIP(dst)
-	if err != nil {
-		return nil, err
-	}
-
-	var bestRoute windows.MibIpForwardRow2
-	err = win.GetBestRoute2(nil, 0, nil, &dstSock, 0, &bestRoute, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert the native row to our Route representation.
-	var rt *Route
-	rt, err = routeFromRow2(&bestRoute)
-	if err != nil {
-		return nil, err
-	}
-
-	return rt, nil
 }
 
 func (b *windowsBackend) buildForwardRow(row *windows.MibIpForwardRow2, destination *net.IPNet, ifaceName string, gateway net.IP, metric uint32) error {
@@ -336,8 +300,8 @@ func sockaddrInetFromIP(ip net.IP) (windows.RawSockaddrInet, error) {
 	return addr, nil
 }
 
-// routeFromRow2 converts a Windows route row to a Route.
-func routeFromRow2(row *windows.MibIpForwardRow2) (*Route, error) {
+// routeFromForwardRow converts a Windows route row to a Route.
+func routeFromForwardRow(row *windows.MibIpForwardRow2) (*Route, error) {
 	if row == nil {
 		return nil, fmt.Errorf("route row is nil")
 	}
@@ -371,7 +335,7 @@ func routeFromRow2(row *windows.MibIpForwardRow2) (*Route, error) {
 
 	switch {
 	case nextHop == nil || row.Loopback == 1:
-		route.LinkAddr = getLinkAddr(row.InterfaceLuid, row.InterfaceIndex, dstIP)
+		//route.LinkAddr = getLinkAddr(row.InterfaceLuid, row.InterfaceIndex, dstIP)
 		route.Gateway = nil
 	default:
 		route.Gateway = nextHop
@@ -387,26 +351,54 @@ func routeFromRow2(row *windows.MibIpForwardRow2) (*Route, error) {
 	return &route, nil
 }
 
-func getLinkAddr(luid uint64, index uint32, target net.IP) net.HardwareAddr {
-	row := &win.MibIpNetRow2{
-		InterfaceLuid:  luid,
-		InterfaceIndex: index,
-	}
+func routeFromNeighbor(target net.IP) (*Route, error) {
+	var (
+		row                = &win.MibIpNetRow2{}
+		prefixLength, bits int
+	)
 	switch {
 	case target.To4() != nil:
 		addr4 := (*windows.RawSockaddrInet4)(unsafe.Pointer(&row.Address))
 		addr4.Family = windows.AF_INET
 		copy(addr4.Addr[:], target.To4())
+		prefixLength, bits = 32, 32
 	case target.To16() != nil:
 		addr6 := (*windows.RawSockaddrInet6)(unsafe.Pointer(&row.Address))
 		addr6.Family = windows.AF_INET6
 		copy(addr6.Addr[:], target.To16())
+		prefixLength, bits = 128, 128
 	}
 	err := win.GetIpNetEntry2(row)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return net.HardwareAddr(row.PhysicalAddress[:row.PhysicalAddressLength])
+
+	switch row.State {
+	case win.NlnsUnreachable, win.NlnsStale, win.NlnsIncomplete:
+		return nil, fmt.Errorf("neighbor is unreachable, stale, or incomplete")
+	default:
+		// go on
+	}
+
+	rt := &Route{
+		Destination: &net.IPNet{
+			IP:   target,
+			Mask: net.CIDRMask(prefixLength, bits),
+		},
+		LinkAddr: net.HardwareAddr(row.PhysicalAddress[:row.PhysicalAddressLength]),
+	}
+
+	if rt.LinkAddr == nil {
+		return nil, fmt.Errorf("link address is nil")
+	}
+
+	ifName, err := win.ConvertInterfaceLuidToNameW(row.InterfaceLuid)
+	if err != nil {
+		return nil, err
+	}
+
+	rt.Interface = ifName
+	return rt, nil
 }
 
 // ipFromSockaddr converts a Windows sockaddr to net.IP.

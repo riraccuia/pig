@@ -31,10 +31,15 @@ var (
 	procDeleteIpForwardEntry2       = modiphlpapi.NewProc("DeleteIpForwardEntry2")
 	procGetBestRoute2               = modiphlpapi.NewProc("GetBestRoute2")
 	procGetIpNetEntry2              = modiphlpapi.NewProc("GetIpNetEntry2")
+	procGetIpNetTable2              = modiphlpapi.NewProc("GetIpNetTable2")
 	procConvertInterfaceLuidToIndex = modiphlpapi.NewProc("ConvertInterfaceLuidToIndex")
 	procConvertInterfaceIndexToLuid = modiphlpapi.NewProc("ConvertInterfaceIndexToLuid")
+	procConvertInterfaceNameToLuidW = modiphlpapi.NewProc("ConvertInterfaceNameToLuidW")
+	procConvertInterfaceLuidToNameW = modiphlpapi.NewProc("ConvertInterfaceLuidToNameW")
 )
 
+// MibIpNetRow2 stores information about a neighbor IP address.
+// See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-mib_ipnet_row2.
 type MibIpNetRow2 struct {
 	Address               windows.RawSockaddrInet6
 	InterfaceIndex        uint32
@@ -45,6 +50,22 @@ type MibIpNetRow2 struct {
 	Flags                 uint8
 	_                     [3]byte
 	ReachabilityTime      uint32
+}
+
+// MibIpNetTable2 contains a table of neighbor IP address entries.
+// See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-mib_ipnet_table2.
+type MibIpNetTable2 struct {
+	NumEntries uint32
+	_          [4]byte
+	Table      [1]MibIpNetRow2
+}
+
+// Rows returns the neighbor IP address entries in the table.
+func (t *MibIpNetTable2) Rows() []MibIpNetRow2 {
+	if t == nil || t.NumEntries == 0 {
+		return nil
+	}
+	return unsafe.Slice(&t.Table[0], t.NumEntries)
 }
 
 // InitializeIpForwardEntry initializes a MIB_IPFORWARD_ROW2 structure with default values.
@@ -133,13 +154,30 @@ func GetIpForwardTable2(family uint16) (*windows.MibIpForwardTable2, error) {
 	return table, nil
 }
 
-// FreeMibTable frees memory allocated by GetIpForwardTable2 and related MIB APIs.
+// FreeMibTable frees memory allocated by GetIpForwardTable2, GetIpNetTable2, and related MIB APIs.
 // See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-freemibtable.
-func FreeMibTable(table *windows.MibIpForwardTable2) {
-	if table == nil {
+func FreeMibTable(memory unsafe.Pointer) {
+	if memory == nil {
 		return
 	}
-	windows.FreeMibTable(unsafe.Pointer(table))
+	windows.FreeMibTable(memory)
+}
+
+// GetIpNetTable2 retrieves the IP neighbor table on the local computer.
+// The caller must free the returned table with FreeMibTable.
+// ERROR_NOT_FOUND is treated as success with an empty table (no neighbor entries).
+// See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipnettable2.
+func GetIpNetTable2(family uint16) (*MibIpNetTable2, error) {
+	var table *MibIpNetTable2
+	ret, _, _ := procGetIpNetTable2.Call(
+		uintptr(family),
+		uintptr(unsafe.Pointer(&table)),
+	)
+	// NO_ERROR and ERROR_NOT_FOUND both indicate a successful call.
+	if ret != 0 && windows.Errno(ret) != windows.ERROR_NOT_FOUND {
+		return nil, newReturnCodeError("GetIpNetTable2", ret)
+	}
+	return table, nil
 }
 
 // NotifyRouteChange2 registers a callback for IPv4/IPv6 route table changes.
@@ -201,6 +239,35 @@ func ConvertInterfaceIndexToLuid(index uint32) (uint64, error) {
 		return 0, newReturnCodeError("ConvertInterfaceIndexToLuid", ret)
 	}
 	return luid, nil
+}
+
+// ConvertInterfaceNameToLuidW converts a NULL-terminated Unicode interface name to a LUID.
+// See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-convertinterfacenametoluidw.
+func ConvertInterfaceNameToLuidW(name string) (uint64, error) {
+	var (
+		luid  uint64
+		wname = windows.StringToUTF16Ptr(name)
+	)
+	ret, _, _ := procConvertInterfaceNameToLuidW.Call(uintptr(unsafe.Pointer(wname)), uintptr(unsafe.Pointer(&luid)))
+	if ret != 0 {
+		return 0, newReturnCodeError("ConvertInterfaceNameToLuidW", ret)
+	}
+	return luid, nil
+}
+
+// ConvertInterfaceLuidToNameW converts a locally unique identifier (LUID) for a network interface to the Unicode interface name.
+// See: https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-convertinterfaceluidtonamew.
+func ConvertInterfaceLuidToNameW(luid uint64) (string, error) {
+	var name [windows.IF_MAX_STRING_SIZE + 1]uint16
+	ret, _, _ := procConvertInterfaceLuidToNameW.Call(
+		uintptr(unsafe.Pointer(&luid)),
+		uintptr(unsafe.Pointer(&name[0])),
+		uintptr(len(name)),
+	)
+	if ret != 0 {
+		return "", newReturnCodeError("ConvertInterfaceLuidToNameW", ret)
+	}
+	return windows.UTF16ToString(name[:]), nil
 }
 
 func apiErrorFromErr(apiName string, err error) error {
