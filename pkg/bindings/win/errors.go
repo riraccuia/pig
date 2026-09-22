@@ -13,13 +13,13 @@
 // limitations under the License.
 
 //go:build windows
-// +build windows
 
 package win
 
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"golang.org/x/sys/windows"
 )
@@ -53,10 +53,9 @@ func (e *APIError) Error() string {
 
 // Unwrap returns the underlying cause.
 func (e *APIError) Unwrap() error {
-	if e == nil {
-		return nil
+	if e.ReturnCode == uintptr(windows.ERROR_OBJECT_ALREADY_EXISTS) {
+		return fmt.Errorf("%w: %w", os.ErrExist, e.Cause)
 	}
-
 	return e.Cause
 }
 
