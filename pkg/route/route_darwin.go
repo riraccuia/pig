@@ -21,6 +21,7 @@ import (
 	"net"
 	"os"
 
+	"github.com/riraccuia/pig/pkg/log"
 	"golang.org/x/net/route"
 	"golang.org/x/sys/unix"
 )
@@ -279,19 +280,10 @@ func (b *darwinBackend) monitorRoutes(routeTableV4, routeTableV6 *Table) {
 
 	buf := make([]byte, 4096)
 
-	err = unix.SetNonblock(monSocket, true)
-	if err != nil {
-		return
-	}
-
 	for {
 		n, err := unix.Read(monSocket, buf)
 		if err != nil {
-			// Check if it's a "would block" error (no data available)
-			if err == unix.EAGAIN || err == unix.EWOULDBLOCK {
-				continue
-			}
-			// Other errors - socket might be closed
+			log.NewBlockingLogger().Errorf("failed to read route message: %v", err)
 			return
 		}
 

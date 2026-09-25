@@ -16,9 +16,14 @@ package main
 
 import (
 	"flag"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+
 	//_ "net/http/pprof"
+
+	"github.com/riraccuia/pig/pkg/log"
 )
 
 var binaryName = filepath.Base(os.Args[0])
@@ -78,15 +83,17 @@ func pigDocs() {
 	os.Exit(0)
 }
 
-/*func setupPprof(logger *log.Logger) {
+// enablePprof enables profiling of the application.
+// In order to use, uncomment the "_ net/http/pprof" package import at the top of this file.
+func enablePprof() {
 	runtime.SetBlockProfileRate(1)
 	runtime.SetMutexProfileFraction(1)
 
 	go func() {
 		pprofAddr := ":6060"
-		logger.Infof("Starting pprof server on %s", pprofAddr)
+		log.NewBlockingLogger().Infof("Starting pprof server on %s", pprofAddr)
 		if err := http.ListenAndServe(pprofAddr, nil); err != nil {
-			logger.Errorf("Failed to start pprof server: %v", err)
+			log.NewBlockingLogger().Errorf("Failed to start pprof server: %v", err)
 		}
 	}()
-}*/
+}

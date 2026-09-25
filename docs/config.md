@@ -97,9 +97,9 @@
 
 | Field | Type | Optional | Default | Description |
 | --- | --- | --- | --- | --- |
-| `weight_factor` | float? | true | 5 | Weight factor. Lower values give more weight to recent packets. |
-| `drop_probability` | float? | true | 0.25 | Probability for packets to be dropped on busy queues. Accepts decimals between 0 and 1. |
-| `threshold` | float? | true | 0.3 | Threshold for WRED as a fraction of the queue length. Accepts decimals between 0 and 1. |
+| `weight_factor` | float? | true | 9 | Weight factor. Lower values give more weight to recent packets. |
+| `drop_probability` | float? | true | 0.1 | Probability for packets to be dropped on busy queues. Accepts decimals between 0 and 1. |
+| `threshold` | float? | true | 0.5 | Threshold for WRED as a fraction of the queue length. Accepts decimals between 0 and 1. |
 
 ## AuthConfig
 

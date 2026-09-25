@@ -84,14 +84,7 @@ func (c *Controller) onTunnelDisconnected(tunnel *client.Client) error {
 	return nil
 }
 
-func (c *Controller) handleClientEventsAsync(ctx context.Context, tunnel *client.Client) {
-	c.Add(1)
-	go c.handleClientEvents(ctx, tunnel)
-	runtime.Gosched()
-}
-
 func (c *Controller) handleClientEvents(ctx context.Context, tunnel *client.Client) {
-	defer c.Done()
 	// tunnelCfg is assumed never nil for controller-managed tunnels (AddClientTunnel path).
 	// HandleClientEvents may pass nil for externally-created clients; route/demux ops are skipped in that case.
 
@@ -100,7 +93,7 @@ func (c *Controller) handleClientEvents(ctx context.Context, tunnel *client.Clie
 		select {
 		case event = <-tunnel.Events():
 		case <-ctx.Done():
-			tunnel.WaitClose()
+			tunnel.Wait()
 			if len(tunnel.Events()) == 0 {
 				c.logger.Debugf("Stopped monitoring client events")
 				return

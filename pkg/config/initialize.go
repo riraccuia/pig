@@ -27,9 +27,9 @@ var (
 	DefaultQueueSize     = 256
 	DefaultStreamCount   = 0
 	DefaultRetryInterval = 5
-	DefaultWredWF        = 5.0
-	DefaultWredDP        = 0.25
-	DefaultWredThresh    = 0.30
+	DefaultWredWF        = 9.0
+	DefaultWredDP        = 0.1
+	DefaultWredThresh    = 0.5
 
 	DefaultICEBrokerAddress = "ssl://broker.hivemq.com:8883"
 	DefaultICEProtocol      = TransportWS

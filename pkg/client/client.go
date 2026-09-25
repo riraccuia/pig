@@ -25,8 +25,8 @@ import (
 	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/queue"
-	"github.com/riraccuia/pig/pkg/queue/wred"
 	"github.com/riraccuia/pig/pkg/streams"
 	"github.com/riraccuia/pig/pkg/transport"
 )
@@ -34,26 +34,25 @@ import (
 // Client represents a tunnel client that handles traffic between
 // a local network adapter and a remote server.
 type Client struct {
-	logger            common.Logger
-	dropLogger        *common.DelayedCounterProcessor
-	config            *config.TunnelConfig
-	conn              transport.Conn
-	streams           *streams.StreamManager
-	adapter           common.TunnelAdapter
-	inbound           common.PacketQueue
-	outbound          *queue.ChanQueue
-	bufferPool        common.BufferPool
-	done              chan struct{}
-	closed            atomic.Bool
-	reconnectInterval time.Duration
-	connError         chan error
-	authenticator     common.Authenticator
-	events            chan *EventContext
-	mtu               int
-	state             atomic.Int32
-	peerAddr          atomic.Value
-	mappedIPs         *sync.Map
-	conntrack         *Conntrack
+	logger          common.Logger
+	dropLogger      *common.DelayedCounterProcessor
+	config          *config.TunnelConfig
+	adapterConfig   *config.AdapterConfig
+	conn            transport.Conn
+	streams         *streams.StreamManager
+	adapter         common.TunnelAdapter
+	inbound         common.PacketQueue
+	outbound        *queue.FIFO[network.IPPacket]
+	bufferPool      common.BufferPool
+	authenticator   common.Authenticator
+	state           atomic.Int32
+	peerAddr        atomic.Value
+	mappedIPs       *sync.Map
+	conntrack       *Conntrack
+	started, closed atomic.Bool
+	mainWg, mgrWg   *sync.WaitGroup
+	connError       chan error
+	events          chan *EventContext
 }
 
 type atomicAddr struct {
@@ -80,36 +79,24 @@ func New(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *conf
 func NewWithAdapter(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *config.TunnelConfig, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Client, error) {
 	logger.Infof("Creating client with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), adapterCfg.MTU)
 
-	queueSize := adapterCfg.QueueSize
-	if queueSize <= 0 {
-		queueSize = config.DefaultQueueSize
-	}
-
-	outbound := queue.NewChanQueue(queueSize)
-	if tunnelCfg.Wred.DropProbability > 0 {
-		wred, err := wred.NewWRED(tunnelCfg.Wred.WeightFactor)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create WRED: %w", err)
-		}
-		logger.Infof("WRED enabled with weight factor: %d, drop probability: %d%%, threshold avg queue len: %d%%", int(tunnelCfg.Wred.WeightFactor), int(tunnelCfg.Wred.DropProbability*100), int(tunnelCfg.Wred.Threshold*100))
-		outbound = outbound.WithWRED(wred, tunnelCfg.Wred.DropProbability, tunnelCfg.Wred.Threshold)
+	adapterConfig := adapterCfg
+	if tunnelCfg.Adapter != nil {
+		adapterConfig = tunnelCfg.Adapter
 	}
 
 	cl := &Client{
-		logger:            logger,
-		config:            tunnelCfg,
-		streams:           streams.New(),
-		adapter:           adapter,
-		inbound:           make(common.PacketQueue, queueSize),
-		outbound:          outbound,
-		bufferPool:        common.DefaultBufferPool,
-		done:              make(chan struct{}),
-		mtu:               adapterCfg.MTU,
-		reconnectInterval: time.Duration(tunnelCfg.ReconnectInterval) * time.Second,
-		connError:         make(chan error, 1),
-		authenticator:     authenticator,
-		events:            make(chan *EventContext, 10),
-		mappedIPs:         &sync.Map{},
+		logger:        logger,
+		config:        tunnelCfg,
+		streams:       streams.New(),
+		adapter:       adapter,
+		bufferPool:    common.DefaultBufferPool,
+		adapterConfig: adapterConfig,
+		connError:     make(chan error, 1),
+		authenticator: authenticator,
+		events:        make(chan *EventContext, 10),
+		mappedIPs:     &sync.Map{},
+		mainWg:        &sync.WaitGroup{},
+		mgrWg:         &sync.WaitGroup{},
 	}
 	return cl, nil
 }
@@ -122,15 +109,16 @@ func (c *Client) WithBufferPool(bufferPool common.BufferPool) *Client {
 // Start initializes the client connection and starts all necessary goroutines
 // for handling traffic. The dialFunc parameter provides the connection to the server.
 func (c *Client) Start(ctx context.Context, dialFunc func(ctx context.Context) (transport.Conn, error)) error {
+	if !c.started.CompareAndSwap(false, true) {
+		return nil
+	}
+
 	select {
 	case <-ctx.Done():
+		c.started.Store(false)
 		return ctx.Err()
 	default:
 	}
-
-	c.conntrack = NewConntrack()
-
-	c.logger.Infof("Starting client with reconnect interval %d seconds", c.reconnectInterval/time.Second)
 
 	if c.dropLogger == nil {
 		c.dropLogger = common.NewDelayedCounterProcessor(func(c1, c2 *atomic.Uint64) {
@@ -139,97 +127,109 @@ func (c *Client) Start(ctx context.Context, dialFunc func(ctx context.Context) (
 		c.dropLogger.Start(ctx)
 	}
 
-	c.resetClosed()
-
-	go c.readFromAdapter(ctx)
-	go c.manageConnection(ctx, dialFunc)
+	c.mainWg.Go(func() {
+		c.manageConnection(ctx, dialFunc)
+		c.started.Store(false)
+	})
 
 	return nil
 }
 
 func (c *Client) manageConnection(ctx context.Context, dialFunc func(ctx context.Context) (transport.Conn, error)) {
-	for {
-		c.logger.Infof("Connecting to target...")
-		conn, err := dialFunc(ctx)
-		if err != nil {
-			c.logger.Errorf("Failed to connect to target: %v", err)
-			select {
-			case <-ctx.Done():
-				c.closeWithEvent(&EventContext{State: StateStopped})
-				c.logger.Infof("Context done, exiting")
-				return
-			case <-time.After(c.reconnectInterval):
-				c.signalEvent(&EventContext{State: StateConnectionFailed, Error: err})
-				c.logger.Error("Retrying connection...")
-				continue
-			}
-		}
+	c.logger.Infof("Connecting to %s", c.config.Name)
 
-		// Perform authentication if configured
-		if c.authenticator != nil {
-			c.logger.Infof("Authenticating connection to %s", conn.RemoteAddr())
-			if err := c.authenticator.Authenticate(ctx, conn); err != nil {
-				c.logger.Errorf("Failed to authenticate: %v", err)
-				c.signalEvent(&EventContext{State: StateConnectionFailed, Error: err})
-				conn.Close()
-				continue
-			}
-		}
+	ctx, cancel := context.WithCancel(ctx)
 
-		c.drainQueues()
-		c.conn = conn
+	c.conntrack = NewConntrack(ctx)
+	c.setupQueues()
 
-		go c.writeToAdapter(ctx)
-		go c.handleInbound(ctx)
-		go c.handleOutbound(ctx)
-
-		c.logger.Infof("Connected to %s", conn.RemoteAddr())
-		c.signalEvent(&EventContext{State: StateConnected, Conn: conn})
-
+	conn, err := dialFunc(ctx)
+	if err != nil {
+		c.logger.Errorf("Failed to connect to %s: %v", c.config.Name, err)
 		select {
-		case <-c.done:
-			c.logger.Infof("Client stopped")
-			return
 		case <-ctx.Done():
+			event := &EventContext{State: StateStopped}
+			c.cancelAndSignalEvent(cancel, event)
 			c.logger.Infof("Context done, exiting")
-			c.closeWithEvent(&EventContext{State: StateStopped, Conn: c.conn})
 			return
-		case err := <-c.connError:
-			c.logger.Errorf("Connection lost: %v", err)
-			c.closeWithEvent(&EventContext{State: StateDisconnected, Conn: c.conn, Error: err})
+		case <-time.After(time.Second * 5):
+			event := &EventContext{State: StateConnectionFailed, Error: err}
+			c.cancelAndSignalEvent(cancel, event)
 			return
 		}
 	}
+
+	// Perform authentication if configured
+	if c.authenticator != nil {
+		c.logger.Infof("Authenticating connection to %s", conn.RemoteAddr())
+		if err := c.authenticator.Authenticate(ctx, conn); err != nil {
+			c.logger.Errorf("Failed to authenticate: %v", err)
+			event := &EventContext{State: StateConnectionFailed, Error: err}
+			c.cancelAndSignalEvent(cancel, event)
+			return
+		}
+	}
+
+	c.conn = conn
+
+	c.resetClosed()
+
+	c.mgrWg.Go(func() { c.readFromAdapter(ctx) })
+	c.mgrWg.Go(func() { c.writeToAdapter(ctx) })
+	c.mgrWg.Go(func() { c.handleInbound(ctx, conn) })
+	c.mgrWg.Go(func() { c.handleOutbound(ctx, conn) })
+
+	c.logger.Infof("Connected to %s: %s", c.config.Name, conn.RemoteAddr())
+	c.signalEvent(&EventContext{State: StateConnected, Conn: conn})
+
+	select {
+	case <-ctx.Done():
+		c.logger.Infof("Context done for %s, exiting", c.config.Name)
+		event := &EventContext{State: StateStopped, Conn: c.conn, Error: ctx.Err()}
+		c.cancelAndSignalEvent(cancel, event)
+		//return
+	case err := <-c.connError:
+		c.logger.Errorf("Connection lost for %s: %v", c.config.Name, err)
+		event := &EventContext{State: StateDisconnected, Conn: c.conn, Error: err}
+		c.cancelAndSignalEvent(cancel, event)
+		//return
+	}
+
+	c.mgrWg.Wait()
 }
 
 func (c *Client) Name() string {
 	return c.config.Name
 }
 
-func (c *Client) WaitClose() {
-	<-c.done
+// Wait waits for the client tunnel to stop.
+func (c *Client) Wait() {
+	/*if !c.started.Load() {
+		return
+	}*/
+	c.mainWg.Wait()
 }
 
-// Close gracefully shuts down the client and all its goroutines.
-func (c *Client) Close() error {
-	return c.closeWithEvent(&EventContext{State: StateStopped, Conn: c.conn})
-}
-
-func (c *Client) closeWithEvent(event *EventContext) error {
-	if c.closed.CompareAndSwap(false, true) {
-		if event != nil {
-			c.signalEvent(event)
-		}
-		c.state.Store(int32(StateStopped))
-		c.streams.CloseAll()
-		if c.conn != nil {
-			c.conn.Close()
-			c.conn = nil
-		}
-		c.conntrack.Close()
-		close(c.done)
+// cancelAndSignalEvent signals the given event, then gracefully clears state and connections
+// for this client so it can be reused.
+func (c *Client) cancelAndSignalEvent(cancel context.CancelFunc, event *EventContext) {
+	if !c.closed.CompareAndSwap(false, true) {
+		return
 	}
-	return nil
+	cancel()
+	if event != nil {
+		c.signalEvent(event)
+	}
+	c.state.Store(int32(StateStopped))
+	c.streams.CloseAll()
+	if c.conn != nil {
+		_ = c.conn.Close()
+		//c.conn = nil
+	}
+	// c.conntrack.Close()
+	close(c.inbound)
+	c.outbound.Close()
+	c.drainQueues()
 }
 
 // Config returns the tunnel configuration.
@@ -269,23 +269,29 @@ func (c *Client) Events() <-chan *EventContext {
 }
 
 func (c *Client) drainQueues() {
-	c.drainQueue(c.inbound)
-	c.drainQueue(c.outbound.C)
+	queue.DrainQueue(c.inbound, func(pkt network.IPPacket) {
+		c.bufferPool.PutBuffer(pkt.Bytes())
+	})
+	queue.DrainQueue(c.outbound, func(pkt network.IPPacket) {
+		c.bufferPool.PutBuffer(pkt.Bytes())
+	})
 }
 
-func (c *Client) drainQueue(queue common.PacketQueue) {
-	for {
-		select {
-		case pkt := <-queue:
-			c.bufferPool.PutBuffer(pkt.Bytes())
-		default:
-			return
-		}
+func (c *Client) setupQueues() {
+	queueSize := c.adapterConfig.QueueSize
+	if queueSize <= 0 {
+		queueSize = config.DefaultQueueSize
 	}
+
+	c.outbound = queue.NewFIFO[network.IPPacket](queueSize)
+	if c.config.Wred.DropProbability > 0 {
+		c.outbound = c.outbound.WithWRED(c.config.Wred.WeightFactor, c.config.Wred.DropProbability, c.config.Wred.Threshold)
+		c.logger.Infof("WRED enabled with weight factor: %d, drop probability: %d%%, threshold avg queue len: %d%%", int(c.config.Wred.WeightFactor), int(c.config.Wred.DropProbability*100), int(c.config.Wred.Threshold*100))
+	}
+
+	c.inbound = make(common.PacketQueue, queueSize)
 }
 
 func (c *Client) resetClosed() {
-	if c.closed.CompareAndSwap(true, false) {
-		c.done = make(chan struct{})
-	}
+	c.closed.CompareAndSwap(true, false)
 }

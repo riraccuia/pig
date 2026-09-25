@@ -19,25 +19,26 @@ import (
 	"fmt"
 	"runtime"
 
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
 // openStreams handles incoming stream connections from the QUIC transport.
-func (c *Client) openStreams(ctx context.Context) {
+func (c *Client) openStreams(ctx context.Context, conn transport.Conn) {
 	streamCount := c.config.StreamCount
 	if streamCount <= 0 {
 		streamCount = runtime.NumCPU()
 	}
 
 	for i := 0; i < streamCount; i++ {
-		stream, err := c.conn.NewStream(ctx)
+		stream, err := conn.NewStream(ctx)
 		if err != nil {
 			c.logger.Errorf("failed to create stream: %v", err)
 			continue
 		}
 		stream.Flush()
 		c.streams.Add(stream)
-		go c.doStream(ctx, stream)
+		c.mgrWg.Go(func() { c.doStream(ctx, stream) })
 	}
 
 	if c.streams.Count() == 0 {
@@ -50,35 +51,24 @@ func (c *Client) openStreams(ctx context.Context) {
 }
 
 func (c *Client) doStream(ctx context.Context, stream transport.Stream) {
-	defer func() {
-		c.removeStream(stream)
-		if c.streams.Count() == 0 {
-			select {
-			case c.connError <- fmt.Errorf("all streams closed"):
-			default:
-			}
-			return
-		}
+	c.processInbound(ctx, stream)
+	//defer func() {
+	c.streams.Remove(stream)
+	if c.streams.Count() == 0 {
 		select {
-		case <-ctx.Done():
-			return
-		case <-c.done:
-			return
+		case c.connError <- fmt.Errorf("all streams closed"):
 		default:
 		}
-		conn := c.conn
-		if conn == nil {
-			return
-		}
-		go c.reconnectStream(ctx, conn)
-		// stream.Close()
-	}()
-	c.processInbound(stream)
-}
+		return
+	}
 
-// removeStream removes a stream from the stream manager.
-func (c *Client) removeStream(stream transport.Stream) {
-	c.streams.Remove(stream)
+	if common.IsContextDone(ctx) {
+		return
+	}
+
+	c.mgrWg.Go(func() { c.reconnectStream(ctx, c.conn) })
+	// // stream.Close()
+	//}()
 }
 
 func (c *Client) reconnectStream(ctx context.Context, conn transport.Conn) {
@@ -102,5 +92,5 @@ func (c *Client) reconnectStream(ctx context.Context, conn transport.Conn) {
 	}
 
 	c.streams.Add(stream)
-	go c.doStream(ctx, stream)
+	c.doStream(ctx, stream)
 }

@@ -50,8 +50,8 @@ Nerd options:
  -qs  Size of the packet queues used by tunnels.
 
 WRED options:
- -wf Weight factor for WRED, lower values mean more weight to recent packets. Defaults to 5.
- -wd Drop probability for WRED. Accepts decimals between 0 and 1. Defaults to 0.25.
+ -wf Weight factor for WRED, lower values mean more weight to recent packets. Defaults to 9.
+ -wd Drop probability for WRED. Accepts decimals between 0 and 1. Defaults to 0.1.
  -wt Threshold for WRED as a fraction of the queue length. Accepts decimals between 0 and 1. Defaults to
-     0.3.
+     0.5.
 ```

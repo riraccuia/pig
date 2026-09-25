@@ -17,25 +17,30 @@ package server
 import (
 	"context"
 	"net"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/queue"
-	"github.com/riraccuia/pig/pkg/queue/wred"
 	"github.com/riraccuia/pig/pkg/streams"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
 // ClientTunnel represents a client connection.
 type ClientTunnel struct {
+	parent              *Server
+	logger              common.Logger
 	conn                transport.Conn
 	streams             *streams.StreamManager
 	sourceIP, sourceIP6 net.IP
-	outbound            *queue.ChanQueue
+	outbound            *queue.FIFO[network.IPPacket]
 	dropLogger          *common.DelayedCounterProcessor
 	connError           chan error
 	cancel              context.CancelFunc
+	wg                  *sync.WaitGroup
+	closed              atomic.Bool
 }
 
 func (s *Server) performAuthentication(ctx context.Context, conn transport.Conn) (err error) {
@@ -66,75 +71,75 @@ func (s *Server) handleNewClient(ctx context.Context, conn transport.Conn) {
 		s.logger.Errorf("Failed to allocate IP6 for client %s: %v", conn.RemoteAddr(), err)
 	}
 
-	clientCtx, cancel := context.WithCancel(ctx)
+	client := NewClientTunnel(ctx, s)
+	go client.Start(ctx, conn, sourceIP, sourceIP6)
+}
 
-	outbound := queue.NewChanQueue(s.adapterCfg.QueueSize)
-	if s.config.Wred.DropProbability > 0 {
-		wred, err := wred.NewWRED(s.config.Wred.WeightFactor)
-		if err != nil {
-			s.logger.Errorf("failed to create WRED: %w", err)
-		}
-		s.logger.Infof("WRED enabled for client %s with weight factor: %d, drop probability: %d%%, threshold avg queue len: %d%%",
+func NewClientTunnel(ctx context.Context, parent *Server) *ClientTunnel {
+	outbound := queue.NewFIFO[network.IPPacket](parent.adapterCfg.QueueSize)
+	if parent.config.Wred.DropProbability > 0 {
+		outbound = outbound.WithWRED(parent.config.Wred.WeightFactor, parent.config.Wred.DropProbability, parent.config.Wred.Threshold)
+		/*parent.logger.Infof("WRED enabled for client %s with weight factor: %d, drop probability: %d%%, threshold avg queue len: %d%%",
 			conn.RemoteAddr(),
-			int(s.config.Wred.WeightFactor),
-			int(s.config.Wred.DropProbability*100),
-			int(s.config.Wred.Threshold*100),
-		)
-		outbound = outbound.WithWRED(wred, s.config.Wred.DropProbability, s.config.Wred.Threshold)
+			int(parent.config.Wred.WeightFactor),
+			int(parent.config.Wred.DropProbability*100),
+			int(parent.config.Wred.Threshold*100),
+		)*/
 	}
 
 	client := &ClientTunnel{
-		conn:      conn,
+		parent:    parent,
+		logger:    parent.logger, // this will be a child logger for the client, e.g. with a prefix
 		streams:   streams.New(),
-		sourceIP:  sourceIP,
-		sourceIP6: sourceIP6,
 		outbound:  outbound,
-		dropLogger: common.NewDelayedCounterProcessor(func(c1, c2 *atomic.Uint64) {
-			s.logger.Infof("Client %s dropped %d packets (%d bytes)", conn.RemoteAddr(), c1.Load(), c2.Load())
-		}).WithBackoff(time.Second, time.Second*15),
 		connError: make(chan error, 1),
-		cancel:    cancel,
+		wg:        &sync.WaitGroup{},
+	}
+	return client
+}
+
+func (client *ClientTunnel) Start(ctx context.Context, conn transport.Conn, sourceIP, sourceIP6 net.IP) {
+	ctx, cancel := context.WithCancel(ctx)
+
+	client.cancel = cancel
+	client.conn = conn
+	client.sourceIP = sourceIP
+	client.sourceIP6 = sourceIP6
+
+	if client.dropLogger == nil {
+		client.dropLogger = common.NewDelayedCounterProcessor(func(c1, c2 *atomic.Uint64) {
+			client.logger.Infof("Client %s dropped %d packets (%d bytes)", conn.RemoteAddr(), c1.Load(), c2.Load())
+		}).WithBackoff(time.Second, time.Second*15)
+		client.dropLogger.Start(ctx)
 	}
 
-	client.dropLogger.Start(clientCtx)
+	client.logger.Infof("New client connected from %s, allocated IP: %s, allocated IP6: %s", conn.RemoteAddr(), sourceIP.String(), sourceIP6.String())
+
+	switch conn.IsStreamed() {
+	case true:
+		client.wg.Go(func() { client.acceptStreams(ctx) })
+	case false:
+		client.wg.Go(func() { client.handleInbound(ctx, conn) })
+	}
+
+	client.wg.Go(func() { client.handleOutbound(ctx) })
 
 	// Store client in sync.Map using sourceIP as key
-	s.clients.Store(client.sourceIP.String(), client)
-
-	s.logger.Infof("New client connected from %s, allocated IP: %s, allocated IP6: %s", client.conn.RemoteAddr(), client.sourceIP.String(), client.sourceIP6.String())
-
-	/* Execute start script
-	s.scriptExecutor.ExecuteStartScript(script.ScriptContext{
-		TunnelName:  s.adapter.Name(),
-		TunnelIndex: s.adapter.Index(),
-		RemoteAddr:  conn.RemoteAddr().String(),
-		NatAddr:     sourceIP.String(),
-		TunnelProto: string(s.config.Proto),
-	})*/
-
-	go s.manageClient(clientCtx, client)
-
-	defer s.handleOutbound(clientCtx, client)
-
-	if !client.conn.IsStreamed() {
-		go s.handleInbound(client, client.conn)
-		return
+	client.parent.clients.Store(sourceIP.String(), client)
+	if sourceIP6 != nil {
+		client.parent.clients.Store(sourceIP6.String(), client)
 	}
 
-	go s.acceptStreams(clientCtx, client)
-}
-
-func (s *Server) manageClient(ctx context.Context, client *ClientTunnel) {
 	select {
 	case <-ctx.Done():
-	case <-s.done:
+		client.logger.Infof("disconnecting client %s (context done)", conn.RemoteAddr())
 	case err := <-client.connError:
-		s.logger.Errorf("client %s lost: %v", client.conn.RemoteAddr(), err)
+		client.logger.Errorf("client %s connection error: %v", conn.RemoteAddr(), err)
 	}
-	s.closeClient(client)
+	client.Close()
 }
 
-func (s *Server) closeClient(client *ClientTunnel) {
+func (client *ClientTunnel) Close() {
 	// Execute stop script
 	/*s.scriptExecutor.ExecuteStopScript(script.ScriptContext{
 		TunnelName:  s.adapter.Name(),
@@ -144,10 +149,25 @@ func (s *Server) closeClient(client *ClientTunnel) {
 		TunnelProto: string(s.config.Proto),
 	})*/
 
+	if !client.closed.CompareAndSwap(false, true) {
+		return
+	}
+
 	client.cancel()
 	client.conn.Close()
+	client.outbound.Close()
 	client.streams.CloseAll()
-	s.ReleaseIP(client.sourceIP)
-	s.ReleaseIP6(client.sourceIP6)
-	s.clients.Delete(client.sourceIP.String())
+
+	queue.DrainQueue(client.outbound, func(pkt network.IPPacket) {
+		client.parent.bufferPool.Put(pkt.Bytes())
+	})
+
+	client.parent.ReleaseIP(client.sourceIP)
+	client.parent.ReleaseIP6(client.sourceIP6)
+	client.parent.clients.Delete(client.sourceIP.String())
+	client.parent.clients.Delete(client.sourceIP6.String())
+
+	client.wg.Wait()
+
+	client.logger.Infof("client %s closed", client.conn.RemoteAddr())
 }

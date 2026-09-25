@@ -20,6 +20,7 @@ import (
 
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/network"
+	"github.com/riraccuia/pig/pkg/queue"
 )
 
 func (c *Client) readFromAdapter(ctx context.Context) {
@@ -29,45 +30,42 @@ func (c *Client) readFromAdapter(ctx context.Context) {
 		return
 	}
 	for {
-		select {
-		case <-ctx.Done():
+		if common.IsContextDone(ctx) {
 			return
-		case <-c.done:
-			return
-		default:
-			buf := c.bufferPool.GetBuffer(c.mtu)
-			_, err := c.adapter.Read(buf[:])
-			if err != nil {
-				c.bufferPool.PutBuffer(buf)
-				c.logger.Errorf("failed to read from adapter: %v", err)
-				select {
-				case c.connError <- fmt.Errorf("failed to read from adapter: %w", err):
-				default:
-				}
-				return
-			}
+		}
 
-			var pkt network.IPPacket
-
-			switch network.IPv4Packet(buf[:]).Version() {
-			case 4:
-				pkt = network.IPv4Packet(buf[:])
-			case 6:
-				pkt = network.IPv6Packet(buf[:])
-			}
-
-			if c.outbound.IsDrop() {
-				c.dropLogger.Incr(1, uint64(pkt.TotalLength()))
-				c.bufferPool.PutBuffer(buf)
-				continue
-			}
-
+		buf := c.bufferPool.GetBuffer(c.adapterConfig.MTU)
+		_, err := c.adapter.Read(buf[:])
+		if err != nil {
+			c.bufferPool.PutBuffer(buf)
+			c.logger.Errorf("failed to read from adapter: %v", err)
 			select {
-			case c.outbound.C <- pkt:
+			case c.connError <- fmt.Errorf("failed to read from adapter: %w", err):
 			default:
-				c.logger.Errorf("client outbound channel full, dropping packet")
-				c.bufferPool.PutBuffer(buf)
 			}
+			return
+		}
+
+		var pkt network.IPPacket
+
+		switch network.IPv4Packet(buf[:]).Version() {
+		case 4:
+			pkt = network.IPv4Packet(buf[:])
+		case 6:
+			pkt = network.IPv6Packet(buf[:])
+		}
+
+		err = c.outbound.Push(pkt)
+
+		if err == queue.ErrWREDDropped || err == queue.ErrDropped {
+			c.dropLogger.Incr(1, uint64(pkt.TotalLength()))
+			c.bufferPool.PutBuffer(buf)
+			continue
+		}
+
+		if err != nil {
+			c.bufferPool.PutBuffer(buf)
+			continue
 		}
 	}
 }
@@ -81,8 +79,6 @@ func (c *Client) writeToAdapter(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
-		case <-c.done:
 			return
 		case pkt, ok := <-c.inbound:
 			if !ok {
@@ -116,19 +112,16 @@ func (c *Client) readFromAdapterOutQueue(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-c.done:
-			return
 		case pkt := <-outQueue:
-			if c.outbound.IsDrop() {
+			err = c.outbound.Push(pkt)
+			if err == queue.ErrWREDDropped || err == queue.ErrDropped {
 				c.dropLogger.Incr(1, uint64(pkt.TotalLength()))
 				c.bufferPool.PutBuffer(pkt.Bytes())
 				continue
 			}
-
-			select {
-			case c.outbound.C <- pkt:
-			default:
+			if err != nil {
 				c.bufferPool.PutBuffer(pkt.Bytes())
+				continue
 			}
 		}
 	}
@@ -147,13 +140,10 @@ func (c *Client) writeToAdapterInQueue(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-c.done:
-			return
-		case pkt := <-c.inbound:
-			/*if pkt.Version() != 4 {
-				c.bufferPool.PutBuffer(pkt.Bytes())
-				continue
-			}*/
+		case pkt, ok := <-c.inbound:
+			if !ok {
+				return
+			}
 			select {
 			case inQueue <- pkt:
 			default:

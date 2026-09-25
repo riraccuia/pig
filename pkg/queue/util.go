@@ -12,33 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package queue
 
 import (
-	"context"
+	"github.com/riraccuia/pig/pkg/common"
 )
 
-func (s *Server) processOutbound(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case pkt := <-s.outbound:
-			_client, ok := s.clients.Load(pkt.DestinationIP().String())
-			if !ok {
-				freeBuf := true
-				if freeBuf {
-					s.bufferPool.Put(pkt.Bytes())
-				}
-				continue
-			}
-			client := _client.(*ClientTunnel)
+func zero[T any]() T {
+	var z T
+	return z
+}
 
+func DrainQueue[T any](q any, fn func(val T)) {
+	if queue, ok := q.(common.PacketQueue); ok {
+		for {
 			select {
-			case client.outbound.C <- pkt:
+			case pkt, ok := <-queue:
+				if !ok {
+					return
+				}
+				t, ok := pkt.(T)
+				if !ok {
+					return
+				}
+				fn(t)
 			default:
-				s.bufferPool.Put(pkt.Bytes())
+				return
 			}
+		}
+	}
+	if fifo, ok := q.(*FIFO[T]); ok {
+		pkts, empty, _ := fifo.TryPopAll()
+		if empty {
+			return
+		}
+		for _, pkt := range pkts {
+			fn(pkt)
 		}
 	}
 }

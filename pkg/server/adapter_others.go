@@ -19,16 +19,17 @@ package server
 import (
 	"context"
 	"io"
-	"runtime"
 
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/network"
+	"github.com/riraccuia/pig/pkg/queue"
 )
 
-func (s *Server) readFromAdapter() {
-	go s.processOutbound(context.Background())
-	runtime.Gosched()
+func (s *Server) readFromAdapter(ctx context.Context) {
 	for {
+		if common.IsContextDone(ctx) {
+			return
+		}
 		buffer := s.bufferPool.Get().([]byte)
 		n, err := s.adapter.Read(buffer)
 		if err != nil {
@@ -56,8 +57,8 @@ func (s *Server) readFromAdapter() {
 
 func (s *Server) processInbound(ctx context.Context) {
 	pq := make(common.PacketQueue, s.adapterCfg.QueueSize)
-	go s.processInboundQueue(ctx, s.adapter, pq)
 	s.inbound = append(s.inbound, pq)
+	s.processInboundQueue(ctx, s.adapter, pq)
 }
 
 func (s *Server) getInboundPktQueue() common.PacketQueue {
@@ -79,6 +80,36 @@ func (s *Server) processInboundQueue(ctx context.Context, q io.Writer, pq common
 				}
 			} else {
 				s.bufferPool.Put(pkt.Bytes())
+			}
+		}
+	}
+}
+
+func (s *Server) processOutbound(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case pkt, ok := <-s.outbound:
+			if !ok {
+				return
+			}
+			_client, ok := s.clients.Load(pkt.DestinationIP().String())
+			if !ok {
+				s.bufferPool.Put(pkt.Bytes())
+				continue
+			}
+			client := _client.(*ClientTunnel)
+
+			err := client.outbound.Push(pkt)
+			if err == queue.ErrWREDDropped || err == queue.ErrDropped {
+				client.dropLogger.Incr(1, uint64(pkt.TotalLength()))
+				s.bufferPool.Put(pkt.Bytes())
+				continue
+			}
+			if err != nil {
+				s.bufferPool.Put(pkt.Bytes())
+				continue
 			}
 		}
 	}

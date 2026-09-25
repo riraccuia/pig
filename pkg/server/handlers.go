@@ -18,53 +18,27 @@ import (
 	"context"
 	"io"
 
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/network"
-	"github.com/riraccuia/pig/pkg/transport"
 )
 
-func (s *Server) acceptClients(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-s.done:
-			return
-		default:
-			_co, err := s.listener.Accept()
-			if err != nil {
-				return
-			}
-			var (
-				conn transport.Conn
-				ok   bool
-			)
-			if conn, ok = _co.(transport.Conn); !ok {
-				s.logger.Errorf("accepted connection is not a transport.Conn: %v", _co)
-				_co.Close()
-				continue
-			}
-			if err := s.performAuthentication(ctx, conn); err != nil {
-				conn.Close()
-				continue
-			}
-			go s.handleNewClient(ctx, conn)
-		}
-	}
-}
-
-func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCloser) {
+func (client *ClientTunnel) handleInbound(ctx context.Context, connOrStream io.ReadWriteCloser) {
 	// assign a queue to the client
-	inbound := s.getInboundPktQueue()
+	inbound := client.parent.getInboundPktQueue()
 
 	const readBufferSize = 64 * 1024 // 64KB buffer
 	buffer := make([]byte, readBufferSize)
 	unprocessed := buffer[:0]
 
 	for {
+		if common.IsContextDone(ctx) {
+			return
+		}
+
 		// Read more data
 		n, err := connOrStream.Read(buffer[len(unprocessed):])
 		if err != nil {
-			s.logger.Errorf("error reading from client (%s) conn or stream: %v", client.conn.RemoteAddr(), err)
+			client.logger.Errorf("error reading from client (%s) conn or stream: %v", client.conn.RemoteAddr(), err)
 			if client.conn.IsStreamed() {
 				// streams are reconnected by the client
 				return
@@ -93,8 +67,8 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 				break // Partial packet, wait for more data
 			}
 
-			if totalLen > s.adapterCfg.MTU {
-				s.logger.Debugf("IPv=%d,len=%d,proto=%d | %d%s->%s:%d | discarded, too long",
+			if totalLen > client.parent.adapterCfg.MTU {
+				client.logger.Debugf("IPv=%d,len=%d,proto=%d | %d%s->%s:%d | discarded, too long",
 					prePkt.Version(), totalLen, prePkt.Protocol(),
 					prePkt.SourcePort(), prePkt.SourceIP(),
 					prePkt.DestinationIP(), prePkt.DestinationPort(),
@@ -105,7 +79,7 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 			}
 
 			// Get new packet from pool and copy data
-			buf := s.bufferPool.Get().([]byte)
+			buf := client.parent.bufferPool.Get().([]byte)
 			copy(buf[:totalLen], unprocessed[processed:processed+totalLen])
 
 			var pkt network.IPPacket
@@ -127,7 +101,7 @@ func (s *Server) handleInbound(client *ClientTunnel, connOrStream io.ReadWriteCl
 			select {
 			case inbound <- pkt:
 			default:
-				s.bufferPool.Put(buf)
+				client.parent.bufferPool.Put(buf)
 			}
 
 			processed += totalLen

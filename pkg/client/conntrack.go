@@ -223,11 +223,11 @@ func (e *ConnTrackEntry) UpdateExpireAt(protocolData protocolData) {
 	e.ExpireAt.Store(&expireAt)
 }
 
-func NewConntrack() *Conntrack {
+func NewConntrack(ctx context.Context) *Conntrack {
 	ct := &Conntrack{
 		table: make(map[uint64]*ConnTrackEntry),
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	ct.cancel = cancel
 	ct.lifeCycleHandler(ctx)
 	return ct

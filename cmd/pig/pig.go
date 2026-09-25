@@ -23,7 +23,6 @@ import (
 )
 
 func pigFromCliFlags(mo Mode) {
-	//setupPprof(logger)
 	startPig(initPig(mo))
 }
 
@@ -32,6 +31,7 @@ func pigFromConfigFileFlag() {
 }
 
 func startPig(cfg *config.Config, logger *log.Logger) {
+	//enablePprof()
 	var (
 		ctx  = context.Background()
 		ctrl *controller.Controller
