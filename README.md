@@ -1,10 +1,12 @@
 ![pig gopher](assets/pig-gopher-shovel.png)
 
+[![Static Badge](https://img.shields.io/badge/Docs-008CFF?logo=github&style=for-the-badge)](docs/index.md) [![Static Badge](https://img.shields.io/badge/CLI%20Reference-008CFF?logo=github&style=for-the-badge)](docs/reference/cli/pig.md)
+
 # pig - packet insertion gear
 
 **pig** is a single binary that connects two computers directly and securely to each other. Pigs can also be chained to create mesh networks.
 
-Using NAT traversal techniques, it finds a suitable connection path automatically in a variety of network environments, even though firewalls/routers may be in the way. In other words you shouldn't need to setup your network/s at all. In most cases.
+Using NAT traversal techniques, it finds a suitable connection path automatically even though firewalls/routers may be in the way. In other words you shouldn't need to setup your network/s at all. In most cases.
 
 ## Why
 
@@ -18,31 +20,31 @@ It is still a bit rough around the edges. Feel free to contribute and bring fres
 
 **Listen/connect tunnel.** Including traditional VPN-style (simple mode) connectivity.
 
-**Pigs can be chained.** A pig can simultaneously connect to multiple remote targets and listen for incoming connections at the same time. Using this feature you can create mesh networks.
+**Pigs can be chained.** A pig can simultaneously connect to multiple remote targets and listen for incoming connections. Using this feature you can create mesh networks.
 
 **Direct path discovery using NAT traversal.** STUN (for NAT discovery) and MQTT (for signaling) servers are required in this mode. While these dependencies seem daunting at first, these are very popular technologies. One can find plenty of public/free servers of both kinds available out there.
 
 **IPv4 and IPv6 support.**
 
-**Swappable transport protocols.** Choose from [available ones](docs/cli-help/protos.md) such as QUIC, TLS, WebSocket, DTLS, and the experimental TLS-in-ICMP. Or let NAT traversal pick one automatically. There are more planned.
+**Swappable transport protocols.** Choose from [available ones](docs/reference/cli/protos.md) such as QUIC, TLS, WebSocket, DTLS, and the experimental TLS-in-ICMP. Or let NAT traversal pick one automatically. There are more planned.
 
 **Routing table management.** Pig can manage the routing table on the local machine to ensure that traffic is routed correctly through the tunnel.
 
 **Authentication.** JWT, mTLS, and OIDC, used independently or combined.
 
-**Event driven script execution.** For extra setup or cleanup. Tunnel events and related information is passed to the called scripts via environment variables (see [`pig -docs env`](docs/cli-help/env.md)).
+**Event driven script execution.** For extra setup or cleanup. Tunnel events and related information is passed to the called scripts via environment variables (see [`pig -docs env`](docs/reference/cli/env.md)).
 
 **Multi-platform.** Linux, macOS, and Windows. Would love to add mobile support, too.
 
-**STUN mode.** Pig has a [`-stun`](docs/cli-help/stun.md) subcommand to query a remote server or become one on the fly.
+**STUN mode.** Pig has a [`-stun`](docs/reference/cli/stun.md) subcommand to query a remote server or become one on the fly.
 
 ## Getting started
 
 - Download the [latest release](https://github.com/riraccuia/pig/releases) or build from source using the [makefile](Makefile).
-- Read the [user gude](docs/guide.md), check out the [examples](examples/) and [Docker](docs/docker.md) files.
-- Run [`pig -h`](docs/cli-help/main.md) to see the available options.
-- Use the [`-to-cfg`](docs/cli-help/connect.md) option to quickly generate a baseline config for advanced setups.
-- See the [config file reference](docs/config.md).
+- Read the [user guide](docs/index.md), check out the [examples](examples/) and [Docker](docs/docker/docker.md) files.
+- Run [`pig -h`](docs/reference/cli/pig.md) to see the available options.
+- Use the [`-to-cfg`](docs/reference/cli/connect.md) option to quickly generate baseline configs for advanced setups.
+- See the [config file reference](docs/reference/config/config.md).
 
 
 

@@ -7,7 +7,7 @@ Two external services are involved:
 - **MQTT** for ICE signaling. Peers exchange candidates and related ICE messages through an MQTT broker. They do not need a direct connection to each other for that exchange.
 
 Enable ICE on the tunnel (`ice.enabled`), and set a STUN server and MQTT broker.
-Global defaults, per-tunnel overrides, flags, or env, see the [config reference](config.md) and/or run `pig docs env`).
+Global defaults, per-tunnel overrides, flags, or env, see the [config reference](../reference/config/config.md) and/or run `pig docs env`).
 
 For more information on ICE, start by reading the [Wikipedia article](https://en.wikipedia.org/wiki/Interactive_Connectivity_Establishment).
 

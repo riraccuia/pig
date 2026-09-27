@@ -12,7 +12,7 @@ It checks the signature and expiration but does not require any particular claim
 
 ## What you need
 
-A key pair and a signed token. To create them, use [signtool](../../tools/signtool/README.md).
+A key pair and a signed token. To create them, use [signtool](../tools/signtool.md).
 
 Set `-A jwt` on both sides.
 Give the listen node the public key.
@@ -60,7 +60,7 @@ JWT settings are in the tunnel `auth` block.
 
 Listen nodes need `public_key_source`. Connect nodes need `token`, or leave it empty and set `PIG_TOKEN`.
 
-See the [config reference](../config.md) for the rest of the file. CLI flags: [listen](../cli-help/listen.md), [connect](../cli-help/connect.md).
+See the [config reference](../reference/config/config.md) for the rest of the file. CLI flags: [listen](../reference/cli/listen.md), [connect](../reference/cli/connect.md).
 
 ## NAT traversal
 

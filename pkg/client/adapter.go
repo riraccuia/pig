@@ -112,7 +112,10 @@ func (c *Client) readFromAdapterOutQueue(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case pkt := <-outQueue:
+		case pkt, ok := <-outQueue:
+			if !ok {
+				return
+			}
 			err = c.outbound.Push(pkt)
 			if err == queue.ErrWREDDropped || err == queue.ErrDropped {
 				c.dropLogger.Incr(1, uint64(pkt.TotalLength()))
