@@ -2,11 +2,13 @@
 
 [![Static Badge](https://img.shields.io/badge/Docs-008CFF?logo=github&style=for-the-badge)](docs/index.md) [![Static Badge](https://img.shields.io/badge/CLI%20Reference-008CFF?logo=github&style=for-the-badge)](docs/reference/cli/pig.md)
 
-# pig - packet insertion gear
+# Packet Insertion Gear (pig)
 
-**pig** is a single binary that connects two computers directly and securely to each other. Pigs can also be chained to create mesh networks.
+**pig** is a single binary that connects computers directly and securely to each other. Pigs can also be chained to create mesh networks.
 
 Using NAT traversal techniques, it finds a suitable connection path automatically even though firewalls/routers may be in the way. In other words you shouldn't need to setup your network/s at all. In most cases.
+
+Works on Linux, macOS, and Windows. Would love to add mobile support, too.
 
 ## Why
 
@@ -18,25 +20,32 @@ It is still a bit rough around the edges. Feel free to contribute and bring fres
 
 ## What you can do
 
-**Listen/connect tunnel.** Including traditional VPN-style (simple mode) connectivity.
+**Listen/connect tunnel** 
+Including traditional VPN-style (simple mode) connectivity.
 
-**Pigs can be chained.** A pig can simultaneously connect to multiple remote targets and listen for incoming connections. Using this feature you can create mesh networks.
+**Pigs can be chained**
+A pig can simultaneously connect to multiple remote targets and listen for incoming connections. Using this feature you can create mesh networks.
 
-**Direct path discovery using NAT traversal.** STUN (for NAT discovery) and MQTT (for signaling) servers are required in this mode. While these dependencies seem daunting at first, these are very popular technologies. One can find plenty of public/free servers of both kinds available out there.
+**No fiddling with your firewall** 
+Pig implements NAT traversal using STUN (for NAT discovery) and MQTT (for signaling). While these dependencies seem daunting at first, they are both very popular technologies. One can find plenty of public/free servers of both kinds available out there. You don't need to run your own.
 
-**IPv4 and IPv6 support.**
+**IPv4 and IPv6 support**
+IPv6 datagrams are fully supported and can be routed through pig tunnels.
 
-**Swappable transport protocols.** Choose from [available ones](docs/reference/cli/protos.md) such as QUIC, TLS, WebSocket, DTLS, and the experimental TLS-in-ICMP. Or let NAT traversal pick one automatically. There are more planned.
+**Swappable transport protocols** 
+Choose from [available ones](docs/reference/cli/protos.md) such as QUIC, TLS, WebSocket, DTLS, and the experimental TLS-in-ICMP. Or let NAT traversal pick one automatically. There are more planned.
 
-**Routing table management.** Pig can manage the routing table on the local machine to ensure that traffic is routed correctly through the tunnel.
+**Routing** 
+Pig can manage the routing table on the local machine to ensure that traffic is routed correctly through the tunnel.
 
-**Authentication.** JWT, mTLS, and OIDC, used independently or combined.
+**Authentication** 
+mTLS, JWT, OAuth and OIDC, used independently or combined.
 
-**Event driven script execution.** For extra setup or cleanup. Tunnel events and related information is passed to the called scripts via environment variables (see [`pig -docs env`](docs/reference/cli/env.md)).
+**Event driven script execution** 
+For extra setup or cleanup. Tunnel events and related information is passed to the called scripts via environment variables (see [`pig -docs env`](docs/reference/cli/env.md)).
 
-**Multi-platform.** Linux, macOS, and Windows. Would love to add mobile support, too.
-
-**STUN mode.** Pig has a [`-stun`](docs/reference/cli/stun.md) subcommand to query a remote server or become one on the fly.
+**STUN mode** 
+Query or become a STUN server on the fly using the [`-stun`](docs/reference/cli/stun.md) subcommand.
 
 ## Getting started
 
