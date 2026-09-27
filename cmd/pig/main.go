@@ -16,6 +16,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -26,7 +27,10 @@ import (
 	"github.com/riraccuia/pig/pkg/log"
 )
 
-var binaryName = filepath.Base(os.Args[0])
+var (
+	Version    = "v0.0.0-localdev"
+	binaryName = filepath.Base(os.Args[0])
+)
 
 func main() {
 	handleSubCommands()
@@ -42,6 +46,9 @@ func handleSubCommands() {
 	switch os.Args[1] {
 	case "-h", "--help":
 		printMainUsage()
+		os.Exit(0)
+	case "-" + FLAG_MAIN_VERSION:
+		_, _ = fmt.Fprintln(os.Stdout, Version)
 		os.Exit(0)
 	case "-" + FLAG_MAIN_CONFIG:
 		pigFromConfigFileFlag()

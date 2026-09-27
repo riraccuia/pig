@@ -77,8 +77,8 @@ func (s *Server) handleNewClient(ctx context.Context, conn transport.Conn) {
 
 func NewClientTunnel(ctx context.Context, parent *Server) *ClientTunnel {
 	outbound := queue.NewFIFO[network.IPPacket](parent.adapterCfg.QueueSize)
-	if parent.config.Wred.DropProbability > 0 {
-		outbound = outbound.WithWRED(parent.config.Wred.WeightFactor, parent.config.Wred.DropProbability, parent.config.Wred.Threshold)
+	if parent.config.Wred.MaxDropProbability > 0 {
+		outbound = outbound.WithWRED(parent.config.Wred.WeightFactor, parent.config.Wred.MaxDropProbability, parent.config.Wred.MinThreshold, parent.config.Wred.MaxThreshold)
 		/*parent.logger.Infof("WRED enabled for client %s with weight factor: %d, drop probability: %d%%, threshold avg queue len: %d%%",
 			conn.RemoteAddr(),
 			int(parent.config.Wred.WeightFactor),

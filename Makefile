@@ -14,6 +14,7 @@ SIGNTOOL_BINNAME ?= signtool
 
 # Directories
 PIG_DIR = cmd/pig
+CONFIG_DIR = pkg/config
 SIGNTOOL_DIR = tools/signtool
 DOCS_DIR = docs
 CLIHELP_DIR = $(DOCS_DIR)/reference/cli
@@ -28,26 +29,27 @@ CLIHELP_DIR = $(DOCS_DIR)/reference/cli
 all: pig signtool
 
 cli-reference:
+	@$(GO) generate ./$(CONFIG_DIR)
 	@set -e; export COLUMNS=110; \
 	$(GO) run ./$(PIG_DIR) -docs config -md > $(DOCS_DIR)/reference/config/config.md; \
 	{ echo '<pre><code>'; $(GO) run ./$(PIG_DIR) -h; echo '</code></pre>'; } | \
-		sed -e 's/ -c / \<a href="connect.md"\>-c\<\/a\>/g' \
-		    -e 's/ -l / \<a href="listen.md"\>-l\<\/a\>/g' \
-		    -e 's/ -stun / \<a href="stun.md"\>-stun\<\/a\>/g' \
-		    -e 's/ -config / \<a href="config.md"\>-config\<\/a\>/g' \
-		    -e 's/ -docs / \<a href="docs.md"\>-docs\<\/a\>/g' \
+		sed -e 's/ -c / \<a href="connect.md"\>-c \<\/a\>/g' \
+		    -e 's/ -l / \<a href="listen.md"\>-l \<\/a\>/g' \
+		    -e 's/ -stun / \<a href="stun.md"\>-stun \<\/a\>/g' \
+		    -e 's/ -config / \<a href="config.md"\>-config \<\/a\>/g' \
+		    -e 's/ -docs / \<a href="docs.md"\>-docs \<\/a\>/g' \
 		> $(CLIHELP_DIR)/pig.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -c -h; echo '```'; } > $(CLIHELP_DIR)/connect.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -l -h; echo '```'; } > $(CLIHELP_DIR)/listen.md; \
 	{ echo '<pre><code>'; $(GO) run ./$(PIG_DIR) -config invalid -h; echo '</code></pre>'; } | \
-		sed -e 's/ -config / \<a href="config-ref.md"\>-config\<\/a\>/g' \
+		sed -e 's/ -config / \<a href="config-ref.md"\>-config \<\/a\>/g' \
 		> $(CLIHELP_DIR)/config.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -docs config; echo '```'; } > $(CLIHELP_DIR)/config-ref.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -stun -h; echo '```'; } > $(CLIHELP_DIR)/stun.md; \
 	{ echo '<pre><code>'; $(GO) run ./$(PIG_DIR) -docs -h 2>/dev/null; echo '</code></pre>'; } | \
-		sed -e 's/ config / \<a href="..\/config.md"\>config\<\/a\>/g' \
-		    -e 's/ env / \<a href="env.md"\>env\<\/a\>/g' \
-		    -e 's/ protos / \<a href="protos.md"\>protos\<\/a\>/g' \
+		sed -e 's/ config / \<a href="..\/config\/config.md"\>config \<\/a\>/g' \
+		    -e 's/ env / \<a href="env.md"\>env \<\/a\>/g' \
+		    -e 's/ protos / \<a href="protos.md"\>protos \<\/a\>/g' \
 		> $(CLIHELP_DIR)/docs.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -docs env; echo '```'; } > $(CLIHELP_DIR)/env.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -docs protos; echo '```'; } > $(CLIHELP_DIR)/protos.md

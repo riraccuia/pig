@@ -284,9 +284,13 @@ func (c *Client) setupQueues() {
 	}
 
 	c.outbound = queue.NewFIFO[network.IPPacket](queueSize)
-	if c.config.Wred.DropProbability > 0 {
-		c.outbound = c.outbound.WithWRED(c.config.Wred.WeightFactor, c.config.Wred.DropProbability, c.config.Wred.Threshold)
-		c.logger.Infof("WRED enabled with weight factor: %d, drop probability: %d%%, threshold avg queue len: %d%%", int(c.config.Wred.WeightFactor), int(c.config.Wred.DropProbability*100), int(c.config.Wred.Threshold*100))
+	if c.config.Wred.MaxDropProbability > 0 {
+		c.outbound = c.outbound.WithWRED(c.config.Wred.WeightFactor, c.config.Wred.MaxDropProbability, c.config.Wred.MinThreshold, c.config.Wred.MaxThreshold)
+		c.logger.Infof("WRED on | Weight-Factor: %d | Max-Drop-Probability: %d%% | Queue-Threshold: min %d%%, max %d%%",
+			int(c.config.Wred.WeightFactor),
+			int(c.config.Wred.MaxDropProbability*100),
+			int(c.config.Wred.MinThreshold*100),
+			int(c.config.Wred.MaxThreshold*100))
 	}
 
 	c.inbound = make(common.PacketQueue, queueSize)

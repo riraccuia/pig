@@ -316,12 +316,16 @@ type WredConfig struct {
 	WeightFactor float64 `toml:"weight_factor" json:"weight_factor"`
 	// default=DefaultWredDP
 	// optional=true
-	// desc=Probability for packets to be dropped on busy queues. Accepts decimals between 0 and 1.
-	DropProbability float64 `toml:"drop_probability" json:"drop_probability"`
+	// desc=Maximum probability (%) for packets to be dropped on busy queues. Accepts decimals between 0 and 1.
+	MaxDropProbability float64 `toml:"max_drop_probability" json:"max_drop_probability"`
+	// default=DefaultWredMinThresh
+	// optional=true
+	// desc=Minimum threshold indicates the average queue fill (%) at which early drops start. Accepts decimals between 0 and 1.
+	MinThreshold float64 `toml:"min_threshold" json:"min_threshold"`
 	// default=DefaultWredThresh
 	// optional=true
-	// desc=Threshold for WRED as a fraction of the queue length. Accepts decimals between 0 and 1.
-	Threshold float64 `toml:"threshold" json:"threshold"`
+	// desc=Maximum threshold indicates the level (%) where the discard probability reaches its maximum value. Accepts decimals between 0 and 1.
+	MaxThreshold float64 `toml:"max_threshold" json:"max_threshold"`
 }
 
 type TLSConfig struct {

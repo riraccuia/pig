@@ -16,6 +16,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"slices"
 	"strings"
@@ -30,6 +31,7 @@ var (
 	DefaultWredWF        = 9.0
 	DefaultWredDP        = 0.1
 	DefaultWredThresh    = 0.5
+	DefaultWredMinThresh = math.Round(DefaultWredThresh*0.5*100) / 100 // half of the max threshold
 
 	DefaultICEBrokerAddress = "ssl://broker.hivemq.com:8883"
 	DefaultICEProtocol      = TransportWS
@@ -196,11 +198,14 @@ func (c *TunnelConfig) Initialize(bindAdapter string, defaultStunServer string, 
 	if c.Wred.WeightFactor == 0 {
 		c.Wred.WeightFactor = DefaultWredWF
 	}
-	if c.Wred.DropProbability == 0 {
-		c.Wred.DropProbability = DefaultWredDP
+	if c.Wred.MaxDropProbability == 0 {
+		c.Wred.MaxDropProbability = DefaultWredDP
 	}
-	if c.Wred.Threshold == 0 {
-		c.Wred.Threshold = DefaultWredThresh
+	if c.Wred.MaxThreshold == 0 {
+		c.Wred.MaxThreshold = DefaultWredThresh
+	}
+	if c.Wred.MinThreshold == 0 {
+		c.Wred.MinThreshold = DefaultWredMinThresh
 	}
 	if c.StreamCount == 0 {
 		c.StreamCount = DefaultStreamCount

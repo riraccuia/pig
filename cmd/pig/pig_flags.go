@@ -37,6 +37,7 @@ const (
 	FLAG_MAIN_CONFIG  = "config"
 	FLAG_MAIN_STUN    = "stun"
 	FLAG_MAIN_DOCS    = "docs"
+	FLAG_MAIN_VERSION = "version"
 
 	FLAG_TO_CFG   = "to-cfg"
 	FLAG_SIMPLE   = "s"
@@ -355,8 +356,8 @@ func applyCommandLineFlags(cfg *config.Config, flags *Flags, mode Mode, logger c
 	setConfigField(&tc.StreamCount, flags.streamCount)
 	setConfigField(&tc.ReconnectInterval, flags.retryInterval)
 
-	setConfigField(&tc.Wred.DropProbability, flags.wredDP)
-	setConfigField(&tc.Wred.Threshold, flags.wredThresh)
+	setConfigField(&tc.Wred.MaxDropProbability, flags.wredDP)
+	setConfigField(&tc.Wred.MaxThreshold, flags.wredThresh)
 	setConfigField(&tc.Wred.WeightFactor, flags.wredWF)
 
 	// Adapter settings

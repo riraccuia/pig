@@ -57,21 +57,24 @@ type WRED struct {
 // Returns:
 //   - *WRED: A new WRED instance
 //   - error: An error if the weight is less than 0
-func NewWRED(qlen int, weight, dropProbability, threshold float64) (*WRED, error) {
+func NewWRED(qlen int, weight, dropProbability, minThPercent, maxThPercent float64) (*WRED, error) {
 	if weight <= 0 {
 		return nil, fmt.Errorf("weight must be greater than 0")
 	}
 	if dropProbability < 0 || dropProbability > 1 {
 		return nil, fmt.Errorf("drop probability must be between 0 and 1")
 	}
-	if threshold < 0 || threshold > 1 {
+	if maxThPercent < 0 || maxThPercent > 1 {
 		return nil, fmt.Errorf("threshold must be between 0 and 1")
 	}
 	if qlen <= 0 {
 		return nil, fmt.Errorf("wred's queue length must be > 0")
 	}
-	maxT := threshold * float64(qlen)
-	minT := math.Round(maxT*0.5*100) / 100
+	maxT := maxThPercent * float64(qlen)
+	minT := math.Round(maxT*0.5*100) / 0.5 // default to half of the max threshold
+	if minThPercent > 0 && minThPercent < maxThPercent {
+		minT = minThPercent * float64(qlen)
+	}
 	if minT >= maxT {
 		minT = maxT // threshold==0 edge
 	}

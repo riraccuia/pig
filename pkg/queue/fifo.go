@@ -50,9 +50,9 @@ func NewFIFO[T any](length int) *FIFO[T] {
 	return f
 }
 
-func (f *FIFO[T]) WithWRED(factor, dropProbability, threshold float64) *FIFO[T] {
+func (f *FIFO[T]) WithWRED(factor, dropProbability, minThPercent, maxThPercent float64) *FIFO[T] {
 	var err error
-	f.wred, err = wred.NewWRED(f.length, factor, dropProbability, threshold)
+	f.wred, err = wred.NewWRED(f.length, factor, dropProbability, minThPercent, maxThPercent)
 	if err != nil {
 		panic(err)
 	}

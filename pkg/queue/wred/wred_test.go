@@ -89,7 +89,7 @@ func TestNewWRED_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w, err := NewWRED(tt.qlen, tt.weight, tt.dropProbability, tt.threshold)
+			w, err := NewWRED(tt.qlen, tt.weight, tt.dropProbability, 0, tt.threshold)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -110,7 +110,7 @@ func TestNewWRED_Thresholds(t *testing.T) {
 	const qlen = 100
 	const threshold = 0.5
 
-	w, err := NewWRED(qlen, 9, 0.1, threshold)
+	w, err := NewWRED(qlen, 9, 0.1, 0, threshold)
 	if err != nil {
 		t.Fatalf("NewWRED: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestNewWRED_Thresholds(t *testing.T) {
 }
 
 func TestNewWRED_ThresholdZeroCollapsesMinMax(t *testing.T) {
-	w, err := NewWRED(100, 9, 0.1, 0)
+	w, err := NewWRED(100, 9, 0.1, 0, 0)
 	if err != nil {
 		t.Fatalf("NewWRED: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestNewWRED_ThresholdZeroCollapsesMinMax(t *testing.T) {
 
 func TestUpdate_EWMA(t *testing.T) {
 	// weight=1, w=1/2, avg = (1-w)*avg + w*q
-	w, err := NewWRED(100, 1, 0.25, 0.5)
+	w, err := NewWRED(100, 1, 0.25, 0, 0.5)
 	if err != nil {
 		t.Fatalf("NewWRED: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestUpdate_EWMA(t *testing.T) {
 
 func TestUpdate_HighWeightFiltersSpike(t *testing.T) {
 	// weight=9 a single large sample barely moves avg from 0
-	w, err := NewWRED(100, 9, 0.25, 0.5)
+	w, err := NewWRED(100, 9, 0.25, 0, 0.5)
 	if err != nil {
 		t.Fatalf("NewWRED: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestUpdate_HighWeightFiltersSpike(t *testing.T) {
 }
 
 func TestIsDrop_MaxDPZeroNeverDrops(t *testing.T) {
-	w, err := NewWRED(100, 1, 0, 0.5)
+	w, err := NewWRED(100, 1, 0, 0, 0.5)
 	if err != nil {
 		t.Fatalf("NewWRED: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestIsDrop_MaxDPZeroNeverDrops(t *testing.T) {
 
 func TestIsDrop_BelowMinTNeverDrops(t *testing.T) {
 	// qlen=100, threshold=0.5, maxT=50, minT=25
-	w, err := NewWRED(100, 1, 1.0, 0.5)
+	w, err := NewWRED(100, 1, 1.0, 0, 0.5)
 	if err != nil {
 		t.Fatalf("NewWRED: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestIsDrop_AtMaxTUsesMaxDP(t *testing.T) {
 		tolerance = 0.03
 	)
 
-	w, err := NewWRED(100, 1, maxDP, 0.5)
+	w, err := NewWRED(100, 1, maxDP, 0, 0.5)
 	if err != nil {
 		t.Fatalf("NewWRED: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestIsDrop_AboveMaxTUsesMaxDP(t *testing.T) {
 		tolerance = 0.03
 	)
 
-	w, err := NewWRED(100, 0, maxDP, 0.5)
+	w, err := NewWRED(100, 0, maxDP, 0, 0.5)
 	if err != nil {
 		t.Fatalf("NewWRED: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestIsDrop_MidRampLinearProbability(t *testing.T) {
 		tolerance = 0.03
 	)
 
-	w, err := NewWRED(100, 0, maxDP, 0.5)
+	w, err := NewWRED(100, 0, maxDP, 0, 0.5)
 	if err != nil {
 		t.Fatalf("NewWRED: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestIsDrop_MidRampLinearProbability(t *testing.T) {
 func TestIsDrop_ForcedWhenMaxDPOneAndAboveMaxT(t *testing.T) {
 	t.Parallel()
 
-	w, err := NewWRED(100, 0, 1.0, 0.5)
+	w, err := NewWRED(100, 0, 1.0, 0, 0.5)
 	if err != nil {
 		t.Fatalf("NewWRED: %v", err)
 	}
