@@ -4,19 +4,22 @@
 
 # Packet Insertion Gear (pig)
 
-**pig** is a single binary that connects computers directly and securely to each other. Pigs can also be chained to create mesh networks.
+**pig** is a single binary that connects computers directly and securely to each other. 
 
-Using NAT traversal techniques, it finds a suitable connection path automatically even though firewalls/routers may be in the way. In other words you shouldn't need to setup your network/s at all. In most cases.
+Using NAT traversal techniques, it gets your endpoints connected through firewalls and NAT devices.\
+In other words, you shouldn't need to setup your network/s at all. In most cases.
 
-Works on Linux, macOS, and Windows. Would love to add mobile support, too.
+It has a small disk and memory footprint, it's fast and works on Linux, macOS, and Windows (and maybe mobile, at some point).
+
+Pigs can also be chained to create mesh networks.
+
+The project is still in early development, please open an issue if you find any bugs or have any suggestions.
 
 ## Why
 
 Pig is a passion project and a place to experiment with network standards, packets and protocols.
 
 It quickly became the primary tool for connecting to my home when I travel, doubling as a privacy protection tool whenever public Wi-Fis are the only option. 
-
-It is still a bit rough around the edges. Feel free to contribute and bring fresh ideas.
 
 ## What you can do
 

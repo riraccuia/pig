@@ -218,7 +218,6 @@ func (l *sharedListener) getClientConn(ip net.IP, icmpID uint16, echoCode uint8)
 	l.logger.Infof("New client connection (%d), ip: %s, icmp id: %d", key, ip.String(), icmpID)
 
 	conn := newConnection(
-		l.ctx,
 		l,
 		&net.IPAddr{IP: ip},
 		icmpID,

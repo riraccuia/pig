@@ -89,7 +89,7 @@ var (
 		FLAG_SPORT:  {FLAG_SPORT, "c", "Source port to use for the connection."},
 		FLAG_TADDR:  {FLAG_TADDR, "a", "Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR values. Defaults to 172.31.254.1/29 for connect nodes and 172.31.255.1/24 for listening nodes."},
 		FLAG_RETRY:  {FLAG_RETRY, "c", "Reconnect interval in seconds. Defaults to " + strconv.Itoa(config.DefaultRetryInterval) + "."},
-		FLAG_ROUTE:  {FLAG_ROUTE, "c", "Route subnets through the tunnel. Provide 'full' to route all traffic, or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'."},
+		FLAG_ROUTE:  {FLAG_ROUTE, "c", "Route subnets through the tunnel. Use 'full4', 'full6', 'full' (as shortcuts for full tunnel routing) or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'."},
 		// scripting settings
 		FLAG_SCRIPT: {FLAG_SCRIPT, "c", "Takes the path to an executable file that will be called on tunnel events. See '" + binaryName + " docs env' for the list of environment variables that are passed to the script."},
 		// logging settings
@@ -527,9 +527,13 @@ func buildRouteSettingsFromFlags(cfg *config.Config, tc *config.TunnelConfig, fl
 	if tc.Direction != config.TunnelDirectionConnect {
 		return
 	}
-	if flags.route == "full" {
+	if strings.HasPrefix(flags.route, "full") {
 		cfg.RouteConfig.Enabled = true
-		tc.Routes = buildFullTunnelRoutes()
+		var err error
+		tc.Routes, err = tunnelRoutesFromKeyWord(flags.route)
+		if err != nil {
+			logger.Fatal(err)
+		}
 		return
 	}
 	// expecting a comma separated list of CIDR prefixes
@@ -549,8 +553,8 @@ func buildRouteSettingsFromFlags(cfg *config.Config, tc *config.TunnelConfig, fl
 	}
 }
 
-func buildFullTunnelRoutes() []config.Route {
-	return []config.Route{
+func tunnelRoutesFromKeyWord(k string) ([]config.Route, error) {
+	fullV4 := []config.Route{
 		{
 			Destination: "0.0.0.0/1",
 			Type:        config.RouteTypeTunnel,
@@ -559,6 +563,8 @@ func buildFullTunnelRoutes() []config.Route {
 			Destination: "128.0.0.0/1",
 			Type:        config.RouteTypeTunnel,
 		},
+	}
+	fullV6 := []config.Route{
 		{
 			Destination: "2000::/3",
 			Type:        config.RouteTypeTunnel,
@@ -567,5 +573,15 @@ func buildFullTunnelRoutes() []config.Route {
 			Destination: "64:ff9b::/96",
 			Type:        config.RouteTypeTunnel,
 		},
+	}
+	switch k {
+	case "full4":
+		return fullV4, nil
+	case "full6":
+		return fullV6, nil
+	case "full":
+		return append(fullV4, fullV6...), nil
+	default:
+		return nil, fmt.Errorf("invalid route keyword: %s", k)
 	}
 }

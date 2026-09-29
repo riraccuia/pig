@@ -191,7 +191,9 @@ func (c *TunnelConfig) Initialize(bindAdapter string, defaultStunServer string, 
 	if c.Auth == nil {
 		c.Auth = &AuthConfig{}
 	}
-
+	if c.Adapter != nil && c.Adapter.BindAdapter != "" {
+		bindAdapter = c.Adapter.BindAdapter
+	}
 	if c.ReconnectInterval == 0 {
 		c.ReconnectInterval = DefaultRetryInterval
 	}
@@ -228,7 +230,7 @@ func (c *TunnelConfig) Initialize(bindAdapter string, defaultStunServer string, 
 		}
 	}
 
-	if err := c.ICE.Initialize(c.Proto, defaultStunServer, defaultMqttBroker); err != nil {
+	if err := c.ICE.Initialize(bindAdapter, c.Proto, defaultStunServer, defaultMqttBroker); err != nil {
 		return err
 	}
 
@@ -247,7 +249,7 @@ func (c *TunnelConfig) Initialize(bindAdapter string, defaultStunServer string, 
 	return nil
 }
 
-func (c *ICEConfig) Initialize(withProto TransportType, defaultStunServer string, defaultMqttBroker *MQTTBrokerConfig) error {
+func (c *ICEConfig) Initialize(bindAdapter string, withProto TransportType, defaultStunServer string, defaultMqttBroker *MQTTBrokerConfig) error {
 	if c == nil || !c.Enabled {
 		return nil
 	}
@@ -263,7 +265,7 @@ func (c *ICEConfig) Initialize(withProto TransportType, defaultStunServer string
 	}
 
 	if withProto == "." && len(c.Protos) == 0 {
-		c.Protos = []string{"ws", "quic", "dtls", "tls"}
+		c.Protos = []string{string(TransportWS), string(TransportQUIC), string(TransportDTLS), string(TransportTLS)}
 	}
 	if len(c.Protos) == 0 && withProto != "" {
 		c.Protos = strings.Split(string(withProto), ",")
@@ -273,8 +275,11 @@ func (c *ICEConfig) Initialize(withProto TransportType, defaultStunServer string
 	}
 
 	for _, proto := range c.Protos {
-		if !TransportType(proto).IsICEProtocol() {
+		switch {
+		case !TransportType(proto).IsICEProtocol():
 			return fmt.Errorf("invalid ICE protocol: %s", proto)
+		case proto == string(TransportTLSICMP) && bindAdapter == "":
+			return fmt.Errorf("bind adapter not specified, but required for %s", proto)
 		}
 	}
 

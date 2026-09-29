@@ -108,6 +108,7 @@ func NewICEBindingAgentConfig(logger LoggerFunc, iceAuth *IceAuth, attributes *I
 
 	if attributes != nil {
 		config.RequestOptions.Ice = attributes
+		config.HandleOptions.Ice = attributes
 	}
 
 	return config

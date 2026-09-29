@@ -31,6 +31,7 @@ type buffer struct {
 	writePos      uint64
 	readDeadline  time.Time
 	writeDeadline time.Time
+	closed        bool
 }
 
 // newBuffer creates a new buffer with the specified size.
@@ -91,6 +92,11 @@ func (b *buffer) Write(data []byte) (n int, err error) {
 
 	b.mu.Lock()
 
+	if b.closed {
+		b.mu.Unlock()
+		return 0, fmt.Errorf("buffer closed")
+	}
+
 	// Calculate available space with correct wraparound handling
 	used := b.calculateUsed()
 	available := b.size - used
@@ -101,6 +107,10 @@ func (b *buffer) Write(data []byte) (n int, err error) {
 	}*/
 	for used >= b.size || available < len(data) {
 		b.wcond.Wait()
+		if b.closed {
+			b.mu.Unlock()
+			return 0, fmt.Errorf("buffer closed")
+		}
 		used = b.calculateUsed()
 		available = b.size - used
 	}
@@ -143,6 +153,11 @@ func (b *buffer) Read(p []byte) (n int, err error) {
 
 	b.mu.Lock()
 
+	if b.closed {
+		b.mu.Unlock()
+		return 0, fmt.Errorf("buffer closed")
+	}
+
 	if isDeadlineExceeded(b.readDeadline) {
 		b.mu.Unlock()
 		return 0, fmt.Errorf("read deadline exceeded")
@@ -155,6 +170,10 @@ func (b *buffer) Read(p []byte) (n int, err error) {
 			return 0, fmt.Errorf("read deadline exceeded")
 		}
 		b.rcond.Wait()
+		if b.closed {
+			b.mu.Unlock()
+			return 0, fmt.Errorf("buffer closed")
+		}
 	}
 
 	// Calculate available data with correct wraparound handling
@@ -186,9 +205,10 @@ func (b *buffer) Read(p []byte) (n int, err error) {
 	return available, nil
 }
 
-// Reset clears the buffer.
-func (b *buffer) Reset() {
+// Close closes the buffer.
+func (b *buffer) Close() {
 	b.mu.Lock()
+	b.closed = true
 	b.readPos = 0
 	b.writePos = 0
 	b.rcond.Broadcast()

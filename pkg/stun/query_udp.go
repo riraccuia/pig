@@ -128,7 +128,7 @@ func (c *Client) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrLocalAddr any
 	// Trim buffer to actual received size
 	responseBytes = responseBytes[:n]
 
-	c.logger("debug", fmt.Sprintf("STUN: Received %d bytes response over UDP from %s", n, serverAddr))
+	c.logger("trace", fmt.Sprintf("STUN: Received %d bytes response over UDP from %s", n, serverAddr))
 
 	return DecodeMessage(responseBytes)
 }

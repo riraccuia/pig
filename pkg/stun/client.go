@@ -135,7 +135,7 @@ func (c *Client) sendStunRequestConn(serverAddr *net.TCPAddr, conn net.Conn, req
 		}
 	}
 
-	c.logger("debug", fmt.Sprintf("STUN: Received %d bytes response over TCP from %s", len(responseBytes), serverAddr))
+	c.logger("trace", fmt.Sprintf("STUN: Received %d bytes response over TCP from %s", len(responseBytes), serverAddr))
 
 	return DecodeMessage(responseBytes)
 }

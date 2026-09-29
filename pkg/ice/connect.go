@@ -16,11 +16,8 @@ package ice
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
-	"math/big"
 	"net"
-	"slices"
 	"time"
 
 	"github.com/riraccuia/pig/pkg/config"
@@ -57,6 +54,7 @@ func (pc *PathConnector) GetConnectPaths(ctx context.Context, target *config.Con
 	}
 
 	offer.ConnectOffsetDuration = pc.opts.ConnectOffset
+	// natType = 2 // TODO: remove this
 	offer.NATType = natType
 
 	answer, err = signaling.GatherICECandidates(ctx, pc.opts, target.Address, offer)
@@ -121,36 +119,7 @@ func (pc *PathConnector) GetConnectPaths(ctx context.Context, target *config.Con
 
 	pc.opts.Logger.Tracef("ICE: connect paths: %v", cp)
 
-	var natCp []*ConnectPath
-
-	cp = slices.DeleteFunc(cp, func(c *ConnectPath) bool {
-		if c.RemoteIP.IsPrivate() {
-			return false
-		}
-		if c.LocalNet.Contains(c.RemoteIP) {
-			return false
-		}
-		paths := pc.generateNATConnectPathsFromPublicPath(c, natType, answer.NATType)
-		if len(paths) == 0 {
-			return false
-		}
-		natCp = append(natCp, paths...)
-		return true
-	})
-
-	/*for _, cPath := range cp {
-		if cPath.RemoteIP.IsPrivate() {
-			//pc.opts.Logger.Infof("PRIVATE CONNECT PATH: %v", cPath)
-			continue
-		}
-		if cPath.LocalNet.Contains(cPath.RemoteIP) {
-			continue
-		}
-		//pc.opts.Logger.Infof("PUBLIC CONNECT PATH: %v", cPath)
-		pc.generateNATConnectPathsFromPublicPath(cPath, natType, 1)
-	}*/
-
-	cp = append(cp, natCp...)
+	cp = pc.appendNATConnectPaths(cp, natType, answer.NATType)
 
 	// Here we calculate the clock offset with the target machine.
 	// It is exactly what the NTP protocol does.
@@ -189,71 +158,4 @@ func (pc *PathConnector) GetConnectPaths(ctx context.Context, target *config.Con
 	//pc.opts.Logger.Tracef("ICE: scheduled at: %s", scheduledAt)
 
 	return
-}
-
-// generateNATConnectPathsFromPublicPath takes a given public path and NAT types for both endpoints and returns a set of connection paths that should
-// be attempted. An empty result means that the original path is valid as is.
-//
-// The returned paths, when simultaneously attempted, maximize the chances for two endpoints to establish a connection even when one is behind
-// "symmetric", or "address dependent" NAT.
-// The idea is that if at least one port of the TCP/UDP tuple can be predicted (e.g. for the machine behind simple NAT), we are left with a single port
-// that's ultimately unknown to both sides, and it's a number in the 0-65535 range.
-//
-// The "birthday problem" suggests that it is not that hard to find a collision in that range from a purely probabilistic angle.
-// Using its generalized formula, we determine the amount of uint16 numbers `n` one has to generate for a ~50% success rate that the resulting set will
-// contain at least one duplicate:
-//
-//	m = desired probability of success (in this case 0.5, or 50%)
-//	T = total items to consider
-//	n = SQRT(-2ln(1-m)) x SQRT(T)
-//
-// We assume that the first 1024 TCP/UDP ports are reserved for well-known services, and calculate `n` as follows.
-// We're looking for a ~50% chances of a duplicate:
-//
-//	n = SQRT(-2ln(1-0.5)) x SQRT(65535-1024)
-//	n = 1.17 x 254
-//	n = 297
-//
-// Only 297 dice rolls needed for a 1/2 chance of a collision. Not bad.
-// What if we had each machine attempt `n/2` ports and compare the results?
-// How does this affect the probability of a collision?
-// Will the two sides find matching tuples with an acceptable success rate?
-// Turns out it's still quite okay, and what this method does today.
-//
-// Early testing shows that with each side attempting 150 ports (currently hardcoded), success drops from 50% to 30%.
-// Still better than having to resort to a TURN server.
-func (pc *PathConnector) generateNATConnectPathsFromPublicPath(cp *ConnectPath, ourNatType, theirNatType int) (paths []*ConnectPath) {
-	if ourNatType < int(stun.MappingAddressDependent) && theirNatType < int(stun.MappingAddressDependent) {
-		// no need to generate NAT connect paths
-		return nil
-	}
-	// generate 150 random ints in the range 1025-65535
-	// do not allow duplicates
-	ports := make(map[int]struct{})
-	for i := 0; i < 150; i++ {
-		p, _ := rand.Int(rand.Reader, big.NewInt(65535-1025+1))
-		port := int(p.Int64()) + 1025
-		if _, ok := ports[port]; ok {
-			i--
-			continue
-		}
-		ports[port] = struct{}{}
-	}
-	if ourNatType == int(stun.MappingEndpointIndependent) {
-		// our NAT type is endpoint independent
-		for port := range ports {
-			addPath := *cp
-			addPath.RemoteAddr = AddressFrom(addPath.Protocol.Network, cp.RemoteIP, port)
-			//pc.opts.Logger.Infof("NAT CONNECT PATH: %v", addPath)
-			paths = append(paths, &addPath)
-		}
-		return paths
-	}
-	// our NAT type is either address dependent or address and port dependent
-	for port := range ports {
-		addPath := *cp
-		addPath.LocalAddr = AddressFrom(addPath.Protocol.Network, cp.LocalNet.IP, port)
-		paths = append(paths, &addPath)
-	}
-	return paths
 }

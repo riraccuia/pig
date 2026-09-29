@@ -17,11 +17,13 @@ package controller
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/riraccuia/pig/pkg/config"
@@ -73,10 +75,8 @@ func (c *Controller) receiveICEServerConnectPaths(ctx context.Context, cfg *conf
 
 func (c *Controller) processICEServerConnectPaths(ctx context.Context, cfg *config.TunnelConfig, bindAdapter string, mtu int, tlsConfig *tls.Config, offerPaths *ice.OfferPaths, pigListener *ice.Listener) {
 	var (
-		err            error
-		connectedPaths = &sync.Map{}
-		timer          = time.NewTimer(time.Second * 10)
-		nomination     *ice.ConnectPath
+		err          error
+		nominatedPtr atomic.Pointer[ice.ConnectPath]
 	)
 	// wait for the scheduled time
 	waitScheduled := time.After(time.Until(offerPaths.ScheduledAt))
@@ -87,84 +87,86 @@ func (c *Controller) processICEServerConnectPaths(ctx context.Context, cfg *conf
 		break
 	}
 
+	bindCtx, bindCancel := context.WithTimeout(ctx, time.Second*5)
+	defer bindCancel()
+
+	wg := &sync.WaitGroup{}
+
 	for _, cp := range offerPaths.ConnectPaths {
 		path := cp
-		go c.connectICEListenPath(ctx, path, bindAdapter, connectedPaths)
-	}
-	var stop bool
-	for !stop {
-		select {
-		case <-ctx.Done():
-			err = ctx.Err()
-			stop = true
-		case <-timer.C:
-			stop = true
-		default:
-			// continue with the logic
-		}
-		connectedPaths.Range(func(key, value any) bool {
-			cp := value.(*ice.ConnectPath)
-			if cp.BindAgent.ICENominated() {
-				cp.BindAgent.StopReceive()
-				nomination = cp
-				return false
+		wg.Go(func() {
+			if c.connectICEListenPath(bindCtx, path, bindAdapter, &nominatedPtr) {
+				// the controlling side nominated the path, cancel the context
+				bindCancel()
 			}
-			return true
 		})
-		if nomination != nil {
-			break
-		}
-		time.Sleep(time.Millisecond * 10)
-		//runtime.Gosched()
 	}
-	connectedPaths.Range(func(key, value any) bool {
-		cp := value.(*ice.ConnectPath)
-		if nomination == nil || cp != nomination {
-			go cp.CloseConn()
-		}
-		return true
-	})
-	if nomination == nil {
+
+	wg.Wait()
+
+	selectedPath := nominatedPtr.Load()
+
+	if selectedPath == nil {
 		return
 	}
 
-	c.logger.Infof("ICE candidate nominated: %s", nomination.String())
+	c.logger.Infof("ICE candidate nominated: %s", selectedPath.String())
 
 	var l transport.Listener
-	switch nomination.Protocol.Protocol {
+	switch selectedPath.Protocol.Protocol {
 	case "quic":
-		co := network.NewUDPPacketConn(nomination.Conn.(*net.UDPConn))
+		co := network.NewUDPPacketConn(selectedPath.Conn.(*net.UDPConn))
 		l, err = qt.GetListenerFromConn(ctx, co, cfg, tlsConfig)
 	case "ws":
-		l, err = ws.GetListenerFromConn(ctx, nomination.Conn, cfg, tlsConfig)
+		l, err = ws.GetListenerFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
 	case "dtls":
-		co := network.NewUDPPacketConn(nomination.Conn.(*net.UDPConn))
+		co := network.NewUDPPacketConn(selectedPath.Conn.(*net.UDPConn))
 		l, err = dtls.GetListenerFromConn(ctx, co, cfg, tlsConfig, mtu)
 	case "tls":
-		l, err = trtls.GetListenerFromConn(ctx, nomination.Conn, cfg, tlsConfig)
+		l, err = trtls.GetListenerFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
 	case "tls-in-icmp":
-		l, err = tlsicmp.GetListenerFromConn(ctx, nomination.Conn, cfg, tlsConfig)
+		l, err = tlsicmp.GetListenerFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
 	}
 	if err != nil {
-		c.logger.Errorf("Failed to get listener for %s: %v", nomination.String(), err)
+		c.logger.Errorf("Failed to get listener for %s: %v", selectedPath.String(), err)
 		return
 	}
-	c.logger.Infof("ICE completed | %s", nomination.String())
+	c.logger.Infof("ICE completed | %s", selectedPath.String())
 	pigListener.Load(l) //nolint:errcheck
 }
 
-func (c *Controller) connectICEListenPath(ctx context.Context, cp *ice.ConnectPath, bindAdapter string, connectedPaths *sync.Map) {
+func (c *Controller) connectICEListenPath(ctx context.Context, cp *ice.ConnectPath, bindAdapter string, nominatedPtr *atomic.Pointer[ice.ConnectPath]) (selected bool) {
 	c.logger.Debugf("Connecting ICE path | %s", cp.String())
-	_, e := cp.Connect()
+	_, e := cp.Connect(ctx)
 	if e == ice.ErrConnectICMP {
 		_, e = cp.ConnectICMP(ctx, c.logger, bindAdapter, true)
+	}
+	if errors.Is(e, context.Canceled) {
+		return
 	}
 	if e != nil {
 		c.logger.Tracef("Failed to connect ICE path %s: %v", cp.String(), e)
 		return
 	}
-	if cp.Protocol.Network != "icmp" {
-		cp.BindAgent.SendRequest(true) //nolint:errcheck // it's okay for this to fail
+	//if cp.Protocol.Network != "icmp" {
+	_, e = cp.BindAgent.Bind(ctx)
+	//}
+	if errors.Is(e, context.Canceled) {
+		return
 	}
-	connectedPaths.Store(cp.String(), cp)
+	if e != nil {
+		c.logger.Tracef("Failed to bind ICE path %s: %v", cp.String(), e)
+		return
+	}
+	selected, e = cp.BindAgent.ICEWaitNominated(ctx)
+	if e != nil || !selected {
+		cp.CloseConn()
+		return false
+	}
+	if !nominatedPtr.CompareAndSwap(nil, cp) {
+		cp.CloseConn()
+		return false
+	}
+	cp.BindAgent.StopReceive()
+	return true
 }

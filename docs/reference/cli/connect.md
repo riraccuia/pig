@@ -21,8 +21,8 @@ General options:
  -ta Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR
      values. Defaults to 172.31.254.1/29 for connect nodes and 172.31.255.1/24 for listening nodes.
  -r  Reconnect interval in seconds. Defaults to 5.
- -R  Route subnets through the tunnel. Provide 'full' to route all traffic, or a comma separated list of
-     CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'.
+ -R  Route subnets through the tunnel. Use 'full4', 'full6', 'full' (as shortcuts for full tunnel
+     routing) or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'.
 
 Scripting options:
  -S Takes the path to an executable file that will be called on tunnel events. See 'pig docs env' for

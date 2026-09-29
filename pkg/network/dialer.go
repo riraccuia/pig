@@ -12,23 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build !windows
+
 package network
 
 import (
+	"context"
+	"fmt"
 	"net"
-	"syscall"
-	"time"
 )
 
-func NewDialer(timeout time.Duration) *net.Dialer {
-	dialer := &net.Dialer{
-		Timeout: timeout,
-		Control: func(network, address string, c syscall.RawConn) error {
-			return c.Control(func(fd uintptr) {
-				setSockoptReuseAddr(fd)
-				setSockoptReusePort(fd)
-			})
-		},
+func DialWithDialer(dialer *net.Dialer, network string, laddr, raddr net.Addr) (net.Conn, error) {
+	switch network {
+	case "tcp":
+		tcpLAddr, ok := laddr.(*net.TCPAddr)
+		if !ok {
+			return nil, fmt.Errorf("invalid TCP address: %s", laddr)
+		}
+		tcpRAddr, ok := raddr.(*net.TCPAddr)
+		if !ok {
+			return nil, fmt.Errorf("invalid TCP address: %s", raddr)
+		}
+		return dialTCP(context.Background(), dialer, network, tcpLAddr, tcpRAddr)
+	case "udp":
+		udpLAddr, ok := laddr.(*net.UDPAddr)
+		if !ok {
+			return nil, fmt.Errorf("invalid UDP address: %s", laddr)
+		}
+		udpRAddr, ok := raddr.(*net.UDPAddr)
+		if !ok {
+			return nil, fmt.Errorf("invalid UDP address: %s", raddr)
+		}
+		return dialUDP(context.Background(), dialer, network, udpLAddr, udpRAddr)
+	default:
+		return nil, fmt.Errorf("unsupported network: %s", network)
 	}
-	return dialer
 }

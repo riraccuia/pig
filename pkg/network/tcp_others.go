@@ -29,21 +29,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func dialTCP(network string, laddr, raddr *net.TCPAddr) (*net.TCPConn, error) {
-	dialer := net.Dialer{
-		Control: func(network, address string, c syscall.RawConn) error {
-			return c.Control(func(fd uintptr) {
-				// Unix-specific socket options
-				unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
-				unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
-				// unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_NODELAY, 1)
-			})
-		},
-		Timeout: 5 * time.Second,
-	}
-
+func dialTCP(ctx context.Context, dialer *net.Dialer, network string, laddr, raddr *net.TCPAddr) (*net.TCPConn, error) {
 	if laddr == nil {
-		return dialTCPOnce(&dialer, network, raddr)
+		return dialTCPOnce(ctx, dialer, network, raddr)
 	}
 
 	dialer.LocalAddr = laddr
@@ -93,7 +81,7 @@ func dialTCP(network string, laddr, raddr *net.TCPAddr) (*net.TCPConn, error) {
 		}
 
 		var conn *net.TCPConn
-		conn, err = dialTCPOnce(&dialer, network, raddr)
+		conn, err = dialTCPOnce(ctx, dialer, network, raddr)
 		if err == nil {
 			select {
 			case accepted := <-acceptCh:
@@ -119,10 +107,10 @@ func isConnRefused(err error) bool {
 	return errors.Is(err, syscall.ECONNREFUSED)
 }
 
-func dialTCPOnce(dialer *net.Dialer, network string, raddr *net.TCPAddr) (*net.TCPConn, error) {
+func dialTCPOnce(ctx context.Context, dialer *net.Dialer, network string, raddr *net.TCPAddr) (*net.TCPConn, error) {
 	var conn net.Conn
 	var err error
-	conn, err = dialer.Dial(network, raddr.String())
+	conn, err = dialer.DialContext(ctx, network, raddr.String())
 	if err != nil {
 		return nil, err
 	}
@@ -139,8 +127,8 @@ func listenTCP(network string, laddr *net.TCPAddr) (*net.TCPListener, error) {
 	lc := net.ListenConfig{
 		Control: func(network, address string, c syscall.RawConn) error {
 			return c.Control(func(fd uintptr) {
-				unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
-				unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+				setSockoptReuseAddr(fd)
+				setSockoptReusePort(fd)
 			})
 		},
 	}

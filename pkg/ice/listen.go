@@ -174,6 +174,12 @@ func (pc *PathConnector) processOffer(topicBase string, offer *signaling.Receive
 	connectPaths = dedupConnectPaths(connectPaths)
 	connectPaths = sortConnectPaths(connectPaths)
 
+	if len(connectPaths) == 0 {
+		return
+	}
+
+	connectPaths = pc.appendNATConnectPaths(connectPaths, natType, offer.Offer.NATType)
+
 	// send the connect paths to the listener
 	select {
 	case listenPaths <- &OfferPaths{ConnectPaths: connectPaths, ScheduledAt: time.UnixMilli(answer.Timestamp[1]).Add(offer.Offer.ConnectOffsetDuration)}:
