@@ -16,6 +16,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"slices"
 	"strings"
@@ -27,9 +28,10 @@ var (
 	DefaultQueueSize     = 256
 	DefaultStreamCount   = 0
 	DefaultRetryInterval = 5
-	DefaultWredWF        = 5.0
-	DefaultWredDP        = 0.25
-	DefaultWredThresh    = 0.30
+	DefaultWredWF        = 9.0
+	DefaultWredDP        = 0.1
+	DefaultWredThresh    = 0.5
+	DefaultWredMinThresh = math.Round(DefaultWredThresh*0.5*100) / 100 // half of the max threshold
 
 	DefaultICEBrokerAddress = "ssl://broker.hivemq.com:8883"
 	DefaultICEProtocol      = TransportWS
@@ -189,18 +191,23 @@ func (c *TunnelConfig) Initialize(bindAdapter string, defaultStunServer string, 
 	if c.Auth == nil {
 		c.Auth = &AuthConfig{}
 	}
-
+	if c.Adapter != nil && c.Adapter.BindAdapter != "" {
+		bindAdapter = c.Adapter.BindAdapter
+	}
 	if c.ReconnectInterval == 0 {
 		c.ReconnectInterval = DefaultRetryInterval
 	}
 	if c.Wred.WeightFactor == 0 {
 		c.Wred.WeightFactor = DefaultWredWF
 	}
-	if c.Wred.DropProbability == 0 {
-		c.Wred.DropProbability = DefaultWredDP
+	if c.Wred.MaxDropProbability == 0 {
+		c.Wred.MaxDropProbability = DefaultWredDP
 	}
-	if c.Wred.Threshold == 0 {
-		c.Wred.Threshold = DefaultWredThresh
+	if c.Wred.MaxThreshold == 0 {
+		c.Wred.MaxThreshold = DefaultWredThresh
+	}
+	if c.Wred.MinThreshold == 0 {
+		c.Wred.MinThreshold = DefaultWredMinThresh
 	}
 	if c.StreamCount == 0 {
 		c.StreamCount = DefaultStreamCount
@@ -223,7 +230,7 @@ func (c *TunnelConfig) Initialize(bindAdapter string, defaultStunServer string, 
 		}
 	}
 
-	if err := c.ICE.Initialize(c.Proto, defaultStunServer, defaultMqttBroker); err != nil {
+	if err := c.ICE.Initialize(bindAdapter, c.Proto, defaultStunServer, defaultMqttBroker); err != nil {
 		return err
 	}
 
@@ -242,7 +249,7 @@ func (c *TunnelConfig) Initialize(bindAdapter string, defaultStunServer string, 
 	return nil
 }
 
-func (c *ICEConfig) Initialize(withProto TransportType, defaultStunServer string, defaultMqttBroker *MQTTBrokerConfig) error {
+func (c *ICEConfig) Initialize(bindAdapter string, withProto TransportType, defaultStunServer string, defaultMqttBroker *MQTTBrokerConfig) error {
 	if c == nil || !c.Enabled {
 		return nil
 	}
@@ -258,7 +265,7 @@ func (c *ICEConfig) Initialize(withProto TransportType, defaultStunServer string
 	}
 
 	if withProto == "." && len(c.Protos) == 0 {
-		c.Protos = []string{"ws", "quic", "dtls", "tls"}
+		c.Protos = []string{string(TransportWS), string(TransportQUIC), string(TransportDTLS), string(TransportTLS)}
 	}
 	if len(c.Protos) == 0 && withProto != "" {
 		c.Protos = strings.Split(string(withProto), ",")
@@ -268,8 +275,11 @@ func (c *ICEConfig) Initialize(withProto TransportType, defaultStunServer string
 	}
 
 	for _, proto := range c.Protos {
-		if !TransportType(proto).IsICEProtocol() {
+		switch {
+		case !TransportType(proto).IsICEProtocol():
 			return fmt.Errorf("invalid ICE protocol: %s", proto)
+		case proto == string(TransportTLSICMP) && bindAdapter == "":
+			return fmt.Errorf("bind adapter not specified, but required for %s", proto)
 		}
 	}
 

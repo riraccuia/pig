@@ -21,24 +21,24 @@ type ICEProtocolDefinition struct {
 }
 
 var (
-	ICEProtocolWS = ICEProtocolDefinition{
-		Network:     "tcp",
-		Protocol:    "ws",
-		ComponentID: 3,
-	}
 	ICEProtocolQUIC = ICEProtocolDefinition{
 		Network:     "udp",
 		Protocol:    "quic",
-		ComponentID: 4,
+		ComponentID: 3,
 	}
-	ICEProtocolDTLS = ICEProtocolDefinition{
-		Network:     "udp",
-		Protocol:    "dtls",
-		ComponentID: 5,
+	ICEProtocolWS = ICEProtocolDefinition{
+		Network:     "tcp",
+		Protocol:    "ws",
+		ComponentID: 4,
 	}
 	ICEProtocolTLS = ICEProtocolDefinition{
 		Network:     "tcp",
 		Protocol:    "tls",
+		ComponentID: 5,
+	}
+	ICEProtocolDTLS = ICEProtocolDefinition{
+		Network:     "udp",
+		Protocol:    "dtls",
 		ComponentID: 6,
 	}
 	ICEProtocolTLSInICMP = ICEProtocolDefinition{
@@ -50,18 +50,18 @@ var (
 
 // a map of protocol definitions keyed by pig protocol name, e.g. "ws", "tls", "quic", etc.
 var ICEProtocolDefinitionsByProtocol = map[string]ICEProtocolDefinition{
-	ICEProtocolWS.Protocol:        ICEProtocolWS,
 	ICEProtocolQUIC.Protocol:      ICEProtocolQUIC,
-	ICEProtocolDTLS.Protocol:      ICEProtocolDTLS,
+	ICEProtocolWS.Protocol:        ICEProtocolWS,
 	ICEProtocolTLS.Protocol:       ICEProtocolTLS,
+	ICEProtocolDTLS.Protocol:      ICEProtocolDTLS,
 	ICEProtocolTLSInICMP.Protocol: ICEProtocolTLSInICMP,
 }
 
 // a map of protocol definitions keyed by component id, e.g. 3, 4, 5, etc.
 var ICEProtocolDefinitionsByComponentID = map[int]ICEProtocolDefinition{
-	ICEProtocolWS.ComponentID:        ICEProtocolWS,
 	ICEProtocolQUIC.ComponentID:      ICEProtocolQUIC,
-	ICEProtocolDTLS.ComponentID:      ICEProtocolDTLS,
+	ICEProtocolWS.ComponentID:        ICEProtocolWS,
 	ICEProtocolTLS.ComponentID:       ICEProtocolTLS,
+	ICEProtocolDTLS.ComponentID:      ICEProtocolDTLS,
 	ICEProtocolTLSInICMP.ComponentID: ICEProtocolTLSInICMP,
 }

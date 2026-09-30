@@ -21,6 +21,7 @@ import (
 	"io/fs"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -58,13 +59,14 @@ func (c *Controller) getICEDialFunc(cfg *config.TunnelConfig) (func(ctx context.
 			return nil, fmt.Errorf("failed to process ICE client connect paths: %w", err)
 		}
 
-		c.logger.Debugf("ICE connect path nominated: %s", selectedPath.String())
-
-		_, err = selectedPath.BindAgent.ICENominateCandidate()
-		selectedPath.BindAgent.StopReceive()
+		_, err = selectedPath.BindAgent.ICENominateCandidate(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to nominate ICE candidate: %w", err)
 		}
+
+		c.logger.Debugf("ICE candidate nominated: %s", selectedPath.String())
+
+		selectedPath.BindAgent.StopReceive()
 
 		c.logger.Infof("ICE completed | %s", selectedPath.String())
 
@@ -104,56 +106,99 @@ func (c *Controller) processICEClientConnectPaths(ctx context.Context, connectPa
 
 	selectedPtr := atomic.Pointer[ice.ConnectPath]{}
 
+	wg := &sync.WaitGroup{}
+	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
+	defer cancel()
+
+	// build the bypass routes for the remote IPs
+	remoteIPs := map[string]*route.Route{}
+	for _, cp := range connectPaths {
+		if _, ok := remoteIPs[cp.RemoteIP.String()]; ok {
+			continue
+		}
+		rt, _ := c.bypassTarget(cp.RemoteIP)
+		remoteIPs[cp.RemoteIP.String()] = rt
+	}
+
 	for _, cp := range connectPaths {
 		// attempt to connect all paths in parallel
 		path := cp
-		go c.connectICEDialPath(ctx, path, &selectedPtr)
+		wg.Go(func() {
+			if c.connectICEDialPath(ctx, path, &selectedPtr) {
+				// we have a winner, cancel everything else
+				cancel()
+			}
+		})
 	}
 
-	lCtx, cancel := context.WithTimeout(ctx, time.Second*10)
-	defer cancel()
+	wg.Wait()
 
-	var stop bool
-	for !stop {
-		select {
-		case <-lCtx.Done():
-			err = ctx.Err()
-			stop = true
-		default:
-			// continue with the logic
-		}
-		selectedPath = selectedPtr.Load()
-		if selectedPath != nil {
-			break
-		}
-		time.Sleep(time.Millisecond * 10)
-		//runtime.Gosched()
-	}
+	selectedPath = selectedPtr.Load()
 
-	// close all connect paths that are not the selected path
-	/*for _, cp := range connectPaths {
-		if selectedPath == nil || cp != selectedPath {
-			cp.CloseConn()
-		}
-	}*/
-
-	if selectedPath == nil {
+	keepRoute := ""
+	switch selectedPath {
+	case nil:
 		err = errors.New("all ICE candidates failed")
-		return
+	default:
+		keepRoute = selectedPath.RemoteIP.String()
 	}
+
+	for target, rt := range remoteIPs {
+		if keepRoute == target {
+			continue
+		}
+		e := c.routeManager.RemoveRoute(rt)
+		if e != nil {
+			c.logger.Errorf("Failed to remove bypass route for %s: %v", rt.Destination.String(), e)
+		}
+	}
+
 	return
 }
 
-func (c *Controller) connectICEDialPath(ctx context.Context, cp *ice.ConnectPath, selectedPath *atomic.Pointer[ice.ConnectPath]) {
-	var e error
+func (c *Controller) connectICEDialPath(ctx context.Context, cp *ice.ConnectPath, selectedPath *atomic.Pointer[ice.ConnectPath]) (selected bool) {
+	c.logger.Debugf("Connecting ICE path | %s", cp.String())
+	_, err := cp.Connect(ctx)
+	if err == ice.ErrConnectICMP {
+		_, err = cp.ConnectICMP(ctx, c.logger, c.cfg.Adapter.BindAdapter, false)
+	}
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	if err != nil {
+		c.logger.Tracef("Failed to connect ICE path %s: %v", cp.String(), err)
+		return
+	}
+	_, err = cp.BindAgent.Bind(ctx)
+	if errors.Is(err, context.Canceled) {
+		cp.CloseConn()
+		return
+	}
+	if err != nil {
+		c.logger.Tracef("Failed to bind ICE path %s: %v", cp.String(), err)
+		cp.CloseConn()
+		return
+	}
+	// if the selected path is not set, set it to the current path
+	if !selectedPath.CompareAndSwap(nil, cp) {
+		// if the selected path is already set, close the current path
+		cp.CloseConn()
+		return
+	}
+	c.logger.Tracef("Bound ICE path %s", cp.String())
+	selected = true
+	return
+}
+
+func (c *Controller) bypassTarget(target net.IP) (rt *route.Route, err error) {
 	// bypass via the best route
 	bypassRoute := config.Route{
-		Destination: cp.RemoteIP.String(),
+		Destination: target.String(),
 		Type:        config.RouteTypeBypass,
 	}
-	rt, err := c.buildRoute(bypassRoute)
+	rt, err = c.buildRoute(bypassRoute)
 	if err != nil {
-		c.logger.Errorf("Failed to build bypass route for %s: %v", cp.RemoteIP.String(), err)
+		c.logger.Errorf("Failed to build bypass route for %s: %v", target.String(), err)
 		return
 	}
 
@@ -164,56 +209,18 @@ func (c *Controller) connectICEDialPath(ctx context.Context, cp *ice.ConnectPath
 
 	c.logger.Debugf("Bypassing %s %s", rt.Destination.String(), viaStr)
 
-	var routeExists bool
-
 	err = c.routeManager.AddRoute(rt)
 	if errors.Is(err, fs.ErrExist) {
 		err = nil
-		routeExists = true
-		c.logger.Debugf("Skipped bypass route for %s as it already exists", cp.RemoteIP.String())
+		c.logger.Debugf("Skipped bypass route for %s as it already exists", target.String())
 	}
-	if errors.Is(err, route.ErrDirectlyConnected) { //err != nil && strings.Contains(err.Error(), "directly connected") {
+	if errors.Is(err, route.ErrDirectlyConnected) {
 		c.logger.Debugf("Skipped bypass route: %v", err)
 		err = nil
-		routeExists = true
 	}
 	if err != nil {
-		c.logger.Errorf("Failed to add bypass route for %s: %v", cp.RemoteIP.String(), err)
+		c.logger.Errorf("Failed to add bypass route for %s: %v", target.String(), err)
 		return
 	}
-
-	if !routeExists {
-		defer func() {
-			if e == nil {
-				return
-			}
-			//c.routeRequests <- routeRequest{op: routeOpRemove, routes: []config.Route{bypassRoute}}
-			err = c.routeManager.RemoveRoute(rt)
-			if err != nil {
-				c.logger.Errorf("Failed to remove bypass route for %s: %v", cp.RemoteIP.String(), err)
-			}
-		}()
-	}
-
-	c.logger.Debugf("Connecting ICE path | %s", cp.String())
-	_, e = cp.Connect()
-	if e == ice.ErrConnectICMP {
-		_, e = cp.ConnectICMP(ctx, c.logger, c.cfg.Adapter.BindAdapter, false)
-	}
-	if e != nil {
-		c.logger.Tracef("Failed to connect ICE path %s: %v", cp.String(), e)
-		return
-	}
-	e = cp.ICESetup()
-	if e != nil {
-		cp.CloseConn()
-		//c.logger.Tracef("Failed to ICE bind path %s: %v", cp.String(), e)
-		return
-	}
-	// if the selected path is not set, set it to the current path
-	if !selectedPath.CompareAndSwap(nil, cp) {
-		// if the selected path is already set, close the current path
-		cp.CloseConn()
-		e = errors.New("selected path already set")
-	}
+	return
 }

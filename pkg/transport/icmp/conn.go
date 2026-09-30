@@ -91,7 +91,7 @@ func dial(ctx context.Context, logger common.Logger, bindAdapter, targetAddr str
 		err            error
 	)*/
 
-	err := setupGlobalListener(ctx, logger, bindAdapter, isServer)
+	err := SetupGlobalListener(ctx, logger, bindAdapter, isServer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup icmp listener: %w", err)
 	}
@@ -114,7 +114,6 @@ func dial(ctx context.Context, logger common.Logger, bindAdapter, targetAddr str
 
 	// Create new connection
 	conn = newConnection(
-		ctx,
 		globalListener,
 		&net.IPAddr{IP: net.ParseIP(targetAddr)},
 		icmpID,
@@ -128,8 +127,8 @@ func dial(ctx context.Context, logger common.Logger, bindAdapter, targetAddr str
 }
 
 // newConnection creates a new connection with shared read/write loops.
-func newConnection(ctx context.Context, listener *sharedListener, remoteAddr *net.IPAddr, icmpID uint16) *Conn {
-	connCtx, cancel := context.WithCancel(ctx)
+func newConnection(listener *sharedListener, remoteAddr *net.IPAddr, icmpID uint16) *Conn {
+	connCtx, cancel := context.WithCancel(context.Background())
 
 	wantType := ipv4.ICMPTypeEchoReply
 	if listener.isServer {
@@ -190,8 +189,8 @@ func (c *Conn) Close() error {
 	c.sendCloseMessage()
 
 	c.cancel()
-	c.readBuf.Reset()
-	c.writeBuf.Reset()
+	c.readBuf.Close()
+	c.writeBuf.Close()
 
 	// Remove from listener's client map
 	key := getClientKey(c.remoteAddr.IP, uint16(c.icmpID))

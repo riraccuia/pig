@@ -27,13 +27,10 @@ import (
 )
 
 func (c *Controller) StartClient() {
-	c.Add(1)
-	go c.startClient(c.ctx, c.cfg)
+	c.Go(func() { c.startClient(c.ctx, c.cfg) })
 }
 
 func (c *Controller) startClient(ctx context.Context, cfg *config.Config) {
-	defer c.Done()
-
 	if !cfg.HasConnectTunnels() {
 		return
 	}
@@ -91,8 +88,8 @@ func (c *Controller) AddClientTunnel(ctx context.Context, tunnelCfg *config.Tunn
 	}
 
 	c.tunnels.Store(tunnelCfg.Name, tunnel)
-	c.Add(1)
-	go c.runClientTunnel(ctx, tunnel, dialer)
+
+	c.Go(func() { c.runClientTunnel(ctx, tunnel, dialer, tunnelCfg.ReconnectInterval) })
 
 	return nil
 }
@@ -122,12 +119,9 @@ func (c *Controller) newClientTunnel(ctx context.Context, tunnelCfg *config.Tunn
 	return tunnel.WithBufferPool(c.bufferPool), dialer, nil
 }
 
-func (c *Controller) runClientTunnel(ctx context.Context, tunnel *client.Client, dialer func(ctx context.Context) (transport.Conn, error)) {
-	defer c.Done()
-
-	c.handleClientEventsAsync(ctx, tunnel)
-
+func (c *Controller) runClientTunnel(ctx context.Context, tunnel *client.Client, dialer func(ctx context.Context) (transport.Conn, error), reconnectInterval int) {
 	t := time.NewTimer(time.Millisecond)
+	c.Go(func() { c.handleClientEvents(ctx, tunnel) })
 	for {
 		select {
 		case <-t.C:
@@ -138,7 +132,8 @@ func (c *Controller) runClientTunnel(ctx context.Context, tunnel *client.Client,
 		if err := tunnel.Start(ctx, dialer); err != nil {
 			c.logger.Fatalf("Failed to start tunnel: %v", err)
 		}
-		tunnel.WaitClose()
-		t.Reset(time.Second)
+		tunnel.Wait()
+		c.logger.Infof("Retrying connection to %s in %d seconds", tunnel.Name(), reconnectInterval)
+		t.Reset(time.Duration(reconnectInterval) * time.Second)
 	}
 }

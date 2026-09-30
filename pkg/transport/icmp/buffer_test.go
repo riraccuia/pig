@@ -218,26 +218,29 @@ func TestBufferEmpty(t *testing.T) {
 	}
 }*/
 
-func TestBufferReset(t *testing.T) {
+func TestBufferCloseUnblocksRead(t *testing.T) {
 	b := newBuffer(10)
-
-	// Add some data
-	data := []byte{1, 2, 3}
-	b.Write(data)
-
-	if b.Len() == 0 {
-		t.Error("Buffer should have data before reset")
+	done := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 8)
+		_, err := b.Read(buf) // blocks on empty buffer
+		done <- err
+	}()
+	// Give the reader time to block in Read.
+	time.Sleep(50 * time.Millisecond)
+	b.Close()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Read after Close should return an error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Read hung after Close")
 	}
-
-	// Reset buffer
-	b.Reset()
-
-	if b.Len() != 0 {
-		t.Errorf("Buffer should be empty after reset, got Len() = %d", b.Len())
-	}
-
-	if b.readPos != 0 || b.writePos != 0 {
-		t.Errorf("Positions should be zero after reset: readPos=%d, writePos=%d",
-			b.readPos, b.writePos)
+	// Subsequent Read must not block either.
+	buf := make([]byte, 8)
+	n, err := b.Read(buf)
+	if err == nil || n != 0 {
+		t.Fatalf("Read on closed buffer: n=%d err=%v", n, err)
 	}
 }

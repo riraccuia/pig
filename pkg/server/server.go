@@ -39,10 +39,11 @@ type Server struct {
 	bufferPool      *sync.Pool
 	inbound         []common.PacketQueue
 	outbound        common.PacketQueue
-	done            chan struct{}
 	authenticator   common.Authenticator
 	_next_queue_id  atomic.Uint64
-	closed          atomic.Bool
+	started, closed atomic.Bool
+	cancel          context.CancelFunc
+	wg              *sync.WaitGroup
 }
 
 // New creates a new Server instance with its own TUN adapter.
@@ -76,17 +77,20 @@ func NewWithAdapter(logger common.Logger, adapterCfg *config.AdapterConfig, tunn
 				return make([]byte, adapterCfg.MTU)
 			},
 		},
-		done:          make(chan struct{}),
 		authenticator: authenticator,
+		wg:            &sync.WaitGroup{},
 	}
 	s.buildIPPool(adapter)
 	return s, nil
 }
 
 func (s *Server) Start(ctx context.Context, listenFunc func(ctx context.Context) (transport.Listener, error)) error {
-	if !s.closed.CompareAndSwap(false, true) {
+	if !s.started.CompareAndSwap(false, true) {
 		return fmt.Errorf("server already started")
 	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	s.cancel = cancel
 
 	s.logger.Info("Starting server")
 
@@ -95,16 +99,42 @@ func (s *Server) Start(ctx context.Context, listenFunc func(ctx context.Context)
 		return fmt.Errorf("failed to create listener: %w", err)
 	}
 	s.listener = listener
-	s.done = make(chan struct{})
 
 	s.logger.Infof("Listening on %s:%d", s.config.Listen.Address, s.config.Listen.Port)
 
-	go s.acceptClients(ctx)
-	go s.processInbound(ctx)
-	// go s.processOutbound(ctx)
-	go s.readFromAdapter()
+	s.wg.Go(func() { s.acceptClients(ctx) })
+	s.wg.Go(func() { s.processInbound(ctx) })
+	s.wg.Go(func() { s.processOutbound(ctx) })
+	s.wg.Go(func() { s.readFromAdapter(ctx) })
 
 	return nil
+}
+
+func (s *Server) acceptClients(ctx context.Context) {
+	for {
+		if common.IsContextDone(ctx) {
+			return
+		}
+
+		_co, err := s.listener.Accept()
+		if err != nil {
+			return
+		}
+		var (
+			conn transport.Conn
+			ok   bool
+		)
+		if conn, ok = _co.(transport.Conn); !ok {
+			s.logger.Errorf("accepted connection is not a transport.Conn: %v", _co)
+			_co.Close()
+			continue
+		}
+		if err := s.performAuthentication(ctx, conn); err != nil {
+			conn.Close()
+			continue
+		}
+		go s.handleNewClient(ctx, conn)
+	}
 }
 
 // GetAdapter returns the adapter.
@@ -113,11 +143,9 @@ func (s *Server) GetAdapter() common.TunnelAdapter {
 }
 
 func (s *Server) Close() error {
-	if !s.closed.CompareAndSwap(false, true) {
+	if !s.started.CompareAndSwap(true, false) {
 		return fmt.Errorf("server already closed")
 	}
-
-	defer close(s.done)
 
 	// Close all client connections
 	s.clients.Range(func(key any, value any) bool {
@@ -133,16 +161,19 @@ func (s *Server) Close() error {
 	s.clients.Clear()
 
 	if s.listener != nil {
-		return s.listener.Close()
+		s.listener.Close()
 	}
+
+	s.cancel()
+	s.wg.Wait()
 	return nil
 }
 
-func (s *Server) WaitClose() {
-	if s.closed.Load() {
+func (s *Server) Wait() {
+	if !s.started.Load() {
 		return
 	}
-	<-s.done
+	s.wg.Wait()
 }
 
 func (s *Server) buildIPPool(adapter common.TunnelAdapter) {

@@ -14,12 +14,13 @@ SIGNTOOL_BINNAME ?= signtool
 
 # Directories
 PIG_DIR = cmd/pig
+CONFIG_DIR = pkg/config
 SIGNTOOL_DIR = tools/signtool
 DOCS_DIR = docs
-CLIHELP_DIR = $(DOCS_DIR)/cli-help
+CLIHELP_DIR = $(DOCS_DIR)/reference/cli
 
 # Targets
-.PHONY: all pig signtool clean test help help-docs \
+.PHONY: all pig signtool clean test help cli-reference \
 	pig-linux pig-linux-arm pig-linux-arm6 pig-linux-arm7 pig-linux-arm64 \
 	pig-darwin-amd64 pig-darwin-arm64 pig-windows pig-win \
 	signtool-linux signtool-linux-arm64 signtool-darwin-amd64 signtool-darwin-arm64 signtool-windows signtool-win \
@@ -27,27 +28,28 @@ CLIHELP_DIR = $(DOCS_DIR)/cli-help
 
 all: pig signtool
 
-help-docs:
+cli-reference:
+	@$(GO) generate ./$(CONFIG_DIR)
 	@set -e; export COLUMNS=110; \
-	$(GO) run ./$(PIG_DIR) -docs config -md > $(DOCS_DIR)/config.md; \
+	$(GO) run ./$(PIG_DIR) -docs config -md > $(DOCS_DIR)/reference/config/config.md; \
 	{ echo '<pre><code>'; $(GO) run ./$(PIG_DIR) -h; echo '</code></pre>'; } | \
-		sed -e 's/ -c / \<a href="connect.md"\>-c\<\/a\>/g' \
-		    -e 's/ -l / \<a href="listen.md"\>-l\<\/a\>/g' \
-		    -e 's/ -stun / \<a href="stun.md"\>-stun\<\/a\>/g' \
-		    -e 's/ -config / \<a href="config.md"\>-config\<\/a\>/g' \
-		    -e 's/ -docs / \<a href="docs.md"\>-docs\<\/a\>/g' \
-		> $(CLIHELP_DIR)/main.md; \
+		sed -e 's/ -c / \<a href="connect.md"\>-c \<\/a\>/g' \
+		    -e 's/ -l / \<a href="listen.md"\>-l \<\/a\>/g' \
+		    -e 's/ -stun / \<a href="stun.md"\>-stun \<\/a\>/g' \
+		    -e 's/ -config / \<a href="config.md"\>-config \<\/a\>/g' \
+		    -e 's/ -docs / \<a href="docs.md"\>-docs \<\/a\>/g' \
+		> $(CLIHELP_DIR)/pig.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -c -h; echo '```'; } > $(CLIHELP_DIR)/connect.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -l -h; echo '```'; } > $(CLIHELP_DIR)/listen.md; \
 	{ echo '<pre><code>'; $(GO) run ./$(PIG_DIR) -config invalid -h; echo '</code></pre>'; } | \
-		sed -e 's/ -config / \<a href="config-ref.md"\>-config\<\/a\>/g' \
+		sed -e 's/ -config / \<a href="config-ref.md"\>-config \<\/a\>/g' \
 		> $(CLIHELP_DIR)/config.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -docs config; echo '```'; } > $(CLIHELP_DIR)/config-ref.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -stun -h; echo '```'; } > $(CLIHELP_DIR)/stun.md; \
 	{ echo '<pre><code>'; $(GO) run ./$(PIG_DIR) -docs -h 2>/dev/null; echo '</code></pre>'; } | \
-		sed -e 's/ config / \<a href="..\/config.md"\>config\<\/a\>/g' \
-		    -e 's/ env / \<a href="env.md"\>env\<\/a\>/g' \
-		    -e 's/ protos / \<a href="protos.md"\>protos\<\/a\>/g' \
+		sed -e 's/ config / \<a href="..\/config\/config.md"\>config \<\/a\>/g' \
+		    -e 's/ env / \<a href="env.md"\>env \<\/a\>/g' \
+		    -e 's/ protos / \<a href="protos.md"\>protos \<\/a\>/g' \
 		> $(CLIHELP_DIR)/docs.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -docs env; echo '```'; } > $(CLIHELP_DIR)/env.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -docs protos; echo '```'; } > $(CLIHELP_DIR)/protos.md
@@ -121,29 +123,29 @@ test:
 # Help
 help:
 	@echo "Available targets:"
-	@echo "  all                  Build pig and signtool for the host"
-	@echo "  pig                  Build pig for GOOS/GOARCH (default: host)"
-	@echo "  signtool             Build signtool for GOOS/GOARCH (default: host)"
-	@echo "  pig-linux            pig, linux/amd64"
-	@echo "  pig-linux-arm        pig, linux/arm"
-	@echo "  pig-linux-arm6       pig, linux/arm GOARM=6"
-	@echo "  pig-linux-arm7       pig, linux/arm GOARM=7"
-	@echo "  pig-linux-arm64      pig, linux/arm64"
-	@echo "  pig-darwin-amd64     pig, darwin/amd64"
-	@echo "  pig-darwin-arm64     pig, darwin/arm64"
-	@echo "  pig-windows          pig, windows/amd64 (.exe)"
-	@echo "  pig-win              Alias for pig-windows"
-	@echo "  signtool-linux       signtool, linux/amd64"
-	@echo "  signtool-linux-arm64 signtool, linux/arm64"
+	@echo "  all                    Build pig and signtool for the host"
+	@echo "  pig                    Build pig for GOOS/GOARCH (default: host)"
+	@echo "  signtool               Build signtool for GOOS/GOARCH (default: host)"
+	@echo "  pig-linux              pig, linux/amd64"
+	@echo "  pig-linux-arm          pig, linux/arm"
+	@echo "  pig-linux-arm6         pig, linux/arm GOARM=6"
+	@echo "  pig-linux-arm7         pig, linux/arm GOARM=7"
+	@echo "  pig-linux-arm64        pig, linux/arm64"
+	@echo "  pig-darwin-amd64       pig, darwin/amd64"
+	@echo "  pig-darwin-arm64       pig, darwin/arm64"
+	@echo "  pig-windows            pig, windows/amd64 (.exe)"
+	@echo "  pig-win                Alias for pig-windows"
+	@echo "  signtool-linux         signtool, linux/amd64"
+	@echo "  signtool-linux-arm64   signtool, linux/arm64"
 	@echo "  signtool-darwin-amd64  signtool, darwin/amd64"
 	@echo "  signtool-darwin-arm64  signtool, darwin/arm64"
-	@echo "  signtool-windows     signtool, windows/amd64 (.exe)"
-	@echo "  signtool-win         Alias for signtool-windows"
-	@echo "  windows              pig-windows and signtool-windows"
-	@echo "  help-docs            Regenerate docs/ and docs/cli-help/"
-	@echo "  test                 Run go test ./..."
-	@echo "  clean                Remove $(BINDIR)"
-	@echo "  help                 Show this help"
+	@echo "  signtool-windows       signtool, windows/amd64 (.exe)"
+	@echo "  signtool-win           Alias for signtool-windows"
+	@echo "  windows                pig-windows and signtool-windows"
+	@echo "  cli-reference          Regenerate $(DOCS_DIR)/reference/"
+	@echo "  test                   Run go test ./..."
+	@echo "  clean                  Remove $(BINDIR)"
+	@echo "  help                   Show this help"
 	@echo ""
 	@echo "Variables:"
 	@echo "  GO           Go command (default: go)"

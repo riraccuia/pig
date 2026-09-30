@@ -69,8 +69,9 @@ type ICEMessage struct {
 	ConnectOffsetDuration time.Duration `json:"connect_offset_duration,omitempty"`
 
 	// NATType represents the NAT type of the remote peer.
-	// 0: endpoint-independent mapping
-	// 1: address-dependent mapping
+	// 0: unknown mapping
+	// 1: endpoint-independent mapping
+	// 2: address-dependent mapping
 	NATType int `json:"nat_type,omitempty"`
 
 	// Candidates for this message.

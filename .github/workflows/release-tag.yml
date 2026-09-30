@@ -7,7 +7,7 @@ on:
 env:
   GO_VERSION: "1.27"
   CGO_ENABLED: "0"
-  LDFLAGS: "-s -w"
+  LDFLAGS: "-s -w -X main.Version=${{ github.ref_name }}"
 
 jobs:
   #test:

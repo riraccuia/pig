@@ -17,10 +17,10 @@ package stun
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,8 +46,12 @@ type BindingAgent struct {
 	started atomic.Bool
 	// ICE nominated flag is set when the connection
 	// is nominated for ICE usage by the remote peer.
-	nominated atomic.Bool
-	requests  *sync.Map
+	nominated    atomic.Bool
+	sigNominated atomic.Pointer[chan struct{}]
+	requests     *sync.Map
+	wg           *sync.WaitGroup
+	alive        chan struct{}
+	aliveOnce    *sync.Once
 }
 
 // requestContext wraps a request context for out of band communication.
@@ -62,29 +66,59 @@ type requestContext struct {
 
 func NewBindingAgent(config *BindingAgentConfig) *BindingAgent {
 	agent := &BindingAgent{
-		requests: &sync.Map{},
+		requests:  &sync.Map{},
+		wg:        &sync.WaitGroup{},
+		alive:     make(chan struct{}, 1),
+		aliveOnce: &sync.Once{},
 	}
 	agent.SetConfig(config)
 	return agent
+}
+
+func (b *BindingAgent) Clone() *BindingAgent {
+	return &BindingAgent{
+		config:    b.config,
+		requests:  &sync.Map{},
+		wg:        &sync.WaitGroup{},
+		alive:     make(chan struct{}, 1),
+		aliveOnce: &sync.Once{},
+	}
 }
 
 func (b *BindingAgent) SetConfig(config *BindingAgentConfig) {
 	b.config = normalizeBindingAgentConfig(config)
 }
 
-// SetConn sets the connection to receive or send binding requests to.
-func (b *BindingAgent) SetConn(conn net.Conn) {
-	b.conn = conn
+// setAlive closes the alive channel to signal that the connection is alive.
+// This allows an ICE agent whose first request may not be received by the remote peer
+// to be considered alive and continue the ICE negotiation.
+func (b *BindingAgent) setAlive() {
+	b.aliveOnce.Do(func() {
+		close(b.alive)
+	})
 }
 
 // Receive starts receiving binding requests from the wrapped connection.
-// Call SetConn first to set the connection.
-func (b *BindingAgent) Receive() {
-	if b.conn == nil {
+func (b *BindingAgent) Receive(conn net.Conn) {
+	if conn == nil {
 		return
 	}
-	go b.receive()
-	runtime.Gosched()
+	if !b.started.CompareAndSwap(false, true) {
+		return
+	}
+	b.conn = conn
+	b.wg.Go(func() { b.receive() })
+}
+
+func (b *BindingAgent) StopReceive() {
+	if !b.started.CompareAndSwap(true, false) {
+		return
+	}
+	// get the receive routine to stop now without closeing the connection
+	b.conn.SetReadDeadline(time.Now())
+	// wait for the receive routine to stop
+	b.wg.Wait()
+	b.conn.SetReadDeadline(time.Time{})
 }
 
 func (b *BindingAgent) logger() LoggerFunc {
@@ -152,10 +186,6 @@ func normalizeBindingAgentConfig(config *BindingAgentConfig) *BindingAgentConfig
 }
 
 func (b *BindingAgent) receive() {
-	if !b.started.CompareAndSwap(false, true) {
-		return
-	}
-	defer b.started.Store(false)
 	for {
 		message, err := ReceiveMessageFromConn(b.conn)
 		if err != nil && err != ErrParseMessage {
@@ -172,37 +202,29 @@ func (b *BindingAgent) receive() {
 			if err != nil {
 				b.logger()("trace", fmt.Sprintf("BIND: failed to handle binding request: %v", err))
 			}
+			b.setAlive()
 			continue
 		}
 		if err := ValidateMethodAndClass(message.Header.Type, MethodBinding, ClassSuccessResponse, ClassErrorResponse); err == nil {
 			v, ok := b.requests.Load(message.Header.TransactionID)
 			if !ok {
 				//b.Logger.Errorf("no request found for transaction ID: %x", message.Header.TransactionID)
+				b.setAlive()
 				continue
 			}
 			rc := v.(*requestContext)
 			select {
 			case <-rc.done:
 				// request context is done (timed out)
+				b.setAlive()
 				continue
 			default:
 			}
-			rc.cancel()
 			rc.result, rc.err = b.HandleResponse(message, message.Header.TransactionID)
+			rc.cancel()
 		}
-	}
-}
 
-func (b *BindingAgent) StopReceive() {
-	if !b.started.Load() || b.conn == nil {
-		return
-	}
-	// get the receive routine to stop now without closeing the connection
-	b.conn.SetReadDeadline(time.Now())
-	defer b.conn.SetReadDeadline(time.Time{})
-	// wait for the receive routine to stop
-	for b.started.Load() {
-		runtime.Gosched()
+		b.setAlive()
 	}
 }
 
@@ -247,119 +269,81 @@ func ReceiveMessageFromConn(conn net.Conn) (message *Message, err error) {
 	return message, nil
 }
 
-// SendRequest sends a STUN binding request and returns the mapped address.
-func (b *BindingAgent) SendRequest(waitForResponse bool) (result *BindingResult, err error) {
-	if b.conn == nil {
-		return nil, fmt.Errorf("binding connection is not set")
-	}
-
+func (b *BindingAgent) Bind(ctx context.Context) (result *BindingResult, err error) {
 	request, err := BuildBindingRequest(b.configOrDefault().RequestOptions)
 	if err != nil {
 		return nil, err
 	}
 
-	// Send request
+	bctx, cancel := context.WithCancel(ctx)
+
+	rc := &requestContext{done: bctx.Done(), cancel: cancel}
+	b.requests.Store(request.Header.TransactionID, rc)
+
 	_, err = request.WriteTo(b.conn)
 	if err != nil {
+		cancel()
+		b.requests.Delete(request.Header.TransactionID)
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 
+	select {
+	case <-b.alive:
+		b.logger()("trace", "BIND: connection is alive, sending request")
+		cancel()
+		b.requests.Delete(request.Header.TransactionID)
+		if rc.result != nil || rc.err != nil {
+			return rc.result, rc.err
+		}
+		return b.SendRequest(ctx, true)
+	case <-bctx.Done():
+	}
+
+	b.requests.Delete(request.Header.TransactionID)
+	if rc.result != nil || rc.err != nil {
+		return rc.result, rc.err
+	}
+	return nil, bctx.Err()
+}
+
+// SendRequest sends a STUN binding request and returns the mapped address.
+func (b *BindingAgent) SendRequest(ctx context.Context, waitForResponse bool) (result *BindingResult, err error) {
 	if !b.started.Load() {
 		return nil, fmt.Errorf("binding agent is not started")
 	}
 
-	if !waitForResponse {
-		return
-	}
-
-	b.logger()("trace", fmt.Sprintf("BIND: sent request with transaction ID: %x", request.Header.TransactionID))
-
-	ctx, cancel := context.WithTimeoutCause(context.Background(), stunTimeout, context.DeadlineExceeded)
-
-	rc := &requestContext{done: ctx.Done(), cancel: cancel}
-	b.requests.Store(request.Header.TransactionID, rc)
-
-	defer func() {
-		b.requests.Delete(request.Header.TransactionID)
-	}()
-
-	<-ctx.Done()
-	if ctx.Err() != nil && ctx.Err() != context.Canceled {
-		err = ctx.Err()
-		return nil, err
-	}
-
-	result = rc.result
-	err = rc.err
-
-	return
-}
-
-// SendRequest sends a STUN binding request and returns the mapped address.
-func (b *BindingAgent) _SendRequest(waitForResponse bool) (result *BindingResult, err error) {
-	if b.conn == nil {
-		return nil, fmt.Errorf("binding connection is not set")
-	}
-
 	request, err := BuildBindingRequest(b.configOrDefault().RequestOptions)
 	if err != nil {
 		return nil, err
 	}
 
+	bctx, cancel := context.WithCancel(ctx)
+	rc := &requestContext{done: bctx.Done(), cancel: cancel}
+	b.requests.Store(request.Header.TransactionID, rc)
+
 	// Send request
 	_, err = request.WriteTo(b.conn)
 	if err != nil {
+		cancel()
+		b.requests.Delete(request.Header.TransactionID)
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 
 	b.logger()("trace", fmt.Sprintf("BIND: sent request with transaction ID: %x", request.Header.TransactionID))
 
-	if !waitForResponse || b.started.Load() {
-		b.requests.Store(request.Header.TransactionID, nil)
-		return
+	if !waitForResponse {
+		cancel()
+		b.requests.Delete(request.Header.TransactionID)
+		return nil, nil
 	}
 
-	// Read response
-	var (
-		stunResponse *Message
-		stop         bool
-	)
+	<-bctx.Done()
+	b.requests.Delete(request.Header.TransactionID)
 
-	for !stop {
-		b.conn.SetReadDeadline(time.Now().Add(stunTimeout))
-		stunResponse, err = ReceiveMessageFromConn(b.conn)
-		b.conn.SetReadDeadline(time.Time{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to read message: %w", err)
-		}
-
-		if MessageMethod(stunResponse.Header.Type) != MethodBinding {
-			// ignore non-binding messages
-			continue
-		}
-
-		switch {
-		case IsErrorResponseType(stunResponse.Header.Type):
-			return b.HandleResponse(stunResponse, request.Header.TransactionID)
-		case IsRequestType(stunResponse.Header.Type):
-			if stunResponse.Header.TransactionID != request.Header.TransactionID {
-				// RFC 8445 Section 7.2.2
-				// If the server receives a Binding Request, it MUST respond with a Binding Response
-				b.HandleRequest(stunResponse)
-				_, err = request.WriteTo(b.conn)
-				if err != nil {
-					return nil, fmt.Errorf("failed to send request: %w", err)
-				}
-				continue
-			}
-		case IsSuccessResponseType(stunResponse.Header.Type):
-			stop = true
-		default:
-			return nil, fmt.Errorf("unexpected STUN message type: 0x%x", stunResponse.Header.Type)
-		}
+	if rc.result != nil || rc.err != nil {
+		return rc.result, rc.err
 	}
-
-	return b.HandleResponse(stunResponse, request.Header.TransactionID)
+	return nil, bctx.Err()
 }
 
 // HandleResponse parses a STUN response and returns the binding result.
@@ -384,12 +368,19 @@ func (b *BindingAgent) HandleRequest(request *Message) error {
 		return fmt.Errorf("failed to send STUN response: %w", err)
 	}
 
-	if b.config.RequestOptions.Ice == nil {
+	if b.config.HandleOptions.Ice == nil {
+		return nil
+	}
+
+	if b.config.HandleOptions.Ice.IceControlled == 0 {
 		return nil
 	}
 
 	if _, ok := request.FindAttribute(AttrICEUseCandidate); ok {
-		b.nominated.Store(true)
+		b.nominated.CompareAndSwap(false, true)
+		if ch := b.sigNominated.Load(); ch != nil {
+			close(*ch)
+		}
 		b.logger()("debug", fmt.Sprintf("BIND: ICE use candidate attribute found in request, nominated: %t", b.nominated.Load()))
 		return nil
 	}
@@ -402,19 +393,44 @@ func (b *BindingAgent) ICENominated() bool {
 	return b.nominated.Load()
 }
 
+// ICEWaitNominated waits for the binding agent to be nominated for ICE usage by the remote peer.
+// It will block until either the context is done or the binding agent is nominated.
+// Only controlled agents can call this method.
+func (b *BindingAgent) ICEWaitNominated(ctx context.Context) (nominated bool, err error) {
+	// if this is not the controlling agent, return immediately
+	if b.config.HandleOptions.Ice == nil || b.config.HandleOptions.Ice.IceControlled == 0 {
+		return false, errors.New("not the controlled agent")
+	}
+	ch := make(chan struct{}, 1)
+	if !b.sigNominated.CompareAndSwap(nil, &ch) {
+		return false, errors.New("nominated channel already set")
+	}
+	defer b.sigNominated.Store(nil)
+	if b.nominated.Load() {
+		return true, nil
+	}
+	select {
+	case <-ctx.Done():
+		err = ctx.Err()
+	case <-ch:
+		nominated = true
+	}
+	return
+}
+
 // ICENominateCandidate sets the ICE nominated flag to true, then calls
 // [BindingAgent.SendRequest] to tell the other side that we are going to use
 // this candidate. It returns the binding result.
-func (b *BindingAgent) ICENominateCandidate() (*BindingResult, error) {
-	config := b.configOrDefault()
-	if config.RequestOptions == nil {
-		config.RequestOptions = &BindingOptions{}
+// Only controlling agents can call this method.
+func (b *BindingAgent) ICENominateCandidate(ctx context.Context) (*BindingResult, error) {
+	// if this is not the controlling agent, return immediately
+	if b.config.RequestOptions.Ice == nil || b.config.RequestOptions.Ice.IceControlling == 0 {
+		return nil, errors.New("not the controlling agent")
 	}
-	if config.RequestOptions.Ice == nil {
-		config.RequestOptions.Ice = &IceConfig{}
-	}
-	config.RequestOptions.Ice.UseCandidate = true
-	return b.SendRequest(true)
+	b.config.RequestOptions.Ice.UseCandidate = true
+	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
+	defer cancel()
+	return b.SendRequest(ctx, true)
 }
 
 // ICEPriority returns the ICE priority of the binding agent.

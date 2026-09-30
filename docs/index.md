@@ -2,17 +2,10 @@
 
 Table of contents for pig user documentation. New guides are added here by topic.
 
-## Command line
+## Quick reference
 
-- [CLI Reference](cli-help/main.md)
-
-## Configuration
-
-- [Config file reference](config.md)
-
-## NAT traversal
-
-- [NAT traversal](nat.md)
+- [CLI](reference/cli/pig.md)
+- [Config](reference/config/config.md)
 
 ## Authentication
 
@@ -22,7 +15,16 @@ Table of contents for pig user documentation. New guides are added here by topic
 
 ## Docker
 
-- [Docker](docker.md)
+- [Docker](docker/docker.md)
+
+## NAT
+
+- [NAT traversal](nat/nat.md)
+- [Symmetric NAT](nat/symmetric.md)
+
+## Tools
+
+- [Signtool](tools/signtool.md)
 
 ## Examples
 

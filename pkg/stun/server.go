@@ -174,7 +174,7 @@ func (s *Server) stunListenUDP(listenAddr *net.UDPAddr) (*net.UDPConn, error) {
 				return
 			}
 
-			s.logger()("info", fmt.Sprintf("STUN: Received %d bytes from %s", n, addr))
+			s.logger()("trace", fmt.Sprintf("STUN: Received %d bytes from %s", n, addr))
 
 			// Create write function for UDP
 			writeFn := func(data []byte) error {
@@ -233,7 +233,7 @@ func (s *Server) stunListenTCP(listenAddr *net.TCPAddr) (net.Listener, error) {
 
 			n += 20
 
-			s.logger()("info", fmt.Sprintf("STUN: Received %d bytes from %s", n, conn.RemoteAddr()))
+			s.logger()("trace", fmt.Sprintf("STUN: Received %d bytes from %s", n, conn.RemoteAddr()))
 
 			// Create write function for TCP
 			writeFn := func(data []byte) error {

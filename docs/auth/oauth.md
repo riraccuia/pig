@@ -2,7 +2,7 @@
 
 OAuth authentication can be activated via config file only. There are no CLI flags for it today. They may be added later.
 
-Set `auth.type` to `oauth`. Field names are in the [config reference](../config.md#authconfig) under `auth.oauth`.
+Set `auth.type` to `oauth`. Field names are in the [config reference](../reference/config/config.md#authconfig) under `auth.oauth`.
 
 Some providers return opaque access tokens but no discoverable introspection endpoint.
 Pig includes helpers for popular non standard providers, so you still use the same `auth.oauth` fields.

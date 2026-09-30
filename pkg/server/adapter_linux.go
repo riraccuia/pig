@@ -23,6 +23,7 @@ import (
 	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/network"
+	"github.com/riraccuia/pig/pkg/queue"
 )
 
 func (s *Server) processInbound(ctx context.Context) {
@@ -38,14 +39,18 @@ func (s *Server) getInboundPktQueue() common.PacketQueue {
 	return s.inbound[queueID]
 }
 
-func (s *Server) readFromAdapter() {
+func (s *Server) readFromAdapter(ctx context.Context) {
 	for _, q := range s.adapter.(*adapter.TUNAdapter).Queues() {
-		go s.readFromTunQueue(q)
+		s.wg.Go(func() { s.readFromTunQueue(ctx, q) })
 	}
 }
 
-func (s *Server) readFromTunQueue(q io.Reader) {
+func (s *Server) readFromTunQueue(ctx context.Context, q io.Reader) {
 	for {
+		if common.IsContextDone(ctx) {
+			return
+		}
+
 		buffer := s.bufferPool.Get().([]byte)
 		n, err := q.Read(buffer)
 		if err != nil {
@@ -63,31 +68,20 @@ func (s *Server) readFromTunQueue(q io.Reader) {
 
 		_client, ok := s.clients.Load(pkt.DestinationIP().String())
 		if !ok {
-			freeBuf := true
-			s.clients.Range(func(key, value any) bool {
-				client := value.(*ClientTunnel)
-				if v4Pkt, ok := pkt.(network.IPv4Packet); ok {
-					v4Pkt.Mark(network.DSCP_MARK_MASQ_SNAT)
-				}
-				select {
-				case client.outbound.C <- pkt:
-					freeBuf = false
-					return false
-				default:
-				}
-				return true
-			})
-			if freeBuf {
-				s.bufferPool.Put(buffer)
-			}
+			s.bufferPool.Put(buffer)
 			continue
 		}
 		client := _client.(*ClientTunnel)
 
-		select {
-		case client.outbound.C <- pkt:
-		default:
+		err = client.outbound.Push(pkt)
+		if err == queue.ErrWREDDropped || err == queue.ErrDropped {
+			client.dropLogger.Incr(1, uint64(pkt.TotalLength()))
 			s.bufferPool.Put(buffer)
+			continue
+		}
+		if err != nil {
+			s.bufferPool.Put(buffer)
+			continue
 		}
 	}
 }
@@ -105,4 +99,8 @@ func (s *Server) processInboundQueue(ctx context.Context, q io.Writer, pq common
 			s.bufferPool.Put(pkt.Bytes())
 		}
 	}
+}
+
+func (s *Server) processOutbound(ctx context.Context) {
+	// processOutbound is a no-op on Linux
 }

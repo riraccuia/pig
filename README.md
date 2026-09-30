@@ -1,10 +1,19 @@
 ![pig gopher](assets/pig-gopher-shovel.png)
 
-# pig - packet insertion gear
+[![Docs](https://img.shields.io/badge/Docs-008CFF?logo=github&style=for-the-badge)](docs/index.md) [![CLI Reference](https://img.shields.io/badge/CLI%20Reference-008CFF?logo=github&style=for-the-badge)](docs/reference/cli/pig.md)
 
-**pig** is a single binary that connects two computers directly and securely to each other. Pigs can also be chained to create mesh networks.
+# Packet Insertion Gear (pig)
 
-Using NAT traversal techniques, it finds a suitable connection path automatically in a variety of network environments, even though firewalls/routers may be in the way. In other words you shouldn't need to setup your network/s at all. In most cases.
+**pig** is a single binary that connects computers directly and securely to each other. 
+
+Using NAT traversal techniques, it gets your endpoints connected through firewalls and NAT devices.\
+In other words, you shouldn't need to setup your network/s at all. In most cases.
+
+It has a small disk and memory footprint, it's fast and works on Linux, macOS, and Windows (and maybe mobile, at some point).
+
+Pigs can also be chained to create mesh networks.
+
+The project is still in early development, please open an issue if you find any bugs or have any suggestions.
 
 ## Why
 
@@ -12,37 +21,42 @@ Pig is a passion project and a place to experiment with network standards, packe
 
 It quickly became the primary tool for connecting to my home when I travel, doubling as a privacy protection tool whenever public Wi-Fis are the only option. 
 
-It is still a bit rough around the edges. Feel free to contribute and bring fresh ideas.
-
 ## What you can do
 
-**Listen/connect tunnel.** Including traditional VPN-style (simple mode) connectivity.
+**Listen/connect tunnel**\
+Including traditional VPN-style (simple mode) connectivity.
 
-**Pigs can be chained.** A pig can simultaneously connect to multiple remote targets and listen for incoming connections at the same time. Using this feature you can create mesh networks.
+**Pigs can be chained**\
+A pig can simultaneously connect to multiple remote targets and listen for incoming connections. Using this feature you can create mesh networks.
 
-**Direct path discovery using NAT traversal.** STUN (for NAT discovery) and MQTT (for signaling) servers are required in this mode. While these dependencies seem daunting at first, these are very popular technologies. One can find plenty of public/free servers of both kinds available out there.
+**No fiddling with your firewall**\
+Pig implements NAT traversal using STUN (for NAT discovery) and MQTT (for signaling). While these dependencies seem daunting at first, they are both very popular technologies. One can find plenty of public/free servers of both kinds available out there. You don't need to run your own.
 
-**IPv4 and IPv6 support.**
+**IPv4 and IPv6 support**\
+IPv6 datagrams are fully supported and can be routed through pig tunnels.
 
-**Swappable transport protocols.** Choose from [available ones](docs/cli-help/protos.md) such as QUIC, TLS, WebSocket, DTLS, and the experimental TLS-in-ICMP. Or let NAT traversal pick one automatically. There are more planned.
+**Swappable transport protocols**\
+Choose from [available ones](docs/reference/cli/protos.md) such as QUIC, TLS, WebSocket, DTLS, and the experimental TLS-in-ICMP. Or let NAT traversal pick one automatically. There are more planned.
 
-**Routing table management.** Pig can manage the routing table on the local machine to ensure that traffic is routed correctly through the tunnel.
+**Routing**\
+Pig can manage the routing table on the local machine to ensure that traffic is routed correctly through the tunnel.
 
-**Authentication.** JWT, mTLS, and OIDC, used independently or combined.
+**Authentication**\
+mTLS, JWT, OAuth and OIDC, used independently or combined.
 
-**Event driven script execution.** For extra setup or cleanup. Tunnel events and related information is passed to the called scripts via environment variables (see [`pig -docs env`](docs/cli-help/env.md)).
+**Event driven script execution**\
+For extra setup or cleanup. Tunnel events and related information is passed to the called scripts via environment variables (see [`pig -docs env`](docs/reference/cli/env.md)).
 
-**Multi-platform.** Linux, macOS, and Windows. Would love to add mobile support, too.
-
-**STUN mode.** Pig has a [`-stun`](docs/cli-help/stun.md) subcommand to query a remote server or become one on the fly.
+**STUN mode**\
+Query or become a STUN server on the fly using the [`-stun`](docs/reference/cli/stun.md) subcommand.
 
 ## Getting started
 
 - Download the [latest release](https://github.com/riraccuia/pig/releases) or build from source using the [makefile](Makefile).
-- Read the [user gude](docs/guide.md), check out the [examples](examples/) and [Docker](docs/docker.md) files.
-- Run [`pig -h`](docs/cli-help/main.md) to see the available options.
-- Use the [`-to-cfg`](docs/cli-help/connect.md) option to quickly generate a baseline config for advanced setups.
-- See the [config file reference](docs/config.md).
+- Read the [user guide](docs/index.md), check out the [examples](examples/) and [Docker](docs/docker/docker.md) files.
+- Run [`pig -h`](docs/reference/cli/pig.md) to see the available options.
+- Use the [`-to-cfg`](docs/reference/cli/connect.md) option to quickly generate baseline configs for advanced setups.
+- See the [config file reference](docs/reference/config/config.md).
 
 
 
@@ -95,7 +109,7 @@ pig -config alice.json
 - Pig features a [WRED (weighted random early detection)](https://en.wikipedia.org/wiki/Weighted_random_early_detection) implementation to combat network bufferbloat and maintain low latency. It is fully configurable.
 - The ICMP transport protocol has a TCP style congestion control (New Reno) built on top of it. More testing and feedback would really help here.
 - Adding a new transport protocol is relatively simple and "only" requires some wrapping to honor the `transport.Conn` and `transport.Listener` interfaces.
-- If one of the connecting nodes is behind [symmetric NAT](https://en.wikipedia.org/wiki/Network_address_translation#Methods_of_translation), pig can usually still find a path using the [birthday problem](https://en.wikipedia.org/wiki/Birthday_problem).
+- If one of the connecting nodes is behind [symmetric NAT](docs/nat/symmetric.md), pig can usually still find a path using the [birthday problem](https://en.wikipedia.org/wiki/Birthday_problem).
 - Stream multiplexing support is built-in where the protocol allows it (e.g. QUIC). The number of streams to open is configurable, too.
 
 

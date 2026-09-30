@@ -54,14 +54,13 @@ var (
 // GetClientDialFunc returns a function that creates client connections based on config.
 func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, bindAdapter string) func(ctx context.Context) (transport.Conn, error) {
 	return func(ctx context.Context) (transport.Conn, error) {
-		err := setupGlobalListener(ctx, logger, bindAdapter, false)
+		err := SetupGlobalListener(ctx, logger, bindAdapter, false)
 		if err != nil {
 			return nil, fmt.Errorf("failed to setup icmp listener: %w", err)
 		}
 
 		// Create new connection
 		conn := newConnection(
-			ctx,
 			globalListener,
 			&net.IPAddr{IP: net.ParseIP(config.Connect.Address)},
 			uint16(os.Getpid()&0xffff),
@@ -86,7 +85,7 @@ func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, bind
 			return nil, fmt.Errorf("failed to initialize system: %w", err)
 		}
 
-		err := setupGlobalListener(ctx, logger, bindAdapter, true)
+		err := SetupGlobalListener(ctx, logger, bindAdapter, true)
 		if err != nil {
 			return nil, fmt.Errorf("failed to setup icmp listener: %w", err)
 		}
@@ -95,7 +94,7 @@ func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, bind
 	}
 }
 
-func setupGlobalListener(ctx context.Context, logger common.Logger, bindAdapter string, isServer bool) (err error) {
+func SetupGlobalListener(ctx context.Context, logger common.Logger, bindAdapter string, isServer bool) (err error) {
 	globalListenerDoOnce.Do(func() {
 		var (
 			bindAddr *net.IPAddr

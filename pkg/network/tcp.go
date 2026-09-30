@@ -15,10 +15,18 @@
 package network
 
 import (
+	"context"
 	"net"
+	"time"
 )
 
 // DialTCP uses a net.Dialer to dial a TCP connection and sets the SO_REUSEADDR and TCP_NODELAY options.
 func DialTCP(network string, laddr, raddr *net.TCPAddr) (*net.TCPConn, error) {
-	return dialTCP(network, laddr, raddr)
+	dialer := NewDialer(5 * time.Second)
+	return dialTCP(context.Background(), dialer, network, laddr, raddr)
+}
+
+func DialTCPContext(ctx context.Context, network string, laddr, raddr *net.TCPAddr) (*net.TCPConn, error) {
+	dialer := NewDialer(5 * time.Second)
+	return dialTCP(ctx, dialer, network, laddr, raddr)
 }

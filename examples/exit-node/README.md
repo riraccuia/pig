@@ -1,7 +1,7 @@
 # Exit node
 
 A, the listener node, waits for incoming connections. B is the connecting node.
-A and B find a connection path automatically using [NAT traversal](../../docs/nat.md).
+A and B find a connection path automatically using [NAT traversal](../../docs/nat/nat.md).
 B sends all of its traffic through A.
 A source NATs (or masquerades) B's traffic exiting A's local domain.
 

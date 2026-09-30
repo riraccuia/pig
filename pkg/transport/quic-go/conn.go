@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go"
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -92,6 +93,9 @@ func (c *QuicConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
 }
 
 func (c *QuicConn) NewStream(ctx context.Context) (transport.Stream, error) {
+	if common.IsContextDone(ctx) {
+		return nil, ctx.Err()
+	}
 	stream, err := c.conn.OpenStream()
 	if err != nil {
 		return nil, err

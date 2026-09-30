@@ -11,6 +11,18 @@ A command-line tool for generating JWT tokens with RSA or ED25519 signatures. Th
 - Supports standard JWT claims
 - Command-line flags for automation
 
+## Building
+
+```bash
+go build -o signtool tools/signtool/main.go
+```
+
+or
+
+```bash
+make signtool
+```
+
 ## Usage
 
 ```bash

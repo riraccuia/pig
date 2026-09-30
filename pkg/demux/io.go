@@ -34,7 +34,7 @@ func (d *Demux) readFromAdapter(ctx context.Context) {
 		_, err := d.adapter.Read(buf[:])
 		if err != nil {
 			d.bufferPool.PutBuffer(buf)
-			d.logger.Errorf("failed to read from adapter: %v", err)
+			d.logger.Errorf("demux failed to read from adapter %s: %v", d.adapter.Name(), err)
 			return
 		}
 
@@ -72,7 +72,7 @@ func (d *Demux) writeToAdapter(ctx context.Context) {
 			_, err := d.adapter.Write(pkt.Bytes()[:pkt.TotalLength()])
 			d.bufferPool.PutBuffer(pkt.Bytes())
 			if err != nil {
-				d.logger.Errorf("failed to write to adapter: %v", err)
+				d.logger.Errorf("demux failed to write to adapter %s: %v", d.adapter.Name(), err)
 			}
 		}
 	}
@@ -97,7 +97,7 @@ func (d *Demux) readFromOutbound(ctx context.Context) {
 			select {
 			case targetAdapter.outqueue <- pkt:
 			default:
-				d.logger.Errorf("tunnel outbound channel full, dropping packet")
+				d.logger.Errorf("demux out queue full, dropping packet")
 				d.bufferPool.PutBuffer(pkt.Bytes())
 			}
 		}

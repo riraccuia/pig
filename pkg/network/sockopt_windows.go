@@ -28,6 +28,10 @@ func setSockoptReuseAddr(fd uintptr) error {
 	return windows.SetsockoptInt(windows.Handle(fd), windows.SOL_SOCKET, windows.SO_REUSEADDR, 1)
 }
 
+func setSockoptTCPNoDelay(fd uintptr) error {
+	return windows.SetsockoptInt(windows.Handle(fd), windows.IPPROTO_TCP, windows.TCP_NODELAY, 1)
+}
+
 // setSockoptReusePort is a no-op on Windows.
 func setSockoptReusePort(fd uintptr) error {
 	return nil

@@ -208,15 +208,15 @@ func (b *linuxBackend) handleRouteMessage(nr *netlinkRoute, routeTableV4, routeT
 		rt = systemRoute
 		routeTable.Insert(rt)
 		b.onChange()
-		routeTable.Walk(func(r *Route) {
-			fmt.Printf("Dump route: %+v\n", r)
-		})
+		//routeTable.Walk(func(r *Route) {
+		//fmt.Printf("Dump route: %+v\n", r)
+		//})
 		return
 	}
 	routeTable.Remove(rt)
-	routeTable.Walk(func(r *Route) {
-		fmt.Printf("Dump route: %+v\n", r)
-	})
+	//routeTable.Walk(func(r *Route) {
+	//fmt.Printf("Dump route: %+v\n", r)
+	//})
 	b.onChange()
 }
 

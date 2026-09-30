@@ -12,31 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build windows && !unix
+package common
 
-package network
+import "context"
 
-import (
-	"context"
-	"fmt"
-	"net"
-)
-
-func dialTCP(ctx context.Context, dialer *net.Dialer, network string, laddr, raddr *net.TCPAddr) (*net.TCPConn, error) {
-	if laddr != nil {
-		dialer.LocalAddr = laddr
+func IsContextDone(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return true
+	default:
+		return false
 	}
-
-	conn, err := dialer.DialContext(ctx, network, raddr.String())
-	if err != nil {
-		return nil, err
-	}
-
-	tcpConn, ok := conn.(*net.TCPConn)
-	if !ok {
-		conn.Close()
-		return nil, fmt.Errorf("failed to convert to TCPConn")
-	}
-
-	return tcpConn, nil
 }

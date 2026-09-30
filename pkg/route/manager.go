@@ -279,6 +279,9 @@ func (m *baseManager) FindBestRoute(dst net.IP) (*Route, error) {
 	}
 
 	rt = table.Lookup(dst)
+	if rt == nil {
+		return nil, fmt.Errorf("no route found for %s", dst.String())
+	}
 	// create hard copy of the route
 	rtCopy := *rt
 	return &rtCopy, nil

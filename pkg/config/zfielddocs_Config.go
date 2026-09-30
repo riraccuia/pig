@@ -109,8 +109,9 @@ func (Config) DescribeFields() map[string]common.FieldMeta {
 		"tunnels[].tls.insecure":                        {Optional: true, Desc: "Insecure is the flag to skip TLS certificate verification."},
 		"tunnels[].tls.key_file":                        {Optional: true, Desc: "KeyFile is the private key for CertFile."},
 		"tunnels[].wred":                                {Optional: true, Desc: "WRED settings."},
-		"tunnels[].wred.drop_probability":               {Default: fmt.Sprint(DefaultWredDP), Optional: true, Desc: "Probability for packets to be dropped on busy queues. Accepts decimals between 0 and 1."},
-		"tunnels[].wred.threshold":                      {Default: fmt.Sprint(DefaultWredThresh), Optional: true, Desc: "Threshold for WRED as a fraction of the queue length. Accepts decimals between 0 and 1."},
+		"tunnels[].wred.max_drop_probability":           {Default: fmt.Sprint(DefaultWredDP), Optional: true, Desc: "Maximum probability (%) for packets to be dropped on busy queues. Accepts decimals between 0 and 1."},
+		"tunnels[].wred.max_threshold":                  {Default: fmt.Sprint(DefaultWredThresh), Optional: true, Desc: "Maximum threshold indicates the level (%) where the discard probability reaches its maximum value. Accepts decimals between 0 and 1."},
+		"tunnels[].wred.min_threshold":                  {Default: fmt.Sprint(DefaultWredMinThresh), Optional: true, Desc: "Minimum threshold indicates the average queue fill (%) at which early drops start. Accepts decimals between 0 and 1."},
 		"tunnels[].wred.weight_factor":                  {Default: fmt.Sprint(DefaultWredWF), Optional: true, Desc: "Weight factor. Lower values give more weight to recent packets."},
 	}
 }

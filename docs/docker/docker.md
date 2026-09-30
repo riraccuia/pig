@@ -4,9 +4,9 @@
 
 | File | Path |
 |------|------|
-| Dockerfile | [`build/docker/Dockerfile`](../build/docker/Dockerfile) |
-| Compose | [`build/docker/compose.yaml`](../build/docker/compose.yaml) |
-| Entrypoint | [`build/docker/start.sh`](../build/docker/start.sh) |
+| Dockerfile | [`build/docker/Dockerfile`](../../build/docker/Dockerfile) |
+| Compose | [`build/docker/compose.yaml`](../../build/docker/compose.yaml) |
+| Entrypoint | [`build/docker/start.sh`](../../build/docker/start.sh) |
 
 Build context is the repository root.
 The entrypoint ensures `/dev/net/tun` exists and optionally installs masquerade rules (`PIG_MASQUERADE`).
@@ -27,4 +27,4 @@ Useful environment variables:
 | `PIG_NAT_OIF` | `eth0` | Interface name | Outbound interface for masquerade (used when masquerade is on) |
 | `PIG_CONFIG` | `/etc/pig/pig.config` | Absolute path inside the container | Config file passed to `pig -config` |
 
-See the [Examples](guide.md#examples) folder for more practical examples.
+See the [Examples](../../examples/) folder for more practical examples.

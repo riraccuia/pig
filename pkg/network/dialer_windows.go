@@ -12,31 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build windows && !unix
+//go:build windows
 
 package network
 
 import (
-	"context"
-	"fmt"
 	"net"
+	"syscall"
+	"time"
 )
 
-func dialTCP(ctx context.Context, dialer *net.Dialer, network string, laddr, raddr *net.TCPAddr) (*net.TCPConn, error) {
-	if laddr != nil {
-		dialer.LocalAddr = laddr
+func NewDialer(timeout time.Duration) *net.Dialer {
+	dialer := &net.Dialer{
+		Timeout: timeout,
+		Control: func(network, address string, c syscall.RawConn) error {
+			return c.Control(func(fd uintptr) {
+				setSockoptReuseAddr(fd)
+				setSockoptReusePort(fd)
+				setSockoptTCPNoDelay(fd)
+			})
+		},
 	}
-
-	conn, err := dialer.DialContext(ctx, network, raddr.String())
-	if err != nil {
-		return nil, err
-	}
-
-	tcpConn, ok := conn.(*net.TCPConn)
-	if !ok {
-		conn.Close()
-		return nil, fmt.Errorf("failed to convert to TCPConn")
-	}
-
-	return tcpConn, nil
+	return dialer
 }

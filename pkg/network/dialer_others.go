@@ -12,33 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+//go:build !windows
+
+package network
 
 import (
-	"context"
+	"net"
+	"syscall"
+	"time"
 )
 
-func (s *Server) processOutbound(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case pkt := <-s.outbound:
-			_client, ok := s.clients.Load(pkt.DestinationIP().String())
-			if !ok {
-				freeBuf := true
-				if freeBuf {
-					s.bufferPool.Put(pkt.Bytes())
-				}
-				continue
-			}
-			client := _client.(*ClientTunnel)
-
-			select {
-			case client.outbound.C <- pkt:
-			default:
-				s.bufferPool.Put(pkt.Bytes())
-			}
-		}
+func NewDialer(timeout time.Duration) *net.Dialer {
+	dialer := &net.Dialer{
+		Timeout: timeout,
+		Control: func(network, address string, c syscall.RawConn) error {
+			return c.Control(func(fd uintptr) {
+				setSockoptReuseAddr(fd)
+				setSockoptReusePort(fd)
+			})
+		},
 	}
+	return dialer
 }

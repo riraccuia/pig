@@ -1,10 +1,12 @@
 package ice
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/stun"
@@ -47,20 +49,23 @@ func testConnectPaths(t *testing.T, protocol transport.ICEProtocolDefinition, la
 	cp1.BindAgent.SetConfig(stun.NewControllingICEBindingAgentConfig(logger.PrintLevel, nil, 100))
 	cp2.BindAgent.SetConfig(stun.NewControlledICEBindingAgentConfig(logger.PrintLevel, nil, 100))
 
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		cp2.Connect()
+		cp2.Connect(ctx)
 	}()
 	go func() {
 		defer wg.Done()
-		cp1.Connect()
+		cp1.Connect(ctx)
 	}()
 	wg.Wait()
 
 	// Test cp1 -> cp2 binding
-	r, err := cp1.BindAgent.SendRequest(true)
+	r, err := cp1.BindAgent.SendRequest(ctx, true)
 	if err != nil {
 		t.Errorf("Failed to send binding request: %v", err)
 		return
@@ -76,7 +81,7 @@ func testConnectPaths(t *testing.T, protocol transport.ICEProtocolDefinition, la
 	}
 
 	// Test cp2 -> cp1 binding
-	r, err = cp2.BindAgent.SendRequest(true)
+	r, err = cp2.BindAgent.SendRequest(ctx, true)
 	if err != nil {
 		t.Errorf("Failed to send binding request: %v", err)
 		return

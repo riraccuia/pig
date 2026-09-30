@@ -25,7 +25,12 @@ import (
 // DialUDP uses a net.Dialer to dial a UDP connection and sets the SO_REUSEADDR option.
 func DialUDP(network string, laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
 	dialer := NewDialer(0)
-	return dialUDP(dialer, network, laddr, raddr)
+	return dialUDP(context.Background(), dialer, network, laddr, raddr)
+}
+
+func DialUDPContext(ctx context.Context, network string, laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
+	dialer := NewDialer(0)
+	return dialUDP(ctx, dialer, network, laddr, raddr)
 }
 
 // ListenUDP uses a net.ListenConfig to listen on a UDP address and sets the SO_REUSEADDR option.
@@ -33,12 +38,12 @@ func ListenUDP(network string, laddr *net.UDPAddr) (*net.UDPConn, error) {
 	return listenUDP(network, laddr)
 }
 
-func dialUDP(dialer *net.Dialer, network string, laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
+func dialUDP(ctx context.Context, dialer *net.Dialer, network string, laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
 	if laddr != nil {
 		dialer.LocalAddr = laddr
 	}
 
-	conn, err := dialer.Dial(network, raddr.String())
+	conn, err := dialer.DialContext(ctx, network, raddr.String())
 	if err != nil {
 		return nil, err
 	}

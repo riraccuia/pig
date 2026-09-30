@@ -12,31 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build windows && !unix
-
-package network
+package queue
 
 import (
-	"context"
-	"fmt"
-	"net"
+	"github.com/riraccuia/pig/pkg/common"
 )
 
-func dialTCP(ctx context.Context, dialer *net.Dialer, network string, laddr, raddr *net.TCPAddr) (*net.TCPConn, error) {
-	if laddr != nil {
-		dialer.LocalAddr = laddr
-	}
+func zero[T any]() T {
+	var z T
+	return z
+}
 
-	conn, err := dialer.DialContext(ctx, network, raddr.String())
-	if err != nil {
-		return nil, err
+func DrainQueue[T any](q any, fn func(val T)) {
+	if queue, ok := q.(common.PacketQueue); ok {
+		for {
+			select {
+			case pkt, ok := <-queue:
+				if !ok {
+					return
+				}
+				t, ok := pkt.(T)
+				if !ok {
+					return
+				}
+				fn(t)
+			default:
+				return
+			}
+		}
 	}
-
-	tcpConn, ok := conn.(*net.TCPConn)
-	if !ok {
-		conn.Close()
-		return nil, fmt.Errorf("failed to convert to TCPConn")
+	if fifo, ok := q.(*FIFO[T]); ok {
+		pkts, empty, _ := fifo.TryPopAll()
+		if empty {
+			return
+		}
+		for _, pkt := range pkts {
+			fn(pkt)
+		}
 	}
-
-	return tcpConn, nil
 }

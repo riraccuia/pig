@@ -1,15 +1,18 @@
 # NAT traversal
 
 Pig can discover a connection path between two endpoints automatically through NATs.
+When one side is address-dependent or address-and-port-dependent, Pig can still try a probabilistic port search: see [Symmetric NAT](symmetric.md).
+
 Two external services are involved:
 
 - **STUN** for NAT discovery. Each peer queries a STUN server for its public address, and to discover its NAT type.
 - **MQTT** for ICE signaling. Peers exchange candidates and related ICE messages through an MQTT broker. They do not need a direct connection to each other for that exchange.
 
 Enable ICE on the tunnel (`ice.enabled`), and set a STUN server and MQTT broker.
-Global defaults, per-tunnel overrides, flags, or env, see the [config reference](config.md) and/or run `pig docs env`).
+Global defaults, per-tunnel overrides, flags, or env, see the [config reference](../reference/config/config.md) and/or run `pig docs env`).
 
 For more information on ICE, start by reading the [Wikipedia article](https://en.wikipedia.org/wiki/Interactive_Connectivity_Establishment).
+
 
 ## STUN
 

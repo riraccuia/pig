@@ -37,6 +37,7 @@ func printMainUsage() {
 	printFlag(w, "-"+FLAG_MAIN_STUN, "STUN (Session Traversal Utilities for NAT) tools.")
 	printFlag(w, "-"+FLAG_MAIN_CONFIG, "Load settings from a json or toml file.")
 	printFlag(w, "-"+FLAG_MAIN_DOCS, "Pig user documentation.")
+	printFlag(w, "-"+FLAG_MAIN_VERSION, "Print the version and exit.")
 	w.Flush()
 }
 

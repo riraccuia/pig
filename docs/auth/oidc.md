@@ -2,7 +2,7 @@
 
 OIDC authentication can be activated via config file only. There are no CLI flags for it today. They may be added later.
 
-Set `auth.type` to `oidc`. Field names are in the [config reference](../config.md#oidcauth) under `auth.oidc`.
+Set `auth.type` to `oidc`. Field names are in the [config reference](../reference/config/config.md#oidcauth) under `auth.oidc`.
 
 For providers that only issue OAuth access tokens (for example GitHub), use [OAuth authentication](oauth.md) instead.
 

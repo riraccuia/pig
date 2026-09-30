@@ -15,6 +15,7 @@
 package stun
 
 import (
+	"context"
 	"math/rand"
 	"net"
 	"os"
@@ -49,8 +50,7 @@ func (s *mockStunServer) start() error {
 				return
 			}
 			agent := NewBindingAgent(s.config)
-			agent.SetConn(conn)
-			agent.Receive()
+			agent.Receive(conn)
 		}
 	}()
 	return nil
@@ -86,10 +86,12 @@ func TestBindingRequestTimeout(t *testing.T) {
 	}
 
 	bindReq := NewBindingAgent(NewBindingAgentConfig(NoopLoggerFunc, nil))
-	bindReq.SetConn(conn)
-	bindReq.Receive()
+	bindReq.Receive(conn)
 
-	_, err = bindReq.SendRequest(true)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	_, err = bindReq.SendRequest(ctx, true)
 	t.Logf("Error: %v", err)
 	// check if err is a timeout error
 	if err == nil {
@@ -150,10 +152,13 @@ func TestBasicIceBindingRequest(t *testing.T) {
 			// Create bind request
 			logger := server.config.Logger
 			bindReq := NewBindingAgent(NewControllingICEBindingAgentConfig(logger, tc.clientAuth, 0))
-			bindReq.SetConn(conn)
-			bindReq.Receive()
+			bindReq.Receive(conn)
+
+			ctx, cancel := context.WithTimeout(context.Background(), stunTimeout)
+			defer cancel()
+
 			// Send binding request
-			result, err := bindReq.SendRequest(true)
+			result, err := bindReq.SendRequest(ctx, true)
 			if err != nil {
 				t.Errorf("DGB error: %v", err)
 				return
@@ -250,10 +255,13 @@ func TestIceBindingRequestAttributes(t *testing.T) {
 
 			// Create bind request
 			bindReq := NewBindingAgent(NewICEBindingAgentConfig(NoopLoggerFunc, nil, tc.attrs))
-			bindReq.SetConn(conn)
-			bindReq.Receive()
+			bindReq.Receive(conn)
+
+			ctx, cancel := context.WithTimeout(context.Background(), stunTimeout)
+			defer cancel()
+
 			// Send binding request
-			result, err := bindReq.SendRequest(true)
+			result, err := bindReq.SendRequest(ctx, true)
 			if err != nil {
 				t.Errorf("Unexpected error: %v", err)
 				return
@@ -311,8 +319,7 @@ func TestConcurrentBindingRequests(t *testing.T) {
 		RemoteUfrag:    "RFRAG",
 		RemotePassword: "PASS2",
 	}, nil))
-	bindReq1.SetConn(peer1)
-	bindReq1.Receive()
+	bindReq1.Receive(peer1)
 
 	bindReq2 := NewBindingAgent(NewICEBindingAgentConfig(NoopLoggerFunc, &IceAuth{
 		LocalUfrag:     "RFRAG",
@@ -320,8 +327,7 @@ func TestConcurrentBindingRequests(t *testing.T) {
 		RemoteUfrag:    "LFRAG",
 		RemotePassword: "PASS1",
 	}, nil))
-	bindReq2.SetConn(peer2)
-	bindReq2.Receive()
+	bindReq2.Receive(peer2)
 
 	// Send binding requests concurrently
 	var (
@@ -329,15 +335,18 @@ func TestConcurrentBindingRequests(t *testing.T) {
 		result1, result2 *BindingResult
 	)
 
+	ctx, cancel := context.WithTimeout(context.Background(), stunTimeout)
+	defer cancel()
+
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		result1, err1 = bindReq1.SendRequest(true)
+		result1, err1 = bindReq1.SendRequest(ctx, true)
 	}()
 
 	go func() {
 		defer wg.Done()
-		result2, err2 = bindReq2.SendRequest(true)
+		result2, err2 = bindReq2.SendRequest(ctx, true)
 	}()
 
 	// Wait for both requests to complete
@@ -428,8 +437,7 @@ func TestICENominatedFlow(t *testing.T) {
 		RemoteUfrag:    "NOM_R",
 		RemotePassword: "PASS2",
 	}, 0x7e0000ff))
-	agent1.SetConn(peer1)
-	agent1.Receive()
+	agent1.Receive(peer1)
 
 	agent2 := NewBindingAgent(NewControlledICEBindingAgentConfig(NoopLoggerFunc, &IceAuth{
 		LocalUfrag:     "NOM_R",
@@ -437,13 +445,15 @@ func TestICENominatedFlow(t *testing.T) {
 		RemoteUfrag:    "NOM_L",
 		RemotePassword: "PASS1",
 	}, 0x7e0000fe))
-	agent2.SetConn(peer2)
-	agent2.Receive()
+	agent2.Receive(peer2)
 
 	// Give the receive goroutine a chance to block in Read before we send.
 	time.Sleep(50 * time.Millisecond)
 
-	result, err := agent1.ICENominateCandidate()
+	ctx, cancel := context.WithTimeout(context.Background(), stunTimeout)
+	defer cancel()
+
+	result, err := agent1.ICENominateCandidate(ctx)
 	if err != nil {
 		t.Fatalf("ICENominateCandidate: %v", err)
 	}
@@ -455,5 +465,6 @@ func TestICENominatedFlow(t *testing.T) {
 		t.Fatal("controlled peer should set ICENominated after receiving USE-CANDIDATE")
 	}
 
+	agent1.StopReceive()
 	agent2.StopReceive()
 }

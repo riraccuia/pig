@@ -1,5 +1,5 @@
 ```
-Usage: pig -c [options] [-to-cfg <json|toml>]
+Usage: pig -l [options] [-to-cfg <json|toml>]
 
 OUTPUT
 
@@ -17,16 +17,10 @@ General options:
  -I  The adapter/interface to bind to, required only when '-P' is *-ICMP.
  -P  Transport protocol for the tunnel. See 'pig docs protos' for the list of supported ones. The
      special '.' option selects all available protocols for candidate generation with NAT traversal.
- -p  Source port to use for the connection.
  -ta Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR
      values. Defaults to 172.31.254.1/29 for connect nodes and 172.31.255.1/24 for listening nodes.
- -r  Reconnect interval in seconds. Defaults to 5.
- -R  Route subnets through the tunnel. Provide 'full' to route all traffic, or a comma separated list of
-     CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'.
 
 Scripting options:
- -S Takes the path to an executable file that will be called on tunnel events. See 'pig docs env' for
-    the list of environment variables that are passed to the script.
 
 Logging options:
  -v Print more verbose output. Use 0 (default) for info, 1 for debug, 2 for trace.
@@ -40,10 +34,10 @@ Trust options:
  -ca Path to a CA certificate or bundle file for mTLS.
 
 Auth options:
- -A Authentication type. Set to 'jwt' to enable JWT authentication. More types will be supported in
-    future versions.
- -T Sets the token string for JWT client authentication. It is recommended to populate the PIG_TOKEN
-    environment variable instead of using this flag.
+ -A   Authentication type. Set to 'jwt' to enable JWT authentication. More types will be supported in
+      future versions.
+ -jwk Path to a public key file used to verify JWT tokens. This can be a local file or a URL. PEM and
+      JWKS (json) formats are supported.
 
 NAT traversal options:
  -stun STUN server to query during NAT traversal.
@@ -53,13 +47,11 @@ NAT traversal options:
 
 Nerd options:
  -mtu MTU (Maximum Transmission Unit) size of the tunnel adapter.
- -os  Open streams. The number of individual streams that the connecting side will open with stream based
-      protocols like quic. Defaults to the number of CPU cores.
  -qs  Size of the packet queues used by tunnels.
 
 WRED options:
- -wf Weight factor for WRED, lower values mean more weight to recent packets. Defaults to 5.
- -wd Drop probability for WRED. Accepts decimals between 0 and 1. Defaults to 0.25.
+ -wf Weight factor for WRED, lower values mean more weight to recent packets. Defaults to 9.
+ -wd Drop probability for WRED. Accepts decimals between 0 and 1. Defaults to 0.1.
  -wt Threshold for WRED as a fraction of the queue length. Accepts decimals between 0 and 1. Defaults to
-     0.3.
+     0.5.
 ```
