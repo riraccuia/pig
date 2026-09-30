@@ -24,14 +24,13 @@ import (
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-func (c *Controller) StartServer() {
-	c.Add(1)
-	go c.startServer(c.ctx, c.cfg)
+func (c *Controller) StartServer(ctx context.Context) {
+	c.Go(func() {
+		c.startServer(ctx, c.cfg)
+	})
 }
 
 func (c *Controller) startServer(ctx context.Context, cfg *config.Config) {
-	defer c.Done()
-
 	if !cfg.HasListenTunnels() {
 		return
 	}
@@ -46,8 +45,6 @@ func (c *Controller) startServer(ctx context.Context, cfg *config.Config) {
 }
 
 func (c *Controller) startServerTunnel(ctx context.Context, tunnelCfg *config.TunnelConfig) {
-	defer c.Done()
-
 	var (
 		tunnel        *server.Server
 		listener      func(ctx context.Context) (transport.Listener, error)

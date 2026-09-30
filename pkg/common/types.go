@@ -47,4 +47,5 @@ type Logger interface {
 	Fatalf(format string, args ...any)
 	Trace(args ...any)
 	Tracef(format string, args ...any)
+	Flush()
 }

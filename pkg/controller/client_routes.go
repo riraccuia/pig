@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"runtime"
 
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/route"
@@ -39,20 +38,23 @@ type routeRequest struct {
 	routes []config.Route
 }
 
-func (c *Controller) ManageRoutes() {
-	c.Add(1)
+func (c *Controller) ManageRoutes(ctx context.Context) {
+	var err error
+	c.routeManager, err = route.NewManager(ctx)
+	if err != nil {
+		c.logger.Fatalf("Failed to create route manager: %v", err)
+	}
 	// Central route manager goroutine: installs global routes once, then
 	// processes per-tunnel add/remove requests for the controller lifetime.
-	go c.manageRoutes(c.ctx, c.cfg)
-	runtime.Gosched()
+	c.Go(func() {
+		c.manageRoutes(ctx, c.cfg)
+	})
 }
 
 // manageRoutes is the single goroutine that owns all route table mutations.
 // It installs global routes (bypass/static from RouteConfig) once, then
 // processes add/remove requests. Callers supply the routes to add or remove.
 func (c *Controller) manageRoutes(ctx context.Context, cfg *config.Config) {
-	defer c.Done()
-
 	c.routeRequests = make(chan routeRequest, 16)
 
 	routeCfg := &cfg.RouteConfig

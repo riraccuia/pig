@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
-	"github.com/riraccuia/pig/pkg/controller"
 	"github.com/riraccuia/pig/pkg/log"
 	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/stun"
@@ -85,10 +84,8 @@ func isFlagPassed(flagSet *flag.FlagSet, name string) bool {
 }
 
 func stunMode() {
-	var (
-		flags = parseStunFlags()
-		ctx   = context.Background()
-	)
+	var flags = parseStunFlags()
+
 	if flags.stunServerAddr != "" {
 		doStunQuery(flags)
 		os.Exit(0)
@@ -102,7 +99,7 @@ func stunMode() {
 	case 2:
 		logger.SetLevel("trace")
 	}
-	stunListenMode(ctx, logger, flags)
+	stunListenMode(logger, flags)
 }
 
 // doStunQuery queries the STUN server to get the public IP and port
@@ -155,7 +152,7 @@ func doStunQuery(flags *stunFlags) {
 }
 
 // stunListenMode listens for STUN requests on the specified protocol, address and port.
-func stunListenMode(ctx context.Context, logger common.Logger, flags *stunFlags) {
+func stunListenMode(logger common.Logger, flags *stunFlags) {
 	var (
 		listenAddr net.Addr
 		err        error
@@ -184,18 +181,21 @@ func stunListenMode(ctx context.Context, logger common.Logger, flags *stunFlags)
 		TCPListenFunc: nil,
 	}
 
-	ctrl := controller.New(ctx).WithLogger(logger)
+	ctx, cancel := getOSignalCtx()
+	defer cancel()
 
-	ctrl.StartCallback(func(ctx context.Context) {
-		s, err := stun.NewServer(serverConfig)
-		if err != nil {
-			log.NewBlockingLogger().Fatalf("Failed to create STUN server: %v", err)
-		}
-		err = s.Listen(ctx, listenAddr)
-		if err != nil {
-			log.NewBlockingLogger().Fatalf("Failed to listen on STUN server: %v", err)
-		}
-	})
+	s, err := stun.NewServer(serverConfig)
+	if err != nil {
+		log.NewBlockingLogger().Fatalf("Failed to create STUN server: %v", err)
+	}
+	err = s.Listen(ctx, listenAddr)
+	if err != nil {
+		log.NewBlockingLogger().Fatalf("Failed to listen on STUN server: %v", err)
+	}
 
-	ctrl.HandleGracefulShutdown(nil)
+	<-ctx.Done()
+
+	logger.Infof("Shutting down: %v", context.Cause(ctx))
+
+	logger.Flush()
 }

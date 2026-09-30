@@ -181,9 +181,9 @@ func setConfigField[T comparable](f *T, v T) (changed bool) {
 	return
 }
 
-func initPig(mode Mode) (*config.Config, *log.Logger) {
+func initPig(mode Mode) (*config.Config, common.Logger) {
 	var (
-		logger *log.Logger
+		logger common.Logger
 		cfg    *config.Config
 		flags  *Flags
 		err    error

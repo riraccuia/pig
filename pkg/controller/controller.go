@@ -17,12 +17,8 @@ package controller
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/signal"
 	"runtime"
 	"sync"
-	"syscall"
-	"time"
 
 	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/common"
@@ -34,11 +30,9 @@ import (
 )
 
 type Controller struct {
-	*sync.WaitGroup
+	sync.WaitGroup
 	cfg            *config.Config
 	logger         common.Logger
-	ctx            context.Context
-	cancel         context.CancelCauseFunc
 	routeManager   route.Manager
 	scriptExecutor *script.Executor
 	clientAdapter  common.TunnelAdapter
@@ -49,25 +43,21 @@ type Controller struct {
 	bufferPool     common.BufferPool
 }
 
-type Waiter interface {
-	WaitClose()
+func New() *Controller {
+	return &Controller{
+		tunnels:    &sync.Map{},
+		adapters:   &sync.Map{},
+		bufferPool: common.DefaultBufferPool,
+	}
 }
 
-func New(ctx context.Context) *Controller {
-	iCtx, cancel := context.WithCancelCause(ctx)
-	routeManager, err := route.NewManager(iCtx)
-	if err != nil {
-		log.NewBlockingLogger().Fatalf("Failed to init controller's route manager: %v", err)
+func (c *Controller) Start(ctx context.Context) {
+	if c.cfg == nil {
+		c.logger.Fatal("no config loaded")
 	}
-	return &Controller{
-		WaitGroup:    &sync.WaitGroup{},
-		ctx:          iCtx,
-		cancel:       cancel,
-		routeManager: routeManager,
-		tunnels:      &sync.Map{},
-		adapters:     &sync.Map{},
-		bufferPool:   common.DefaultBufferPool,
-	}
+	c.ManageRoutes(ctx)
+	c.StartClient(ctx)
+	c.StartServer(ctx)
 }
 
 func (c *Controller) WithLogger(logger common.Logger) *Controller {
@@ -149,23 +139,6 @@ func (c *Controller) createAdapter(cfg *config.AdapterConfig, multiQueue bool) (
 	return a, nil
 }
 
-func (c *Controller) StartCallback(callback func(ctx context.Context)) {
-	c.Add(1)
-	go func() {
-		defer c.Done()
-		callback(c.ctx)
-	}()
-}
-
-func (c *Controller) Start() {
-	if c.cfg == nil {
-		c.logger.Fatal("no config loaded")
-	}
-	c.ManageRoutes()
-	c.StartClient()
-	c.StartServer()
-}
-
 func tunnelsByDirection(cfg *config.Config, direction config.TunnelDirection) []*config.TunnelConfig {
 	tunnels := make([]*config.TunnelConfig, 0, len(cfg.Tunnels))
 	for i := range cfg.Tunnels {
@@ -174,34 +147,4 @@ func tunnelsByDirection(cfg *config.Config, direction config.TunnelDirection) []
 		}
 	}
 	return tunnels
-}
-
-func (c *Controller) WaitClose() {
-	c.WaitGroup.Wait()
-}
-
-// HandleGracefulShutdown will wait (block) for an OS signal to be received and then gracefully shutdown the controller.
-func (c *Controller) HandleGracefulShutdown(waiter Waiter) {
-	// Create signal channel with buffer size 1 to avoid blocking
-	sigChan := make(chan os.Signal, 1)
-	// Register for essential signals
-	signal.Notify(sigChan,
-		os.Interrupt,    // SIGINT (Ctrl+C)
-		syscall.SIGTERM, // SIGTERM (termination request)
-		syscall.SIGQUIT, // SIGQUIT (quit from keyboard)
-	)
-	// Block until we receive a signal
-	sig := <-sigChan
-	c.logger.Infof("Received signal: %v, initiating graceful shutdown...", sig)
-	// Cancel the context to signal all goroutines to stop
-	c.cancel(fmt.Errorf("received signal: %v", sig))
-	// Close the closer if it is not nil
-	if waiter != nil {
-		waiter.WaitClose()
-	}
-	// Wait for all goroutines to finish
-	c.Wait() // this will wait for all goroutines to finish
-	c.logger.Info("Graceful shutdown completed")
-	// used to flush the log buffer
-	time.Sleep(time.Millisecond * 100)
 }

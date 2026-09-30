@@ -16,10 +16,13 @@ package main
 
 import (
 	"context"
+	"os"
+	"os/signal"
+	"syscall"
 
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/controller"
-	"github.com/riraccuia/pig/pkg/log"
 )
 
 func pigFromCliFlags(mo Mode) {
@@ -30,14 +33,18 @@ func pigFromConfigFileFlag() {
 	startPig(initPigConfig(), nil)
 }
 
-func startPig(cfg *config.Config, logger *log.Logger) {
+func startPig(cfg *config.Config, logger common.Logger) {
 	//enablePprof()
 	var (
-		ctx  = context.Background()
-		ctrl *controller.Controller
+		ctx    context.Context
+		cancel context.CancelFunc
+		ctrl   *controller.Controller
 	)
 
-	ctrl = controller.New(ctx)
+	ctx, cancel = getOSignalCtx()
+	defer cancel()
+
+	ctrl = controller.New()
 
 	if logger != nil {
 		ctrl = ctrl.WithLogger(logger)
@@ -45,6 +52,25 @@ func startPig(cfg *config.Config, logger *log.Logger) {
 
 	ctrl = ctrl.WithConfig(cfg)
 
-	ctrl.Start()
-	ctrl.HandleGracefulShutdown(nil)
+	if logger == nil {
+		// after calling WithConfig, the logger will be set
+		logger = ctrl.GetLogger()
+	}
+
+	ctrl.Start(ctx)
+
+	<-ctx.Done()
+
+	logger.Infof("Shutting down: %v", context.Cause(ctx))
+
+	logger.Flush()
+}
+
+func getOSignalCtx() (context.Context, context.CancelFunc) {
+	ctx, cancel := signal.NotifyContext(context.Background(),
+		os.Interrupt,    // SIGINT (Ctrl+C)
+		syscall.SIGTERM, // SIGTERM (termination request)
+		syscall.SIGQUIT, // SIGQUIT (quit from keyboard)
+	)
+	return ctx, cancel
 }

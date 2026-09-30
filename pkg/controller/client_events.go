@@ -17,21 +17,11 @@ package controller
 import (
 	"context"
 	"fmt"
-	"runtime"
 
 	"github.com/riraccuia/pig/pkg/client"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/demux"
 )
-
-// HandleClientEvents starts monitoring events for a client tunnel that was
-// created externally (e.g. in tests). It has no associated TunnelConfig so
-// only peer-bypass routes are managed.
-func (c *Controller) HandleClientEvents(tunnel *client.Client) {
-	c.Add(1)
-	go c.handleClientEvents(c.ctx, tunnel)
-	runtime.Gosched()
-}
 
 func (c *Controller) onTunnelConnected(tunnel *client.Client) error {
 	ta, ok := tunnel.GetAdapter().(*demux.Adapter)

@@ -26,8 +26,8 @@ import (
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-func (c *Controller) StartClient() {
-	c.Go(func() { c.startClient(c.ctx, c.cfg) })
+func (c *Controller) StartClient(ctx context.Context) {
+	c.Go(func() { c.startClient(ctx, c.cfg) })
 }
 
 func (c *Controller) startClient(ctx context.Context, cfg *config.Config) {

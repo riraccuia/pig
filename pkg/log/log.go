@@ -26,7 +26,8 @@ import (
 
 // Logger wraps zerolog.Logger to provide simplified logging methods.
 type Logger struct {
-	log zerolog.Logger
+	log    zerolog.Logger
+	output *zerolog.ConsoleWriter
 }
 
 // NewLogger creates a new Logger instance.
@@ -34,14 +35,15 @@ func NewLogger() *Logger {
 	wr := diode.NewWriter(os.Stdout, 1024, 10*time.Millisecond, func(missed int) {
 		fmt.Printf("Logger Dropped %d messages", missed)
 	})
-	output := zerolog.ConsoleWriter{
+	output := &zerolog.ConsoleWriter{
 		Out:        wr, //zerolog.SyncWriter(NewBufferedWriter(ctx, 1024)),
 		NoColor:    noColor,
 		TimeFormat: time.RFC3339,
 	}
 	zl := zerolog.New(output).Level(zerolog.InfoLevel).With().Timestamp().Logger()
 	return &Logger{
-		log: zl,
+		log:    zl,
+		output: output,
 	}
 }
 
@@ -64,21 +66,30 @@ func NewFileLogger(path string, rotateSizeAny any) (*Logger, error) {
 	}
 	zl := zerolog.New(output).Level(zerolog.InfoLevel).With().Timestamp().Logger()
 	return &Logger{
-		log: zl,
+		log:    zl,
+		output: output,
 	}, nil
 }
 
 // NewBlockingLogger creates a new Logger instance that writes directly to stdout
 // without buffering. This logger will block until each message is written.
 func NewBlockingLogger() *Logger {
-	output := zerolog.ConsoleWriter{
+	output := &zerolog.ConsoleWriter{
 		Out:        os.Stdout,
 		TimeFormat: time.RFC3339,
 	}
 	zl := zerolog.New(output).Level(zerolog.InfoLevel).With().Timestamp().Logger()
 	return &Logger{
-		log: zl,
+		log:    zl,
+		output: output,
 	}
+}
+
+func (l *Logger) Flush() {
+	if l.output == nil {
+		return
+	}
+	l.output.Close() //nolint:errcheck
 }
 
 func (l *Logger) SetLevel(level string) {
