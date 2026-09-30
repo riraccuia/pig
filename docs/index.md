@@ -20,6 +20,7 @@ Table of contents for pig user documentation. New guides are added here by topic
 ## NAT
 
 - [NAT traversal](nat/nat.md)
+- [Symmetric NAT](nat/symmetric.md)
 
 ## Tools
 

@@ -109,7 +109,7 @@ pig -config alice.json
 - Pig features a [WRED (weighted random early detection)](https://en.wikipedia.org/wiki/Weighted_random_early_detection) implementation to combat network bufferbloat and maintain low latency. It is fully configurable.
 - The ICMP transport protocol has a TCP style congestion control (New Reno) built on top of it. More testing and feedback would really help here.
 - Adding a new transport protocol is relatively simple and "only" requires some wrapping to honor the `transport.Conn` and `transport.Listener` interfaces.
-- If one of the connecting nodes is behind [symmetric NAT](https://en.wikipedia.org/wiki/Network_address_translation#Methods_of_translation), pig can usually still find a path using the [birthday problem](https://en.wikipedia.org/wiki/Birthday_problem).
+- If one of the connecting nodes is behind [symmetric NAT](docs/nat/symmetric.md), pig can usually still find a path using the [birthday problem](https://en.wikipedia.org/wiki/Birthday_problem).
 - Stream multiplexing support is built-in where the protocol allows it (e.g. QUIC). The number of streams to open is configurable, too.
 
 
