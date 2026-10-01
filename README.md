@@ -23,42 +23,27 @@ It quickly became the primary tool for connecting to my home when I travel, doub
 
 ## What you can do
 
-**Listen/connect tunnel**\
-Including traditional VPN-style (simple mode) connectivity.
+**Connect two machines.** Simple or NAT traversal mode. Choose between traditional VPN-style tunnel and a less fiddly experience.
 
-**Pigs can be chained**\
-A pig can simultaneously connect to multiple remote targets and listen for incoming connections. Using this feature you can create mesh networks.
+**Build a mesh.** Pigs can be chained.
 
-**No fiddling with your firewall**\
-Pig implements NAT traversal using STUN (for NAT discovery) and MQTT (for signaling). While these dependencies seem daunting at first, they are both very popular technologies. One can find plenty of public/free servers of both kinds available out there. You don't need to run your own.
+**Skip firewall plumbing.** Don't worry about setting up your network. Pig's NAT traversal approach can beat symmetric NAT, too. More details in the [docs](docs/nat/symmetric.md).
 
-**IPv4 and IPv6 support**\
-IPv6 datagrams are fully supported and can be routed through pig tunnels.
+**Pick a transport.** [QUIC, TLS, WebSocket, DTLS, TLS-in-ICMP](docs/reference/cli/protos.md), or let pig choose.
 
-**Swappable transport protocols**\
-Choose from [available ones](docs/reference/cli/protos.md) such as QUIC, TLS, WebSocket, DTLS, and the experimental TLS-in-ICMP. Or let NAT traversal pick one automatically. There are more planned.
+**Route traffic.** Pig can update the routing table for you, so packets go through the tunnel.
 
-**Routing**\
-Pig can manage the routing table on the local machine to ensure that traffic is routed correctly through the tunnel.
+**Authenticate.** mTLS, JWT, OAuth, OIDC.
 
-**Authentication**\
-mTLS, JWT, OAuth and OIDC, used independently or combined.
+**Hook scripts.** Run setup/cleanup on tunnel events ([env vars](docs/reference/cli/env.md)).
 
-**Event driven script execution**\
-For extra setup or cleanup. Tunnel events and related information is passed to the called scripts via environment variables (see [`pig -docs env`](docs/reference/cli/env.md)).
-
-**STUN mode**\
-Query or become a STUN server on the fly using the [`-stun`](docs/reference/cli/stun.md) subcommand.
+**Act as STUN.** Query or become a STUN server with [`-stun`](docs/reference/cli/stun.md).
 
 ## Getting started
 
-- Download the [latest release](https://github.com/riraccuia/pig/releases) or build from source using the [makefile](Makefile).
+- [Installation](docs/installation/installation.md) (Windows, macOS, Linux)
+- [Quick start](docs/getting-started/quick-start.md) (first tunnel)
 - Read the [user guide](docs/index.md), check out the [examples](examples/) and [Docker](docs/docker/docker.md) files.
-- Run [`pig -h`](docs/reference/cli/pig.md) to see the available options.
-- Use the [`-to-cfg`](docs/reference/cli/connect.md) option to quickly generate baseline configs for advanced setups.
-- See the [config file reference](docs/reference/config/config.md).
-
-
 
 ### Example
 
@@ -74,7 +59,7 @@ Query or become a STUN server on the fly using the [`-stun`](docs/reference/cli/
 **Listen:**
 
 ```bash
-# Alice - local address 192.168.5.1
+# Alice - local address 192.168.1.100
 nohup pig -l -id pig-demo-alice -P . -k &
 printf '\t[Alice] Hello, Bob!\n' | nc -l 8080; killall -INT pig
 
@@ -84,19 +69,20 @@ printf '\t[Alice] Hello, Bob!\n' | nc -l 8080; killall -INT pig
 
 ```bash
 # Bob
-nohup pig -c -id pig-demo-alice -k -R 192.168.5.1/32 &
+nohup pig -c -id pig-demo-alice -k -R 192.168.1.100/32 &
 nc 192.168.5.1 8080; killall -INT pig
 	[Alice] Hello Bob!
 
 ```
 
-To turn Alice's command into a config file, do
+Turn Alice's command into a baseline config:
 
 ```bash
 pig -l -id pig-demo-alice -P . -k -to-cfg json > alice.json
 ```
 
-Customize and run with it.
+Build your [advanced setup](docs/reference/config/config.md).
+Run with it.
 
 ```bash
 pig -config alice.json
@@ -106,12 +92,12 @@ pig -config alice.json
 
 ## Nerd facts
 
+- IPv6 is fully supported and can be routed between nodes.
 - Pig features a [WRED (weighted random early detection)](https://en.wikipedia.org/wiki/Weighted_random_early_detection) implementation to combat network bufferbloat and maintain low latency. It is fully configurable.
 - The ICMP transport protocol has a TCP style congestion control (New Reno) built on top of it. More testing and feedback would really help here.
-- Adding a new transport protocol is relatively simple and "only" requires some wrapping to honor the `transport.Conn` and `transport.Listener` interfaces.
+- Implementing a new transport protocol is relatively simple and "only" requires some wrapping to honor the `transport.Conn` and `transport.Listener` interfaces.
 - If one of the connecting nodes is behind [symmetric NAT](docs/nat/symmetric.md), pig can usually still find a path using the [birthday problem](https://en.wikipedia.org/wiki/Birthday_problem).
 - Stream multiplexing support is built-in where the protocol allows it (e.g. QUIC). The number of streams to open is configurable, too.
-
 
 
 ## Acknowledgments

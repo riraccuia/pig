@@ -72,6 +72,6 @@ TLS-in-ICMP is excluded from this expansion: there is no TCP/UDP port pair to se
 
 ## Related
 
-- [NAT traversal](nat.md) — STUN, MQTT signaling, and public servers
+- [NAT traversal](nat.md)
 - [Birthday problem](https://en.wikipedia.org/wiki/Birthday_problem)
 - [Network address translation](https://en.wikipedia.org/wiki/Network_address_translation#Methods_of_translation)
