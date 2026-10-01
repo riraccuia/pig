@@ -70,7 +70,7 @@ printf '\t[Alice] Hello, Bob!\n' | nc -l 8080; killall -INT pig
 ```bash
 # Bob
 nohup pig -c -id pig-demo-alice -k -R 192.168.1.100/32 &
-nc 192.168.5.1 8080; killall -INT pig
+nc 192.168.1.100 8080; killall -INT pig
 	[Alice] Hello Bob!
 
 ```
