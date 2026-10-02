@@ -192,6 +192,8 @@ func addAdapterAddress(netfd int, ifName string, ip net.IP, mask net.IPMask) err
 	return fmt.Errorf("invalid IP address: %s", ip)
 }
 
+// addAdapterAddressV6 adds an IPv6 address to the adapter. If the address is nil, it will attach the protocol to the interface
+// and start the link-local address configuration.
 func addAdapterAddressV6(netfd int, ifName string, ipAddr net.IP, mask net.IPMask) error {
 	var err error
 
@@ -203,33 +205,24 @@ func addAdapterAddressV6(netfd int, ifName string, ipAddr net.IP, mask net.IPMas
 		defer unix.Close(netfd)
 	}
 
-	// Configure IPv6 address
+	// Prepare interface alias request
 	var ifra6 in6_aliasreq
 	copy(ifra6.Name[:], ifName)
 
-	/* Attach link-local address configuration */
+	if ipAddr == nil || ipAddr.To16() == nil {
+		// Attach protocol to IPv6 interface
+		if err = unix.IoctlSetInt(netfd, uint(SIOCPROTOATTACH_IN6), int(uintptr(unsafe.Pointer(&ifra6)))); err != nil {
+			return fmt.Errorf("SIOCPROTOATTACH_IN6: %w", err)
+		}
 
-	// Attach protocol to IPv6 interface
-	if err = unix.IoctlSetInt(netfd, uint(SIOCPROTOATTACH_IN6), int(uintptr(unsafe.Pointer(&ifra6)))); err != nil {
-		return fmt.Errorf("SIOCPROTOATTACH_IN6: %w", err)
-	}
-
-	// Start link-local address configuration
-	if err = unix.IoctlSetInt(netfd, uint(SIOCLL_START), int(uintptr(unsafe.Pointer(&ifra6)))); err != nil {
-		return fmt.Errorf("SIOCLL_START: %w", err)
-	}
-
-	/* End of link-local address configuration */
-
-	if ipAddr == nil {
+		// Start link-local address configuration
+		if err = unix.IoctlSetInt(netfd, uint(SIOCLL_START), int(uintptr(unsafe.Pointer(&ifra6)))); err != nil {
+			return fmt.Errorf("SIOCLL_START: %w", err)
+		}
 		return nil
 	}
 
-	if ipAddr.To16() == nil {
-		return fmt.Errorf("invalid IPv6 address: %s", ipAddr)
-	}
-
-	/* Configure IPv6 address */
+	// Configure IPv6 address
 
 	ifra6.Addr.Family = unix.AF_INET6
 	ifra6.Addr.Len = unix.SizeofSockaddrInet6
