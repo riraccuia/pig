@@ -33,7 +33,7 @@ type Logger struct {
 // NewLogger creates a new Logger instance.
 func NewLogger() *Logger {
 	wr := diode.NewWriter(os.Stdout, 1024, 10*time.Millisecond, func(missed int) {
-		fmt.Printf("Logger Dropped %d messages", missed)
+		fmt.Fprintf(os.Stdout, "Logger Dropped %d messages\n", missed)
 	})
 	output := &zerolog.ConsoleWriter{
 		Out:        wr, //zerolog.SyncWriter(NewBufferedWriter(ctx, 1024)),

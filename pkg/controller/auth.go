@@ -27,7 +27,7 @@ import (
 	"github.com/riraccuia/pig/pkg/config"
 )
 
-func (c *Controller) configureMTLS(direction config.TunnelDirection, cfg *config.AuthConfig, tlsConfig *tls.Config) error {
+func (c *Controller) configureMTLS(direction config.TunnelDirection, cfg *config.TrustConfig, tlsConfig *tls.Config) error {
 	if cfg == nil || cfg.MTLS == nil {
 		return nil
 	}

@@ -18,16 +18,16 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice/message"
-	"github.com/riraccuia/pig/pkg/ice/signaling"
 	"github.com/riraccuia/pig/pkg/stun"
 )
 
-func (pc *PathConnector) GetConnectPaths(ctx context.Context, target *config.ConnectTarget) (cp []*ConnectPath, scheduledAt time.Time, err error) {
-	localEndpoints, err := GetLocalEndpoints("", pc.excludedAdapters)
+func (pc *PathFinder) GetConnectPaths(ctx context.Context, target config.ConnectTarget, excludedAdapters *sync.Map) (cp []*ConnectPath, scheduledAt time.Time, err error) {
+	localEndpoints, err := GetLocalEndpoints("", excludedAdapters)
 	if err != nil {
 		return nil, time.Time{}, err
 	}
@@ -40,8 +40,8 @@ func (pc *PathConnector) GetConnectPaths(ctx context.Context, target *config.Con
 		localInfo       map[localCandidateKey]localCandidateInfo
 	)
 
-	offerCandidates, localInfo = buildLocalCandidates(pc.pigProtos, localEndpoints, uint16(target.SrcPort))
-	offerCandidates = append(offerCandidates, buildReflexiveCandidates(pc.pigProtos, localEndpoints, localInfo, pc.opts)...)
+	offerCandidates, localInfo = pc.buildLocalCandidates(localEndpoints, uint16(target.SrcPort))
+	offerCandidates = append(offerCandidates, pc.buildReflexiveCandidates(ctx, localEndpoints, localInfo)...)
 	offerCandidates = dedupCandidates(offerCandidates)
 
 	var (
@@ -57,7 +57,7 @@ func (pc *PathConnector) GetConnectPaths(ctx context.Context, target *config.Con
 	// natType = 2 // TODO: remove this
 	offer.NATType = natType
 
-	answer, err = signaling.GatherICECandidates(ctx, pc.opts, target.Address, offer)
+	answer, err = pc.signaler.GatherICECandidates(ctx, target.Address, offer)
 	if err != nil {
 		return
 	}
@@ -151,7 +151,7 @@ func (pc *PathConnector) GetConnectPaths(ctx context.Context, target *config.Con
 
 	// adjust the connect offset to the one-way latency
 	// this way we should be more accurate in case we need a further attempt
-	pc.SetConnectOffset(oneWayLatency)
+	// pc.SetConnectOffset(oneWayLatency)
 
 	scheduledAt = time.UnixMilli(answer.Timestamp[1] - clockOffset).Add(offer.ConnectOffsetDuration)
 

@@ -40,7 +40,7 @@ func TestTOMLConfigUnmarshal(t *testing.T) {
 				},
 				ICE: &ICEConfig{
 					Enabled:     true,
-					STUNAddress: "stun.server.com:19302",
+					STUNAddress: []string{"stun.server.com:19302"},
 					Signaling: &ICESignalingOpts{
 						EncryptionKey: "test-encryption-key",
 						MQTT: &MQTTBrokerConfig{

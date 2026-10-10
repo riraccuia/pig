@@ -15,15 +15,13 @@
 package ice
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"net"
-	"time"
 
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/ice/message"
-	"github.com/riraccuia/pig/pkg/ice/signaling"
-	"github.com/riraccuia/pig/pkg/network"
-	"github.com/riraccuia/pig/pkg/stun"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -93,11 +91,11 @@ func makeLocalCandidateKey(tr transport.ICEProtocolDefinition, ip net.IP) localC
 	}
 }
 
-func buildLocalCandidates(pigProtos []transport.ICEProtocolDefinition, localEndpoints []LocalEndpoint, listenPort uint16) ([]message.ICECandidate, map[localCandidateKey]localCandidateInfo) {
+func (pc *PathFinder) buildLocalCandidates(localEndpoints []LocalEndpoint, listenPort uint16) ([]message.ICECandidate, map[localCandidateKey]localCandidateInfo) {
 	var candidates []message.ICECandidate
 	localInfo := make(map[localCandidateKey]localCandidateInfo)
 
-	for _, tr := range pigProtos {
+	for _, tr := range pc.pigProtos {
 		for _, localEndpoint := range localEndpoints {
 			if tr.Network == transport.ICEProtocolTLSInICMP.Network && localEndpoint.IP.To4() == nil {
 				// skip IPv6 addresses for TLS-in-ICMP
@@ -119,7 +117,7 @@ func buildLocalCandidates(pigProtos []transport.ICEProtocolDefinition, localEndp
 	return candidates, localInfo
 }
 
-func buildReflexiveCandidates(pigProtos []transport.ICEProtocolDefinition, localEndpoints []LocalEndpoint, localInfo map[localCandidateKey]localCandidateInfo, opts *signaling.Options) []message.ICECandidate {
+func (pc *PathFinder) buildReflexiveCandidates(ctx context.Context, localEndpoints []LocalEndpoint, localInfo map[localCandidateKey]localCandidateInfo) []message.ICECandidate {
 	type ipPort struct {
 		ip   net.IP
 		port int
@@ -127,17 +125,13 @@ func buildReflexiveCandidates(pigProtos []transport.ICEProtocolDefinition, local
 	var (
 		candidates  []message.ICECandidate
 		mappedAddrs = make(map[string]ipPort)
-		stunClient  = stun.NewClient(
-			opts.STUNServer,
-		).WithDialer(
-			network.NewDialer(time.Second * 5),
-		).WithLoggerFunc(
-			opts.Logger.PrintLevel,
-		)
 	)
 
-	for _, tr := range pigProtos {
+	for _, tr := range pc.pigProtos {
 		for _, localEndpoint := range localEndpoints {
+			if common.IsContextDone(ctx) {
+				return candidates
+			}
 			if tr.Network == transport.ICEProtocolTLSInICMP.Network && localEndpoint.IP.To4() == nil {
 				// skip IPv6 addresses for TLS-in-ICMP
 				continue
@@ -153,15 +147,15 @@ func buildReflexiveCandidates(pigProtos []transport.ICEProtocolDefinition, local
 				candidates = append(candidates, CandidateFrom(tr.Network, tr.ComponentID, ma.ip, ma.port, true))
 				continue
 			}
-			opts.Logger.Tracef("ICE: performing STUN query for %d:%s:%s:%d", family, tr.Network, localEndpoint.IP.String(), info.port)
-			mappedIP, mappedPort, err := PerformSTUNQuery(stunClient, AddressFrom(tr.Network, localEndpoint.IP, info.port))
+			pc.opts.Logger.Tracef("ICE: performing STUN query for %d:%s:%s:%d", family, tr.Network, localEndpoint.IP.String(), info.port)
+			result, err := pc.stunClient.QueryFromLocalAddr(ctx, AddressFrom(tr.Network, localEndpoint.IP, info.port))
 			if err != nil {
-				opts.Logger.Errorf("ICE: STUN query failed: %v", err)
+				pc.opts.Logger.Errorf("ICE: STUN query failed: %v", err)
 				continue
 			}
-			opts.Logger.Tracef("ICE: STUN query successful | %d:%s:%s:%d -> %s:%d", family, tr.Network, localEndpoint.IP.String(), info.port, mappedIP.String(), mappedPort)
-			mappedAddrs[mappingKey] = ipPort{ip: mappedIP, port: mappedPort}
-			candidates = append(candidates, CandidateFrom(tr.Network, tr.ComponentID, mappedIP, mappedPort, true))
+			pc.opts.Logger.Tracef("ICE: STUN query successful | %d:%s:%s:%d -> %s:%d", family, tr.Network, localEndpoint.IP.String(), info.port, result.IP.String(), result.Port)
+			mappedAddrs[mappingKey] = ipPort{ip: result.IP, port: result.Port}
+			candidates = append(candidates, CandidateFrom(tr.Network, tr.ComponentID, result.IP, result.Port, true))
 		}
 	}
 

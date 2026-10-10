@@ -34,11 +34,12 @@ const (
 // routeRequest is sent to the central route manager goroutine. Add and remove
 // operations are serialised; routes are pre-built by the caller.
 type routeRequest struct {
-	op     routeOp
-	routes []config.Route
+	op        routeOp
+	routes    []config.Route
+	tunIfName string
 }
 
-func (c *Controller) ManageRoutes(ctx context.Context) {
+func (c *Controller) manageRoutes(ctx context.Context) {
 	var err error
 	c.routeManager, err = route.NewManager(ctx)
 	if err != nil {
@@ -47,14 +48,14 @@ func (c *Controller) ManageRoutes(ctx context.Context) {
 	// Central route manager goroutine: installs global routes once, then
 	// processes per-tunnel add/remove requests for the controller lifetime.
 	c.Go(func() {
-		c.manageRoutes(ctx, c.cfg)
+		c.doManageRoutes(ctx, c.cfg)
 	})
 }
 
-// manageRoutes is the single goroutine that owns all route table mutations.
+// doManageRoutes is the single goroutine that owns all route table mutations.
 // It installs global routes (bypass/static from RouteConfig) once, then
 // processes add/remove requests. Callers supply the routes to add or remove.
-func (c *Controller) manageRoutes(ctx context.Context, cfg *config.Config) {
+func (c *Controller) doManageRoutes(ctx context.Context, cfg *config.Config) {
 	c.routeRequests = make(chan routeRequest, 16)
 
 	routeCfg := &cfg.RouteConfig
@@ -77,17 +78,13 @@ func (c *Controller) manageRoutes(ctx context.Context, cfg *config.Config) {
 	for {
 		select {
 		case <-ctx.Done():
-			c.logger.Infof("Route manager shutting down, cleaning up all routes")
-			if err := c.routeManager.Cleanup(); err != nil {
-				c.logger.Errorf("Failed to cleanup routes: %v", err)
-			}
 			return
 		case req := <-c.routeRequests:
 			switch req.op {
 			case routeOpAdd:
-				c.handleRouteAdd(req.routes)
+				c.handleRouteAdd(req.routes, req.tunIfName)
 			case routeOpRemove:
-				c.handleRouteRemove(req.routes)
+				c.handleRouteRemove(req.routes, req.tunIfName)
 			}
 		}
 	}
@@ -98,7 +95,7 @@ func (c *Controller) manageRoutes(ctx context.Context, cfg *config.Config) {
 // individual tunnel.
 func (c *Controller) installGlobalRoutes(routeCfg *config.RouteConfig) {
 	for _, r := range routeCfg.Routes {
-		rt, err := c.buildRoute(r)
+		rt, err := c.buildRoute(r, c.sharedClientAdapter.Name())
 		if err != nil {
 			c.logger.Errorf("Failed to build global route %s: %v", r.Destination, err)
 			continue
@@ -110,13 +107,13 @@ func (c *Controller) installGlobalRoutes(routeCfg *config.RouteConfig) {
 }
 
 // handleRouteAdd installs the given routes.
-func (c *Controller) handleRouteAdd(routes []config.Route) {
+func (c *Controller) handleRouteAdd(routes []config.Route, tunIfName string) {
 	if len(routes) == 0 {
 		return
 	}
 	c.logger.Infof("Adding %d route(s)", len(routes))
 	for _, r := range routes {
-		rt, err := c.buildRoute(r)
+		rt, err := c.buildRoute(r, tunIfName)
 		if err != nil {
 			c.logger.Errorf("Failed to build route %s: %v", r.Destination, err)
 			continue
@@ -131,13 +128,13 @@ func (c *Controller) handleRouteAdd(routes []config.Route) {
 }
 
 // handleRouteRemove tears down the given routes.
-func (c *Controller) handleRouteRemove(routes []config.Route) {
+func (c *Controller) handleRouteRemove(routes []config.Route, tunIfName string) {
 	if len(routes) == 0 {
 		return
 	}
 	c.logger.Infof("Removing %d route(s)", len(routes))
 	for _, r := range routes {
-		rt, err := c.buildRoute(r)
+		rt, err := c.buildRoute(r, tunIfName)
 		if err != nil {
 			c.logger.Errorf("Failed to build route for removal %s: %v", r.Destination, err)
 			continue
@@ -168,7 +165,7 @@ func ipNetFromAddrString(addr string) (*net.IPNet, error) {
 // buildRoute converts a config.Route into a *route.Route ready for the
 // route manager. For bypass routes it resolves the best gateway; for tunnel
 // routes it uses the shared adapter's address.
-func (c *Controller) buildRoute(r config.Route) (*route.Route, error) {
+func (c *Controller) buildRoute(r config.Route, tunIfName string) (*route.Route, error) {
 	ipNet, err := ipNetFromAddrString(r.Destination)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert destination %s to IPNet: %w", r.Destination, err)
@@ -176,16 +173,17 @@ func (c *Controller) buildRoute(r config.Route) (*route.Route, error) {
 
 	switch r.Type {
 	case config.RouteTypeBypass:
-		best, err := c.routeManager.FindBestRoute(ipNet.IP)
+		/*best, err := c.routeManager.FindBestRoute(ipNet.IP)
 		if err != nil {
 			return nil, fmt.Errorf("find best route for %s: %w", ipNet, err)
 		}
 		if best.IsDirectlyConnected() {
 			return best, nil //fmt.Errorf("%s is directly connected via %s (%s)", ipNet, best.LinkAddr, best.Interface)
-		}
+		}*
 		/*if !best.HasGateway() {
 			return nil, fmt.Errorf("no suitable gateway for %s", ipNet)
 		}*/
+		best := &route.Route{}
 		best.Destination = ipNet
 		return best, nil
 
@@ -206,9 +204,9 @@ func (c *Controller) buildRoute(r config.Route) (*route.Route, error) {
 		}, nil
 
 	case config.RouteTypeTunnel:
-		dest := c.clientAdapter.IP()
+		dest := c.sharedClientAdapter.IP()
 		if ipNet.IP.To4() == nil {
-			dest = c.clientAdapter.IP6()
+			dest = c.sharedClientAdapter.IP6()
 		}
 		if dest == nil {
 			return nil, fmt.Errorf("no suitable tunnel address for %s", ipNet)
@@ -217,7 +215,7 @@ func (c *Controller) buildRoute(r config.Route) (*route.Route, error) {
 		return &route.Route{
 			Destination: ipNet,
 			Gateway:     dest,
-			Interface:   c.clientAdapter.Name(),
+			Interface:   tunIfName,
 		}, nil
 
 	default:

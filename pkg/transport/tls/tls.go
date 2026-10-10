@@ -19,10 +19,13 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"strconv"
+	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -31,37 +34,51 @@ func GetClientFromConn(ctx context.Context, co net.Conn, config *config.TunnelCo
 	if err := tlsConn.Handshake(); err != nil {
 		return nil, fmt.Errorf("failed to handshake: %w", err)
 	}
-	return NewTLSConn(tlsConn), nil
+	return &TLSConn{
+		Conn: tlsConn,
+	}, nil
 }
 
 func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config) (transport.Listener, error) {
 	tlsConn := tls.Server(co, tlsConfig.Clone())
-	return ice.NewListenerConn(NewTLSConn(tlsConn), nil), nil
+	tc := &TLSConn{
+		Conn: tlsConn,
+	}
+	return ice.NewListenerConn(tc, nil), nil
 }
 
 func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func(ctx context.Context) (transport.Conn, error) {
 	return func(ctx context.Context) (transport.Conn, error) {
-		addr := fmt.Sprintf("%s:%d", config.Connect.Address, config.Connect.Port)
-		dialer := &net.Dialer{
-			LocalAddr: &net.TCPAddr{
-				Port: config.Connect.SrcPort,
-			},
+		idleTimeout := time.Duration(config.IdleTimeout) * time.Second
+
+		dialer := network.NewDialer(idleTimeout)
+		dialer.LocalAddr = &net.TCPAddr{
+			Port: config.Connect.SrcPort,
 		}
+
+		addr := net.JoinHostPort(config.Connect.Address, strconv.Itoa(config.Connect.Port))
+
 		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig.Clone())
 		if err != nil {
 			return nil, fmt.Errorf("failed to establish TLS connection: %w", err)
 		}
-		return NewTLSConn(conn), nil
+
+		return &TLSConn{
+			Conn: conn,
+		}, nil
 	}
 }
 
 func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func(ctx context.Context) (transport.Listener, error) {
 	return func(ctx context.Context) (transport.Listener, error) {
-		addr := fmt.Sprintf("%s:%d", config.Listen.Address, config.Listen.Port)
+		addr := net.JoinHostPort(config.Listen.Address, strconv.Itoa(config.Listen.Port))
 		listener, err := tls.Listen("tcp", addr, tlsConfig.Clone())
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS listener: %w", err)
 		}
-		return NewTLSListener(listener), nil
+		tl := &TLSListener{
+			Listener: listener,
+		}
+		return tl, nil
 	}
 }

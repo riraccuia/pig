@@ -57,10 +57,7 @@ func (cp ConnectPath) String() string {
 func (cp *ConnectPath) Connect(ctx context.Context) (co net.Conn, err error) {
 	switch cp.Protocol.Network {
 	case "udp":
-		var _co *net.UDPConn
-		_co, err = network.DialUDPContext(ctx, "udp", cp.LocalAddr.(*net.UDPAddr), cp.RemoteAddr.(*net.UDPAddr))
-		//co = conn.NewUDPPacketConn(_co)
-		co = _co
+		co, err = network.DialUDPContext(ctx, "udp", cp.LocalAddr.(*net.UDPAddr), cp.RemoteAddr.(*net.UDPAddr))
 	case "tcp":
 		co, err = network.DialTCPContext(ctx, "tcp", cp.LocalAddr.(*net.TCPAddr), cp.RemoteAddr.(*net.TCPAddr))
 	case "icmp":

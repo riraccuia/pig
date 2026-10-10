@@ -155,7 +155,8 @@ func TestNATConnectPathsProbabilityEquivalence(t *testing.T) {
 	}
 	var matchedCount int
 	for range 1000 {
-		pc := NewPathConnector(nil, nil, nil)
+		pc := &PathFinder{}
+
 		pathsA := pc.generateNATConnectPathsFromPublicPath(
 			publicPath,
 			int(stun.MappingEndpointIndependent),

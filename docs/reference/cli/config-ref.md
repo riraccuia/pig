@@ -7,8 +7,9 @@ Config
 | adapter     | AdapterConfig?    | true     | -                      | Adapter configuration block.         |
 | route       | RouteConfig?      | true     | -                      | Route configuration block.           |
 | tunnels     | []TunnelConfig    | false    | -                      | Tunnel configuration block.          |
-| stun_global | string?           | true     | stun.nextcloud.com:443 | Default STUN server address for NAT  |
-|             |                   |          |                        | traversal in the form of host:port.  |
+| stun_global | []string?         | true     | stun.nextcloud.com:443 | Default STUN server addresses for    |
+|             |                   |          |                        | NAT traversal in the form of         |
+|             |                   |          |                        | host:port.                           |
 | mqtt_global | MQTTBrokerConfig? | true     | -                      | Default MQTT broker configuration    |
 |             |                   |          |                        | for NAT traversal.                   |
 | script_path | string?           | true     | -                      | Path to an executable file to call   |
@@ -62,8 +63,10 @@ TunnelConfig
 |                    |                |          |         | streamed protocols like QUIC. Zero means the    |
 |                    |                |          |         | number of CPU cores.                            |
 | proto              | string?        | true     | ws      | Transport protocol to use for the tunnel.       |
+| idle_timeout       | int?           | true     | 0       | Inactivity timeout in seconds.                  |
 | reconnect_interval | int?           | true     | 5       | Reconnect interval in seconds.                  |
 | wred               | WredConfig?    | true     | -       | WRED settings.                                  |
+| trust              | TrustConfig?   | true     | -       | Trust configuration.                            |
 | auth               | AuthConfig?    | true     | -       | Authentication configuration.                   |
 | ice                | ICEConfig?     | true     | -       | NAT traversal and path discovery configuration. |
 |                    |                |          |         | To enable NAT traversal, set                    |
@@ -137,16 +140,23 @@ WredConfig
 |                      |        |          |         | Accepts decimals between 0 and 1.                     |
 +----------------------+--------+----------+---------+-------------------------------------------------------+
 
+TrustConfig
++-----------+------------------+----------+---------+-------------------------------------------------------+
+| Field     | Type             | Optional | Default | Description                                           |
++-----------+------------------+----------+---------+-------------------------------------------------------+
+| mtls      | MTLSConfig?      | true     | -       | MTLS authentication configuration.                    |
+| wireguard | WireGuardConfig? | true     | -       | WireGuard configuration. Required when proto is "wg". |
++-----------+------------------+----------+---------+-------------------------------------------------------+
+
 AuthConfig
-+-------+-------------+----------+---------+----------------------------------------+
-| Field | Type        | Optional | Default | Description                            |
-+-------+-------------+----------+---------+----------------------------------------+
-| type  | string?     | true     | none    | One of "none", "jwt", "oidc", "oauth". |
-| jwt   | JWTAuth?    | true     | -       | JWT authentication configuration.      |
-| oidc  | OIDCAuth?   | true     | -       | OIDC authentication configuration.     |
-| oauth | OAuthAuth?  | true     | -       | OAuth authentication configuration.    |
-| mtls  | MTLSConfig? | true     | -       | MTLS authentication configuration.     |
-+-------+-------------+----------+---------+----------------------------------------+
++-------+------------+----------+---------+----------------------------------------+
+| Field | Type       | Optional | Default | Description                            |
++-------+------------+----------+---------+----------------------------------------+
+| type  | string?    | true     | none    | One of "none", "jwt", "oidc", "oauth". |
+| jwt   | JWTAuth?   | true     | -       | JWT authentication configuration.      |
+| oidc  | OIDCAuth?  | true     | -       | OIDC authentication configuration.     |
+| oauth | OAuthAuth? | true     | -       | OAuth authentication configuration.    |
++-------+------------+----------+---------+----------------------------------------+
 
 ICEConfig
 +--------------+-------------------+----------+---------+----------------------------------------------------+
@@ -155,10 +165,34 @@ ICEConfig
 | enabled      | bool?             | true     | false   | Enable ICE based network path discovery.           |
 | protos       | []string?         | true     | -       | Protocols to use for candidate generation. Not     |
 |              |                   |          |         | needed when TunnelConfig.Proto is already set.     |
-| stun_address | string?           | true     | -       | Optional custom STUN server to use instead of the  |
+| stun_address | []string?         | true     | -       | Optional custom STUN server to use instead of the  |
 |              |                   |          |         | global config.STUNAddress.                         |
 | signaling    | ICESignalingOpts? | true     | -       | Signaling configuration.                           |
 +--------------+-------------------+----------+---------+----------------------------------------------------+
+
+MTLSConfig
++-----------+---------+----------+---------+-----------------------------------------------------------------+
+| Field     | Type    | Optional | Default | Description                                                     |
++-----------+---------+----------+---------+-----------------------------------------------------------------+
+| trust_pem | string? | true     | -       | TrustPEM is the path to the trust bundle for MTLS, if not       |
+|           |         |          |         | provided, the system CA will be used. In client mode, this is   |
+|           |         |          |         | used to validate the server certificate. In server mode, this   |
+|           |         |          |         | is used to validate client certificates.                        |
+| cert_file | string? | true     | -       | CertFile is the client certificate presented by connect         |
+|           |         |          |         | tunnels.                                                        |
+| key_file  | string? | true     | -       | KeyFile is the private key for CertFile.                        |
++-----------+---------+----------+---------+-----------------------------------------------------------------+
+
+WireGuardConfig
++-------------+------------------+----------+---------+------------------------------------------------------+
+| Field       | Type             | Optional | Default | Description                                          |
++-------------+------------------+----------+---------+------------------------------------------------------+
+| private_key | string           | false    | -       | Local WireGuard private key (standard base64         |
+|             |                  |          |         | encoding of 32 bytes).                               |
+| peers       | []WireGuardPeer? | true     | -       | WireGuard peers. On connect, peers[0] is the remote  |
+|             |                  |          |         | peer. On listen, every entry is an authorized        |
+|             |                  |          |         | client.                                              |
++-------------+------------------+----------+---------+------------------------------------------------------+
 
 JWTAuth
 +-------------------+--------+----------+---------+----------------------------------------------------------+
@@ -232,19 +266,6 @@ OAuthAuth
 |                          |                 |          |         | pkg/auth/oauth.Config.ClaimMatchers.     |
 +--------------------------+-----------------+----------+---------+------------------------------------------+
 
-MTLSConfig
-+-----------+---------+----------+---------+-----------------------------------------------------------------+
-| Field     | Type    | Optional | Default | Description                                                     |
-+-----------+---------+----------+---------+-----------------------------------------------------------------+
-| trust_pem | string? | true     | -       | TrustPEM is the path to the trust bundle for MTLS, if not       |
-|           |         |          |         | provided, the system CA will be used. In client mode, this is   |
-|           |         |          |         | used to validate the server certificate. In server mode, this   |
-|           |         |          |         | is used to validate client certificates.                        |
-| cert_file | string? | true     | -       | CertFile is the client certificate presented by connect         |
-|           |         |          |         | tunnels.                                                        |
-| key_file  | string? | true     | -       | KeyFile is the private key for CertFile.                        |
-+-----------+---------+----------+---------+-----------------------------------------------------------------+
-
 ICESignalingOpts
 +----------------+-------------------+----------+---------+--------------------------------------------------+
 | Field          | Type              | Optional | Default | Description                                      |
@@ -256,5 +277,19 @@ ICESignalingOpts
 | mqtt           | MQTTBrokerConfig? | true     | -       | Optional MQTT broker configuration to use        |
 |                |                   |          |         | instead of the default one.                      |
 +----------------+-------------------+----------+---------+--------------------------------------------------+
+
+WireGuardPeer
++---------------+-----------+----------+---------+-----------------------------------------------------------+
+| Field         | Type      | Optional | Default | Description                                               |
++---------------+-----------+----------+---------+-----------------------------------------------------------+
+| public_key    | string    | false    | -       | Peer WireGuard public key (standard base64 encoding of 32 |
+|               |           |          |         | bytes).                                                   |
+| preshared_key | string?   | true     | -       | Optional WireGuard preshared key for this peer (standard  |
+|               |           |          |         | base64 encoding of 32 bytes).                             |
+| allowed_ips   | []string? | true     | -       | AllowedIPs for this peer as CIDR prefixes. Empty falls    |
+|               |           |          |         | back to wireguard.allowed_ips.                            |
+| keepalive     | int?      | true     | -       | Persistent keepalive interval in seconds for this peer.   |
+|               |           |          |         | Negative means unset; falls back to wireguard.keepalive.  |
++---------------+-----------+----------+---------+-----------------------------------------------------------+
 
 ```

@@ -359,7 +359,7 @@ func (b *darwinBackend) handleRouteMessage(msg *route.RouteMessage, routeTableV4
 	b.onChange()
 }
 
-func (b *darwinBackend) createInetAddr(ip net.IP) route.Addr {
+func (b *darwinBackend) createInetAddr(ip net.IP, zoneID int) route.Addr {
 	if ip.To4() != nil {
 		var ip4 [4]byte
 		copy(ip4[:], ip.To4())
@@ -394,6 +394,7 @@ func (b *darwinBackend) buildRouteMessageRaw(rt *Route, msgType int, flags int) 
 			ID:      uintptr(os.Getpid()),
 			Seq:     1,
 		}
+		zoneID int
 	)
 
 	if rt.Destination == nil {
@@ -405,23 +406,24 @@ func (b *darwinBackend) buildRouteMessageRaw(rt *Route, msgType int, flags int) 
 		return nil, fmt.Errorf("invalid route destination: %v", rt.Destination.String())
 	}
 
-	addrs[unix.RTAX_DST] = b.createInetAddr(destinationIP)
-
-	if rt.Gateway != nil {
-		addrs[unix.RTAX_GATEWAY] = b.createInetAddr(rt.Gateway)
-	}
-
-	maskIP := net.IP(rt.Destination.Mask)
-	addrs[unix.RTAX_NETMASK] = b.createInetAddr(maskIP)
+	addrs[unix.RTAX_DST] = b.createInetAddr(destinationIP, 0)
 
 	if rt.Interface != "" {
 		iface, err := net.InterfaceByName(rt.Interface)
 		if err != nil {
-			return nil, fmt.Errorf("interface %s not found: %w", rt.Interface, err)
+			return nil, fmt.Errorf("interface %s not found", rt.Interface)
 		}
 		msg.Index = iface.Index
+		zoneID = iface.Index
 		addrs[unix.RTAX_IFP] = linkAddrForInterface(rt.Interface, iface.Index)
 	}
+
+	if rt.Gateway != nil {
+		addrs[unix.RTAX_GATEWAY] = b.createInetAddr(rt.Gateway, zoneID)
+	}
+
+	maskIP := net.IP(rt.Destination.Mask)
+	addrs[unix.RTAX_NETMASK] = b.createInetAddr(maskIP, 0)
 
 	msg.Flags |= flags | unix.RTF_UP | unix.RTF_STATIC | unix.RTF_PRCLONING
 
@@ -496,7 +498,7 @@ func (b *darwinBackend) getSystemRoute(dst net.IP) (*Route, error) {
 		ID:      uintptr(os.Getpid()),
 		Seq:     1,
 		Addrs: []route.Addr{
-			unix.RTAX_DST: b.createInetAddr(dst),
+			unix.RTAX_DST: b.createInetAddr(dst, 0),
 		},
 	}
 

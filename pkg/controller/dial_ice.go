@@ -28,13 +28,13 @@ import (
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice"
 	"github.com/riraccuia/pig/pkg/ice/signaling"
-	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/route"
 	"github.com/riraccuia/pig/pkg/transport"
 	"github.com/riraccuia/pig/pkg/transport/dtls"
 	qt "github.com/riraccuia/pig/pkg/transport/quic-go"
 	trtls "github.com/riraccuia/pig/pkg/transport/tls"
 	"github.com/riraccuia/pig/pkg/transport/tlsicmp"
+	"github.com/riraccuia/pig/pkg/transport/wireguard"
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
 
@@ -43,10 +43,17 @@ func (c *Controller) getICEDialFunc(cfg *config.TunnelConfig) (func(ctx context.
 	if err != nil {
 		return nil, fmt.Errorf("failed to create TLS config: %w", err)
 	}
-	pc := ice.NewPathConnector(signaling.GetOptions(c.logger, cfg.ICE), cfg.ICE.UseProtos(), c.adapters)
+	signalingOpts := signaling.GetOptions(c.logger, cfg.ICE)
+	signalingOpts.Dialer = c.newBypassDialer(time.Second * 5)
+
+	pc, err := ice.NewPathFinder(signalingOpts, cfg.ICE.UseProtos())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create path connector: %w", err)
+	}
+
 	return func(ctx context.Context) (transport.Conn, error) {
 		c.logger.Infof("Starting ICE | Candidate protocols: %v", strings.Join(cfg.ICE.Protos, ", "))
-		connectPaths, scheduledAt, err := pc.GetConnectPaths(ctx, &cfg.Connect)
+		connectPaths, scheduledAt, err := pc.GetConnectPaths(ctx, cfg.Connect, c.adapters)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get ICE connect paths: %w", err)
 		}
@@ -77,15 +84,13 @@ func (c *Controller) getICEDialFunc(cfg *config.TunnelConfig) (func(ctx context.
 		case "ws":
 			return ws.GetClientFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
 		case "quic":
-			co := network.NewUDPPacketConn(selectedPath.Conn.(*net.UDPConn))
-			return qt.GetClientFromConn(ctx, co, cfg, tlsConfig)
+			return qt.GetClientFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
 		case "dtls":
-			co := network.NewUDPPacketConn(selectedPath.Conn.(*net.UDPConn))
-			co.SetReadBuffer(1024 * 2048)
-			co.SetWriteBuffer(1024 * 2048)
-			return dtls.GetClientFromConn(ctx, co, cfg, tlsConfig, c.cfg.Adapter.MTU)
+			return dtls.GetClientFromConn(ctx, selectedPath.Conn, cfg, tlsConfig, c.cfg.Adapter.MTU)
 		case "tls":
 			return trtls.GetClientFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
+		case "wg":
+			return wireguard.GetClientFromConn(ctx, selectedPath.Conn, cfg, c.cfg.Adapter.MTU)
 		case "tls-in-icmp":
 			return tlsicmp.GetClientFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
 		}
@@ -196,18 +201,13 @@ func (c *Controller) bypassTarget(target net.IP) (rt *route.Route, err error) {
 		Destination: target.String(),
 		Type:        config.RouteTypeBypass,
 	}
-	rt, err = c.buildRoute(bypassRoute)
+	rt, err = c.buildRoute(bypassRoute, "")
 	if err != nil {
 		c.logger.Errorf("Failed to build bypass route for %s: %v", target.String(), err)
 		return
 	}
 
-	viaStr := fmt.Sprintf("on <%s>", rt.Interface)
-	if rt.Gateway != nil {
-		viaStr += fmt.Sprintf(" via %s", rt.Gateway.String())
-	}
-
-	c.logger.Debugf("Bypassing %s %s", rt.Destination.String(), viaStr)
+	c.logger.Debugf("Bypassing %s", rt.Destination.String())
 
 	err = c.routeManager.AddRoute(rt)
 	if errors.Is(err, fs.ErrExist) {

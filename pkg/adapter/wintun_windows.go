@@ -28,7 +28,6 @@ package adapter
 import (
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -55,7 +54,6 @@ type rateJuggler struct {
 }
 
 type NativeTun struct {
-	ip, ipv6  *net.IPNet
 	wt        *wintun.Adapter
 	name      string
 	handle    windows.Handle
@@ -110,28 +108,6 @@ func CreateTUNWithRequestedGUID(ifname string, requestedGUID *windows.GUID) (*Na
 
 func (tun *NativeTun) Name() string {
 	return tun.name
-}
-
-func (tun *NativeTun) IP() net.IP {
-	if tun.ip != nil {
-		return tun.ip.IP
-	}
-	return nil
-}
-
-func (tun *NativeTun) IP6() net.IP {
-	if tun.ipv6 != nil {
-		return tun.ipv6.IP
-	}
-	return nil
-}
-
-func (tun *NativeTun) IPNet() *net.IPNet {
-	return tun.ip
-}
-
-func (tun *NativeTun) IPNet6() *net.IPNet {
-	return tun.ipv6
 }
 
 func (tun *NativeTun) Index() int {

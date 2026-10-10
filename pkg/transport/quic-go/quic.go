@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/quic-go/quic-go"
@@ -31,37 +32,46 @@ import (
 )
 
 func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func(ctx context.Context) (transport.Conn, error) {
-	return dialFuncWithSrcPort(logger, config.Connect.Address, config.Connect.SrcPort, config.Connect.Port, tlsConfig)
+	return dialFuncWithSrcPort(config.Connect.Address, config.Connect.SrcPort, config.Connect.Port, tlsConfig)
 }
 
 func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func(ctx context.Context) (transport.Listener, error) {
 	return func(ctx context.Context) (transport.Listener, error) {
 		var (
-			udpConn      *net.UDPConn
-			listenerAddr = &net.UDPAddr{IP: net.ParseIP(config.Listen.Address), Port: config.Listen.Port}
-			err          error
+			udpConn   *net.UDPConn
+			localAddr *net.UDPAddr
+			err       error
 		)
-		udpConn, err = network.ListenUDP("udp", listenerAddr)
+
+		localAddr, err = net.ResolveUDPAddr("udp", net.JoinHostPort(config.Listen.Address, strconv.Itoa(config.Listen.Port)))
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve address: %w", err)
+		}
+		networkStr := transport.GetUDPNetworkString(localAddr.IP)
+
+		udpConn, err = network.ListenUDP(networkStr, localAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
 		}
+
 		maxStreams := int64(config.StreamCount)
 		if maxStreams <= 0 {
 			maxStreams = int64(runtime.NumCPU())
 		}
-		listener, err := quic.Listen(
-			udpConn,
-			tlsConfig.Clone(),
-			&quic.Config{
-				MaxIncomingStreams: maxStreams,
-				EnableDatagrams:    true,
-				MaxIdleTimeout:     time.Minute,
-			},
-		)
+		idleTimeout, _ := getTimeoutAndKeepalivePeriod(config.IdleTimeout)
+		quicConfig := &quic.Config{
+			MaxIncomingStreams: maxStreams,
+			EnableDatagrams:    true,
+			MaxIdleTimeout:     idleTimeout,
+		}
+		tr := &quic.Transport{
+			Conn: udpConn,
+		}
+		listener, err := tr.Listen(tlsConfig.Clone(), quicConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
 		}
-		return NewQuicTransport(ctx, listener), nil
+		return NewQuicTransport(listener), nil
 	}
 }
 
@@ -69,17 +79,22 @@ func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Tunnel
 	if tlsConfig == nil {
 		return nil, errors.New("quic: tls.Config not set")
 	}
+
+	packetConn := network.NewPacketConn(conn.(*net.UDPConn))
 	tr := &quic.Transport{
-		Conn: conn.(net.PacketConn),
+		Conn: packetConn,
 	}
+
+	idleTimeout, keepalivePeriod := getTimeoutAndKeepalivePeriod(config.IdleTimeout)
+
 	qConn, err := tr.Dial(
 		ctx,
 		conn.RemoteAddr(),
 		tlsConfig.Clone(),
 		&quic.Config{
 			EnableDatagrams: true,
-			MaxIdleTimeout:  time.Minute,
-			KeepAlivePeriod: time.Second * 30,
+			MaxIdleTimeout:  idleTimeout,
+			KeepAlivePeriod: keepalivePeriod,
 		},
 	)
 	if err != nil {
@@ -96,46 +111,48 @@ func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Tunnel
 	if maxStreams <= 0 {
 		maxStreams = int64(runtime.NumCPU())
 	}
-	listener, err := quic.Listen(co.(net.PacketConn), tlsConfig.Clone(), &quic.Config{
-		EnableDatagrams:    true,
+	idleTimeout, _ := getTimeoutAndKeepalivePeriod(config.IdleTimeout)
+	quicConfig := &quic.Config{
 		MaxIncomingStreams: maxStreams,
-	})
+		EnableDatagrams:    true,
+		MaxIdleTimeout:     idleTimeout,
+	}
+	packetConn := network.NewPacketConn(co.(*net.UDPConn))
+	tr := &quic.Transport{
+		Conn: packetConn,
+	}
+	listener, err := tr.Listen(tlsConfig.Clone(), quicConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen using QUIC on endpoint: %w", err)
 	}
-	return NewQuicTransport(ctx, listener), nil
+	return NewQuicTransport(listener), nil
 }
 
-func dialFuncDefault(ctx context.Context, address string, dstPort int, tlsConfig *tls.Config) func() (transport.Conn, error) {
-	return func() (transport.Conn, error) {
-		conn, err := quic.DialAddr(
-			ctx,
-			fmt.Sprintf("%s:%d", address, dstPort),
-			tlsConfig.Clone(),
-			&quic.Config{},
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to establish QUIC connection: %w", err)
-		}
-		return NewQuicConn(conn), nil
-	}
-}
-
-func dialFuncWithSrcPort(logger common.Logger, address string, srcPort, dstPort int, tlsConfig *tls.Config) func(ctx context.Context) (transport.Conn, error) {
+func dialFuncWithSrcPort(address string, srcPort, dstPort int, tlsConfig *tls.Config) func(ctx context.Context) (transport.Conn, error) {
 	return func(ctx context.Context) (transport.Conn, error) {
 		var (
-			udpConn *net.UDPConn
-			udpAddr *net.UDPAddr
-			err     error
+			udpConn    *net.UDPConn
+			localAddr  *net.UDPAddr
+			targetAddr *net.UDPAddr
+			err        error
 		)
-		udpConn, err = network.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: srcPort})
+
+		targetAddr, err = net.ResolveUDPAddr("udp", net.JoinHostPort(address, strconv.Itoa(dstPort)))
 		if err != nil {
 			return nil, err
 		}
-		udpAddr, err = net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", address, dstPort))
+		networkStr := transport.GetUDPNetworkString(targetAddr.IP)
+
+		localAddr, err = net.ResolveUDPAddr(networkStr, net.JoinHostPort("", strconv.Itoa(srcPort)))
 		if err != nil {
 			return nil, err
 		}
+
+		udpConn, err = network.ListenUDP(networkStr, localAddr)
+		if err != nil {
+			return nil, err
+		}
+
 		if tlsConfig == nil {
 			return nil, errors.New("quic: tls.Config not set")
 		}
@@ -144,7 +161,7 @@ func dialFuncWithSrcPort(logger common.Logger, address string, srcPort, dstPort 
 		}
 		conn, err := tr.Dial(
 			ctx,
-			udpAddr,
+			targetAddr,
 			tlsConfig,
 			&quic.Config{
 				EnableDatagrams: true,
@@ -155,4 +172,13 @@ func dialFuncWithSrcPort(logger common.Logger, address string, srcPort, dstPort 
 		}
 		return NewQuicConn(conn), nil
 	}
+}
+
+func getTimeoutAndKeepalivePeriod(idleTimeoutSec int) (time.Duration, time.Duration) {
+	idleTimeout := time.Duration(idleTimeoutSec) * time.Second
+	keepalivePeriod := idleTimeout / 2
+	if keepalivePeriod < time.Second {
+		keepalivePeriod = 0
+	}
+	return idleTimeout, keepalivePeriod
 }

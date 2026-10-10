@@ -4,16 +4,19 @@ BOOTSTRAP ENVIRONMENT VARIABLES
 The following variables are used for bootstrapping.
 Configure these in your shell or in a .env file to be sourced.
 
-+-------------------- +--------------------------------------------------- +
-| Name                | Description                                        |
-+-------------------- +--------------------------------------------------- +
-| PIG_TOKEN           | JWT token string to use for client authentication  |
-| PIG_STUN            | STUN server for NAT traversal                      |
-| PIG_MQTT_BROKER     | MQTT broker for NAT traversal ICE signaling        |
-| PIG_MQTT_CLIENT_ID  | MQTT client identifier for the signaling broker    |
-| PIG_MQTT_USERNAME   | MQTT username for the signaling broker             |
-| PIG_MQTT_PASSWORD   | MQTT password for the signaling broker             |
-+-------------------- +--------------------------------------------------- +
++------------------------ +----------------------------------------------------------------- +
+| Name                    | Description                                                      |
++------------------------ +----------------------------------------------------------------- +
+| PIG_TOKEN               | JWT token string to use for client authentication                |
+| PIG_STUN                | STUN server for NAT traversal                                    |
+| PIG_MQTT_BROKER         | MQTT broker for NAT traversal ICE signaling                      |
+| PIG_MQTT_CLIENT_ID      | MQTT client identifier for the signaling broker                  |
+| PIG_MQTT_USERNAME       | MQTT username for the signaling broker                           |
+| PIG_MQTT_PASSWORD       | MQTT password for the signaling broker                           |
+| PIG_WG_PRIVATE_KEY      | WireGuard private key (base64) used when proto is wg             |
+| PIG_WG_PEER_PUBLIC_KEY  | WireGuard peer public key (base64) used when proto is wg         |
+| PIG_WG_PSK              | WireGuard optional preshared key (base64) used when proto is wg  |
++------------------------ +----------------------------------------------------------------- +
 
 SCRIPTING ENVIRONMENT VARIABLES
 

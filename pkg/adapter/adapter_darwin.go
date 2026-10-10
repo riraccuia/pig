@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"sync/atomic"
+	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
 	"golang.org/x/sys/unix"
@@ -30,8 +31,8 @@ func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
 	}
 
 	adapter := &TUNAdapter{
-		iface:  utun,
-		ifName: ifName,
+		ReadWriteCloser: utun,
+		ifName:          ifName,
 	}
 
 	ip, ipNet, err := getAdapterAddress(ifName, unix.AF_INET)
@@ -105,6 +106,18 @@ func (uta *utunAdapter) Write(buf []byte) (int, error) {
 
 	n, err := uta.fd.Write(uta.w)
 	return n - 4, err
+}
+
+func (uta *utunAdapter) SetDeadline(t time.Time) error {
+	return uta.fd.SetDeadline(t)
+}
+
+func (uta *utunAdapter) SetReadDeadline(t time.Time) error {
+	return uta.fd.SetReadDeadline(t)
+}
+
+func (uta *utunAdapter) SetWriteDeadline(t time.Time) error {
+	return uta.fd.SetWriteDeadline(t)
 }
 
 func (uta *utunAdapter) Close() error {

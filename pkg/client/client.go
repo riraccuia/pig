@@ -140,8 +140,15 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func(ctx context
 
 	ctx, cancel := context.WithCancel(ctx)
 
+	c.drainConnError()
+
 	c.conntrack = NewConntrack(ctx)
 	c.setupQueues()
+
+	if deadliner, ok := c.adapter.(transport.DeadLiner); ok {
+		// cancel any previous deadline
+		deadliner.SetReadDeadline(time.Time{})
+	}
 
 	conn, err := dialFunc(ctx)
 	if err != nil {
@@ -187,12 +194,10 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func(ctx context
 		c.logger.Infof("Context done for %s, exiting", c.config.Name)
 		event := &EventContext{State: StateStopped, Conn: c.conn, Error: ctx.Err()}
 		c.cancelAndSignalEvent(cancel, event)
-		//return
 	case err := <-c.connError:
 		c.logger.Errorf("Connection lost for %s: %v", c.config.Name, err)
 		event := &EventContext{State: StateDisconnected, Conn: c.conn, Error: err}
 		c.cancelAndSignalEvent(cancel, event)
-		//return
 	}
 
 	c.mgrWg.Wait()
@@ -204,9 +209,6 @@ func (c *Client) Name() string {
 
 // Wait waits for the client tunnel to stop.
 func (c *Client) Wait() {
-	/*if !c.started.Load() {
-		return
-	}*/
 	c.mainWg.Wait()
 }
 
@@ -224,9 +226,10 @@ func (c *Client) cancelAndSignalEvent(cancel context.CancelFunc, event *EventCon
 	c.streams.CloseAll()
 	if c.conn != nil {
 		_ = c.conn.Close()
-		//c.conn = nil
 	}
-	// c.conntrack.Close()
+	if deadliner, ok := c.adapter.(transport.DeadLiner); ok {
+		deadliner.SetReadDeadline(time.Now())
+	}
 	close(c.inbound)
 	c.outbound.Close()
 	c.drainQueues()
@@ -275,6 +278,13 @@ func (c *Client) drainQueues() {
 	queue.DrainQueue(c.outbound, func(pkt network.IPPacket) {
 		c.bufferPool.PutBuffer(pkt.Bytes())
 	})
+}
+
+func (c *Client) drainConnError() {
+	select {
+	case <-c.connError:
+	default:
+	}
 }
 
 func (c *Client) setupQueues() {

@@ -24,6 +24,9 @@ import (
 
 // Manager handles static route operations.
 type Manager interface {
+	// ExcludeAdapter excludes an adapter from the route manager lookups.
+	ExcludeAdapterForLookup(adapterName string)
+
 	// GetRoutes returns all routes currently in the system.
 	GetRoutes() ([]*Route, error)
 
@@ -207,10 +210,13 @@ func (m *baseManager) AddRoute(rt *Route) error {
 }
 
 func (m *baseManager) RemoveRoute(rt *Route) error {
+	trackedRoutes := m.trackedRoutesForRoute(rt)
+	if _, ok := trackedRoutes.Load(rt.String()); !ok {
+		return nil
+	}
 	if err := m.backend.deleteRoute(rt); err != nil {
 		return err
 	}
-	trackedRoutes := m.trackedRoutesForRoute(rt)
 	trackedRoutes.Delete(rt.String())
 	return nil
 }
@@ -334,6 +340,11 @@ func (m *baseManager) waitDefaultGateway(v4, v6 bool) {
 		break
 	}
 	m.defGwCond.L.Unlock()
+}
+
+func (m *baseManager) ExcludeAdapterForLookup(adapterName string) {
+	m.routeTableV4.ExcludeAdapter(adapterName)
+	m.routeTableV6.ExcludeAdapter(adapterName)
 }
 
 func (m *baseManager) GetRoutes() ([]*Route, error) {

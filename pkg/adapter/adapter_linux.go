@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 	"unsafe"
 
 	"github.com/riraccuia/pig/pkg/common"
@@ -31,8 +32,8 @@ func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
 	}
 
 	adapter := &TUNAdapter{
-		iface:  tun,
-		ifName: ifName,
+		ReadWriteCloser: tun,
+		ifName:          ifName,
 	}
 
 	ip, ipNet, err := getAdapterAddress(ifName, unix.AF_INET)
@@ -51,7 +52,7 @@ func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
 }
 
 func (a *TUNAdapter) Queues() []io.ReadWriteCloser {
-	return a.iface.(*tunAdapter).queues
+	return a.ReadWriteCloser.(*tunAdapter).queues
 }
 
 type tunAdapter struct {
@@ -83,6 +84,48 @@ func (a *tunAdapter) Write(p []byte) (n int, err error) {
 
 func (a *tunAdapter) Read(p []byte) (n int, err error) {
 	return a.queues[0].Read(p)
+}
+
+func (a *tunAdapter) SetDeadline(t time.Time) (err error) {
+	for i, q := range a.queues {
+		d, ok := q.(deadliner)
+		if !ok {
+			continue
+		}
+		err := d.SetDeadline(t)
+		if err != nil {
+			err = fmt.Errorf("queue %d: %w", i, err)
+		}
+	}
+	return err
+}
+
+func (a *tunAdapter) SetReadDeadline(t time.Time) (err error) {
+	for i, q := range a.queues {
+		d, ok := q.(deadliner)
+		if !ok {
+			continue
+		}
+		err := d.SetReadDeadline(t)
+		if err != nil {
+			err = fmt.Errorf("queue %d: %w", i, err)
+		}
+	}
+	return err
+}
+
+func (a *tunAdapter) SetWriteDeadline(t time.Time) (err error) {
+	for i, q := range a.queues {
+		d, ok := q.(deadliner)
+		if !ok {
+			continue
+		}
+		err := d.SetWriteDeadline(t)
+		if err != nil {
+			err = fmt.Errorf("queue %d: %w", i, err)
+		}
+	}
+	return err
 }
 
 func (a *tunAdapter) Close() error {

@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,12 +28,12 @@ import (
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice"
 	"github.com/riraccuia/pig/pkg/ice/signaling"
-	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/transport"
 	"github.com/riraccuia/pig/pkg/transport/dtls"
 	qt "github.com/riraccuia/pig/pkg/transport/quic-go"
 	trtls "github.com/riraccuia/pig/pkg/transport/tls"
 	"github.com/riraccuia/pig/pkg/transport/tlsicmp"
+	"github.com/riraccuia/pig/pkg/transport/wireguard"
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
 
@@ -44,9 +43,17 @@ func (c *Controller) getICEListenFunc(cfg *config.TunnelConfig) (func(ctx contex
 		// use a random port
 		listenPort = uint16(rand.Intn(65535-1024) + 1024)
 	}
-	c.logger.Infof("Starting ICE | Candidate protocols: %v | Listen port: %d", strings.Join(cfg.ICE.Protos, ", "), listenPort)
+
+	sigOpts := signaling.GetOptions(c.logger, cfg.ICE)
+	sigOpts.Dialer = c.newBypassDialer(time.Second * 5)
+
+	pc, err := ice.NewPathFinder(sigOpts, cfg.ICE.UseProtos())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create path connector: %w", err)
+	}
 	return func(ctx context.Context) (transport.Listener, error) {
-		offerPathsChan, err := ice.NewPathConnector(signaling.GetOptions(c.logger, cfg.ICE), cfg.ICE.UseProtos(), c.adapters).GetListenPaths(ctx, listenPort)
+		c.logger.Infof("Starting ICE | Candidate protocols: %v | Listen port: %d", strings.Join(cfg.ICE.Protos, ", "), listenPort)
+		offerPathsChan, err := pc.GetListenPaths(ctx, listenPort, c.adapters)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get listen paths: %w", err)
 		}
@@ -115,15 +122,15 @@ func (c *Controller) processICEServerConnectPaths(ctx context.Context, cfg *conf
 	var l transport.Listener
 	switch selectedPath.Protocol.Protocol {
 	case "quic":
-		co := network.NewUDPPacketConn(selectedPath.Conn.(*net.UDPConn))
-		l, err = qt.GetListenerFromConn(ctx, co, cfg, tlsConfig)
+		l, err = qt.GetListenerFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
 	case "ws":
 		l, err = ws.GetListenerFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
 	case "dtls":
-		co := network.NewUDPPacketConn(selectedPath.Conn.(*net.UDPConn))
-		l, err = dtls.GetListenerFromConn(ctx, co, cfg, tlsConfig, mtu)
+		l, err = dtls.GetListenerFromConn(ctx, selectedPath.Conn, cfg, tlsConfig, mtu)
 	case "tls":
 		l, err = trtls.GetListenerFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
+	case "wg":
+		l, err = wireguard.GetListenerFromConn(ctx, selectedPath.Conn, cfg, mtu)
 	case "tls-in-icmp":
 		l, err = tlsicmp.GetListenerFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
 	}

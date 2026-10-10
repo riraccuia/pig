@@ -43,6 +43,18 @@ var (
 		VarName:     "PIG_MQTT_PASSWORD",
 		Description: "MQTT password for the signaling broker",
 	}
+	EnvWGPrivateKey = common.EnvVar{
+		VarName:     "PIG_WG_PRIVATE_KEY",
+		Description: "WireGuard private key (base64) used when proto is wg",
+	}
+	EnvWGPeerPublicKey = common.EnvVar{
+		VarName:     "PIG_WG_PEER_PUBLIC_KEY",
+		Description: "WireGuard peer public key (base64) used when proto is wg",
+	}
+	EnvWGPSK = common.EnvVar{
+		VarName:     "PIG_WG_PSK",
+		Description: "WireGuard optional preshared key (base64) used when proto is wg",
+	}
 )
 
 var EnvVars = []common.EnvVar{
@@ -52,4 +64,7 @@ var EnvVars = []common.EnvVar{
 	EnvMQTTClientID,
 	EnvMQTTUsername,
 	EnvMQTTPassword,
+	EnvWGPrivateKey,
+	EnvWGPeerPublicKey,
+	EnvWGPSK,
 }

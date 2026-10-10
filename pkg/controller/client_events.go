@@ -19,32 +19,29 @@ import (
 	"fmt"
 
 	"github.com/riraccuia/pig/pkg/client"
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/demux"
 )
 
 func (c *Controller) onTunnelConnected(tunnel *client.Client) error {
-	ta, ok := tunnel.GetAdapter().(*demux.Adapter)
-	if !ok {
-		c.logger.Errorf("unexpected tunnel adapter type %T", tunnel.GetAdapter())
+	tunnelAdapter := tunnel.GetAdapter()
+	tunnelCfg := tunnel.Config()
+	switch ta := tunnel.GetAdapter().(type) {
+	case *demux.Adapter:
+		/*if tunnelCfg == nil || len(tunnelCfg.Routes) == 0 {
+			c.demux.SetDefault(tunnelAdapter)
+			return nil
+		}*/
+		c.demux.AddRoutes(ta, tunnelCfg.Routes)
+	case common.TunnelAdapter:
+	default:
 		return fmt.Errorf("unexpected tunnel adapter type %T", tunnel.GetAdapter())
 	}
-	tunnelCfg := tunnel.Config()
-	if tunnelCfg == nil || len(tunnelCfg.Routes) == 0 {
-		c.demux.SetDefault(ta)
-		return nil
-	}
-	c.demux.AddRoutes(ta, tunnelCfg.Routes)
 	var addRoutes []config.Route
-	/*peerAddr := tunnel.PeerAddr()
-	if peerAddr != nil {
-		if pb, err := peerBypassRoute(peerAddr); err == nil {
-			addRoutes = append(addRoutes, pb)
-		}
-	}*/
 	addRoutes = append(addRoutes, tunnelCfg.Routes...)
 	select {
-	case c.routeRequests <- routeRequest{op: routeOpAdd, routes: addRoutes}:
+	case c.routeRequests <- routeRequest{op: routeOpAdd, routes: addRoutes, tunIfName: tunnelAdapter.Name()}:
 	default:
 		c.logger.Errorf("failed to send route add request: channel is full")
 	}
@@ -53,11 +50,9 @@ func (c *Controller) onTunnelConnected(tunnel *client.Client) error {
 
 func (c *Controller) onTunnelDisconnected(tunnel *client.Client) error {
 	ta, ok := tunnel.GetAdapter().(*demux.Adapter)
-	if !ok {
-		c.logger.Errorf("unexpected tunnel adapter type %T", tunnel.GetAdapter())
-		return fmt.Errorf("unexpected tunnel adapter type %T", tunnel.GetAdapter())
+	if ok {
+		c.demux.RemoveRoutes(ta)
 	}
-	c.demux.RemoveRoutes(ta)
 
 	tunnelCfg := tunnel.Config()
 	if tunnelCfg == nil || len(tunnelCfg.Routes) == 0 {
@@ -70,7 +65,11 @@ func (c *Controller) onTunnelDisconnected(tunnel *client.Client) error {
 	if len(removeRoutes) == 0 {
 		return nil
 	}
-	c.routeRequests <- routeRequest{op: routeOpRemove, routes: removeRoutes}
+	select {
+	case c.routeRequests <- routeRequest{op: routeOpRemove, routes: removeRoutes, tunIfName: tunnel.GetAdapter().Name()}:
+	default:
+		c.logger.Errorf("failed to send route remove request: channel is full")
+	}
 	return nil
 }
 

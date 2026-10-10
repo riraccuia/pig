@@ -17,21 +17,22 @@ package quicgo
 import (
 	"context"
 	"net"
+	"sync"
 
 	"github.com/quic-go/quic-go"
 )
 
 type QuicListener struct {
-	ctx      context.Context
-	listener *quic.Listener
+	listener  *quic.Listener
+	closeOnce sync.Once
 }
 
-func NewQuicTransport(ctx context.Context, listener *quic.Listener) *QuicListener {
-	return &QuicListener{ctx: ctx, listener: listener}
+func NewQuicTransport(listener *quic.Listener) *QuicListener {
+	return &QuicListener{listener: listener}
 }
 
 func (t *QuicListener) Accept() (net.Conn, error) {
-	conn, err := t.listener.Accept(t.ctx)
+	conn, err := t.listener.Accept(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -39,5 +40,12 @@ func (t *QuicListener) Accept() (net.Conn, error) {
 }
 
 func (t *QuicListener) Close() error {
-	return t.listener.Close()
+	t.closeOnce.Do(func() {
+		if t.listener == nil {
+			return
+		}
+		t.listener.Close()
+		t.listener = nil
+	})
+	return nil
 }

@@ -26,6 +26,7 @@ import (
 	trtls "github.com/riraccuia/pig/pkg/transport/tls"
 	"github.com/riraccuia/pig/pkg/transport/tlsicmp"
 	"github.com/riraccuia/pig/pkg/transport/udp"
+	"github.com/riraccuia/pig/pkg/transport/wireguard"
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
 
@@ -75,6 +76,8 @@ func (c *Controller) getServerListenFunc(cfg *config.TunnelConfig) (func(ctx con
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
 		return dtls.GetServerListenFunc(c.logger, cfg, tlsConfig, cfg.Adapter.MTU), nil
+	case config.TransportWG:
+		return wireguard.GetServerListenFunc(c.logger, cfg, cfg.Adapter.MTU), nil
 	default:
 		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 	}

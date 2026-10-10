@@ -55,15 +55,19 @@ func (t *WSConn) Flush() error {
 	return nil
 }
 
+func (t *WSConn) Read(b []byte) (int, error) {
+	return t.Conn.Read(b)
+}
+
 func (t *WSConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
-	return t, transport.ErrNotImplemented
+	return nil, transport.ErrNotImplemented
 }
 
 func (t *WSConn) NewStream(ctx context.Context) (transport.Stream, error) {
-	return t, transport.ErrNotImplemented
+	return nil, transport.ErrNotImplemented
 }
 
-func DialConn(ctx context.Context, conn net.Conn, address string, tlsConfig *tls.Config) (transport.Conn, error) {
+func DialConn(ctx context.Context, conn net.Conn, address string, tlsConfig *tls.Config) (*WSConn, error) {
 	scheme := "ws"
 	if tlsConfig != nil {
 		scheme = "wss"
@@ -90,15 +94,16 @@ func DialConn(ctx context.Context, conn net.Conn, address string, tlsConfig *tls
 
 	remoteAddr, _ := net.ResolveTCPAddr("tcp", address)
 
-	netConn := websocket.NetConn(context.Background(), wsConn, websocket.MessageBinary)
+	netConn := websocket.NetConn(ctx, wsConn, websocket.MessageBinary)
+
 	return &WSConn{
 		Conn:       netConn,
 		localAddr:  conn.LocalAddr(),
-		remoteAddr: remoteAddr, //conn.RemoteAddr(),
+		remoteAddr: remoteAddr,
 	}, nil
 }
 
-func Dial(ctx context.Context, address string, tlsConfig *tls.Config) (transport.Conn, error) {
+func Dial(ctx context.Context, address string, tlsConfig *tls.Config) (*WSConn, error) {
 	scheme := "ws"
 	if tlsConfig != nil {
 		scheme = "wss"
@@ -123,7 +128,8 @@ func Dial(ctx context.Context, address string, tlsConfig *tls.Config) (transport
 
 	remoteAddr, _ := net.ResolveTCPAddr("tcp", address)
 
-	netConn := websocket.NetConn(context.Background(), wsConn, websocket.MessageBinary)
+	netConn := websocket.NetConn(ctx, wsConn, websocket.MessageBinary)
+
 	return &WSConn{
 		Conn:       netConn,
 		remoteAddr: remoteAddr,

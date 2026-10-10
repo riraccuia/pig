@@ -17,6 +17,7 @@ package client
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/network"
@@ -48,6 +49,9 @@ func (c *Client) handleOutbound(ctx context.Context, conn transport.Conn) {
 // processInbound processes incoming IPv4 packets from the connection or stream
 // and forwards them to the local network adapter.
 func (c *Client) processInbound(ctx context.Context, connOrStream io.ReadWriteCloser) {
+	// load the idle timeout settings from the parent config
+	idleTimeout := time.Duration(c.config.IdleTimeout) * time.Second
+
 	const readBufferSize = 64 * 1024 // 64KB buffer
 	buffer := make([]byte, readBufferSize)
 	unprocessed := buffer[:0]
@@ -57,10 +61,13 @@ func (c *Client) processInbound(ctx context.Context, connOrStream io.ReadWriteCl
 			return
 		}
 
+		if idleTimeout > 0 {
+			connOrStream.(transport.DeadLiner).SetReadDeadline(time.Now().Add(idleTimeout))
+		}
 		n, err := connOrStream.Read(buffer[len(unprocessed):])
 		if err != nil {
 			c.logger.Debugf("failed to read from connection or stream: %v", err)
-			if _, ok := connOrStream.(transport.Stream); ok {
+			if _, ok := connOrStream.(transport.Conn); !ok {
 				// streams are reconnected automatically
 				return
 			}
@@ -86,9 +93,10 @@ func (c *Client) processInbound(ctx context.Context, connOrStream io.ReadWriteCl
 
 			totalLen := prePkt.TotalLength()
 
-			if totalLen < 20 || totalLen > c.adapterConfig.MTU {
-				c.logger.Debugf("received packet inbound with invalid length: %d", totalLen)
-				processed++
+			if totalLen > c.adapterConfig.MTU {
+				// consume the packet and continue
+				c.logger.Debugf("received packet inbound with unexpected length: %d", totalLen)
+				processed += totalLen
 				continue
 			}
 
@@ -211,15 +219,15 @@ func (c *Client) processOutboundConn(ctx context.Context, conn transport.Conn) {
 
 	// Helper function to write and reset batch
 	writeBatch := func() error {
-		for len(batch) > 0 {
-			n, err := conn.Write(batch)
-			batch = batch[n:]
-			if err != nil && err != io.ErrShortWrite {
-				return err
+		err := flushOutboundBatch(conn, batch)
+		if err != nil {
+			select {
+			case c.connError <- err:
+			default:
 			}
 		}
 		batch = buffer[:0]
-		return nil
+		return err
 	}
 
 	processPacket := func(pkt network.IPPacket) error {
@@ -291,7 +299,7 @@ func (c *Client) processOutboundConn(ctx context.Context, conn transport.Conn) {
 		if empty {
 			// write the data quickly when the channel has no more packets
 			if err := writeBatch(); err != nil {
-				c.logger.Error(err)
+				c.logger.Errorf("failed to write batch to connection: %v", err)
 				return
 			}
 			pkts = c.outbound.PopAll()
@@ -307,4 +315,51 @@ func (c *Client) processOutboundConn(ctx context.Context, conn transport.Conn) {
 			}
 		}
 	}
+}
+
+// flushOutboundBatch writes outbound batches to conn.
+// When conn is AtomicPacketConn (e.g. WireGuard), datagrams are flushed one at a time.
+func flushOutboundBatch(conn transport.Conn, batch []byte) error {
+	if ap, ok := conn.(transport.AtomicPacketConn); ok && ap.AtomicPacketWrites() {
+		return flushBatchAsPackets(conn, batch)
+	}
+	for len(batch) > 0 {
+		n, err := conn.Write(batch)
+		batch = batch[n:]
+		if err != nil && err != io.ErrShortWrite {
+			return err
+		}
+	}
+	return nil
+}
+
+// flushBatchAsPackets walks the datagrams in the batch and
+// writes one at a time using the conn's Write method.
+func flushBatchAsPackets(conn transport.Conn, batch []byte) error {
+	for len(batch) > 0 {
+		if len(batch) < 20 {
+			return io.ErrUnexpectedEOF
+		}
+		var totalLen int
+		switch network.IPv4Packet(batch).Version() {
+		case 4:
+			totalLen = network.IPv4Packet(batch).TotalLength()
+		case 6:
+			totalLen = network.IPv6Packet(batch).TotalLength()
+		default:
+			return io.ErrUnexpectedEOF
+		}
+		if totalLen < 20 || totalLen > len(batch) {
+			return io.ErrUnexpectedEOF
+		}
+		n, err := conn.Write(batch[:totalLen])
+		if err != nil && err != io.ErrShortWrite {
+			return err
+		}
+		if n < totalLen {
+			return io.ErrShortWrite
+		}
+		batch = batch[totalLen:]
+	}
+	return nil
 }

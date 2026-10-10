@@ -39,34 +39,35 @@ const (
 	FLAG_MAIN_DOCS    = "docs"
 	FLAG_MAIN_VERSION = "version"
 
-	FLAG_TO_CFG   = "to-cfg"
-	FLAG_SIMPLE   = "s"
-	FLAG_ID       = "id"
-	FLAG_ADDR     = "a"
-	FLAG_BIND     = "I"
-	FLAG_PROTO    = "P"
-	FLAG_SPORT    = "p"
-	FLAG_TADDR    = "ta"
-	FLAG_RETRY    = "r"
-	FLAG_ROUTE    = "R"
-	FLAG_SCRIPT   = "S"
-	FLAG_VERBOSE  = "v"
-	FLAG_CERT     = "cert"
-	FLAG_KEY      = "key"
-	FLAG_INSECURE = "k"
-	FLAG_CA       = "ca"
-	FLAG_AUTH     = "A"
-	FLAG_JWK      = "jwk"
-	FLAG_TOKEN    = "T"
-	FLAG_STUN     = "stun"
-	FLAG_MQTT     = "mqtt"
-	FLAG_SIGKEY   = "sk"
-	FLAG_MTU      = "mtu"
-	FLAG_STREAMS  = "os"
-	FLAG_QSIZE    = "qs"
-	FLAG_WRED_WF  = "wf"
-	FLAG_WRED_DP  = "wd"
-	FLAG_WRED_TH  = "wt"
+	FLAG_TO_CFG       = "to-cfg"
+	FLAG_SIMPLE       = "s"
+	FLAG_ID           = "id"
+	FLAG_ADDR         = "a"
+	FLAG_BIND         = "I"
+	FLAG_PROTO        = "P"
+	FLAG_SPORT        = "p"
+	FLAG_TADDR        = "ta"
+	FLAG_RETRY        = "r"
+	FLAG_IDLE_TIMEOUT = "t"
+	FLAG_ROUTE        = "R"
+	FLAG_SCRIPT       = "S"
+	FLAG_VERBOSE      = "v"
+	FLAG_CERT         = "cert"
+	FLAG_KEY          = "key"
+	FLAG_INSECURE     = "k"
+	FLAG_CA           = "ca"
+	FLAG_AUTH         = "A"
+	FLAG_JWK          = "jwk"
+	FLAG_TOKEN        = "T"
+	FLAG_STUN         = "stun"
+	FLAG_MQTT         = "mqtt"
+	FLAG_SIGKEY       = "sk"
+	FLAG_MTU          = "mtu"
+	FLAG_STREAMS      = "os"
+	FLAG_QSIZE        = "qs"
+	FLAG_WRED_WF      = "wf"
+	FLAG_WRED_DP      = "wd"
+	FLAG_WRED_TH      = "wt"
 
 	FLAG_DOCS_CONFIG = FLAG_MAIN_CONFIG
 	FLAG_DOCS_ENV    = "env"
@@ -75,49 +76,48 @@ const (
 	FLAG_OUT_MARKDOWN = "md"
 )
 
-var (
-	// map values for all flags: flag name, [supported mode (c=connect, l=listen, a=all), description]
-	pigFlags = map[string][3]string{
-		// output settings
-		FLAG_TO_CFG: {FLAG_TO_CFG, "a", "Takes either 'json' or 'toml'. Turns the current CLI options into a config file and exits."},
-		// general settings
-		FLAG_SIMPLE: {FLAG_SIMPLE, "a", "Simple mode. Disables NAT traversal to establish direct connections, in which case ports need to be opened manually on edge routers and/or firewalls."},
-		FLAG_ID:     {FLAG_ID, "a", "ID or friendly name for a listening node. This identifier is registered for signaling during NAT traversal. When the connecting side uses it, it doesn't need to know the other node's address."},
-		FLAG_ADDR:   {FLAG_ADDR, "a", "Address host[:port]. Or use -id in NAT traversal mode. In simple mode, this is the connect node's target address and the listen node's bind address."},
-		FLAG_BIND:   {FLAG_BIND, "a", "The adapter/interface to bind to, required only when '-P' is *-ICMP."},
-		FLAG_PROTO:  {FLAG_PROTO, "a", "Transport protocol for the tunnel. See '" + binaryName + " docs protos' for the list of supported ones. The special '.' option selects all available protocols for candidate generation with NAT traversal."},
-		FLAG_SPORT:  {FLAG_SPORT, "c", "Source port to use for the connection."},
-		FLAG_TADDR:  {FLAG_TADDR, "a", "Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR values. Defaults to 172.31.254.1/29 for connect nodes and 172.31.255.1/24 for listening nodes."},
-		FLAG_RETRY:  {FLAG_RETRY, "c", "Reconnect interval in seconds. Defaults to " + strconv.Itoa(config.DefaultRetryInterval) + "."},
-		FLAG_ROUTE:  {FLAG_ROUTE, "c", "Route subnets through the tunnel. Use 'full4', 'full6', 'full' (as shortcuts for full tunnel routing) or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'."},
-		// scripting settings
-		FLAG_SCRIPT: {FLAG_SCRIPT, "c", "Takes the path to an executable file that will be called on tunnel events. See '" + binaryName + " docs env' for the list of environment variables that are passed to the script."},
-		// logging settings
-		FLAG_VERBOSE: {FLAG_VERBOSE, "a", "Print more verbose output. Use 0 (default) for info, 1 for debug, 2 for trace."},
-		// certificate settings
-		FLAG_CERT: {FLAG_CERT, "a", "Path to a certificate file for mTLS."},
-		FLAG_KEY:  {FLAG_KEY, "a", "Path to a private key file for mTLS."},
-		// trust settings
-		FLAG_INSECURE: {FLAG_INSECURE, "a", "Insecure. Disable certificate verification."},
-		FLAG_CA:       {FLAG_CA, "a", "Path to a CA certificate or bundle file for mTLS."},
-		// auth settings
-		FLAG_AUTH:  {FLAG_AUTH, "a", "Authentication type. Set to 'jwt' to enable JWT authentication. More types will be supported in future versions."},
-		FLAG_JWK:   {FLAG_JWK, "l", "Path to a public key file used to verify JWT tokens. This can be a local file or a URL. PEM and JWKS (json) formats are supported."},
-		FLAG_TOKEN: {FLAG_TOKEN, "c", "Sets the token string for JWT client authentication. It is recommended to populate the " + config.EnvToken.Name() + " environment variable instead of using this flag."},
-		// NAT traversal settings
-		FLAG_STUN:   {FLAG_STUN, "a", "STUN server to query during NAT traversal."},
-		FLAG_MQTT:   {FLAG_MQTT, "a", "MQTT broker to use for NAT traversal signaling. See '" + binaryName + " -env' for additional configuration options."},
-		FLAG_SIGKEY: {FLAG_SIGKEY, "a", "Encryption key for signaling messages. Connecting peers need to use the same key as the listeners."},
-		// nerd settings
-		FLAG_MTU:     {FLAG_MTU, "a", "MTU (Maximum Transmission Unit) size of the tunnel adapter."},
-		FLAG_STREAMS: {FLAG_STREAMS, "c", "Open streams. The number of individual streams that the connecting side will open with stream based protocols like quic. Defaults to the number of CPU cores."},
-		FLAG_QSIZE:   {FLAG_QSIZE, "a", "Size of the packet queues used by tunnels."},
-		// WRED settings
-		FLAG_WRED_WF: {FLAG_WRED_WF, "a", "Weight factor for WRED, lower values mean more weight to recent packets. Defaults to " + strconv.FormatFloat(config.DefaultWredWF, 'f', -1, 64) + "."},
-		FLAG_WRED_DP: {FLAG_WRED_DP, "a", "Drop probability for WRED. Accepts decimals between 0 and 1. Defaults to " + strconv.FormatFloat(config.DefaultWredDP, 'f', -1, 64) + "."},
-		FLAG_WRED_TH: {FLAG_WRED_TH, "a", "Threshold for WRED as a fraction of the queue length. Accepts decimals between 0 and 1. Defaults to " + strconv.FormatFloat(config.DefaultWredThresh, 'f', -1, 64) + "."},
-	}
-)
+// map values for all flags: flag name, [supported mode (c=connect, l=listen, a=all), description]
+var pigFlags = map[string][3]string{
+	// output settings
+	FLAG_TO_CFG: {FLAG_TO_CFG, "a", "Takes either 'json' or 'toml'. Turns the current CLI options into a config file and exits."},
+	// general settings
+	FLAG_SIMPLE:       {FLAG_SIMPLE, "a", "Simple mode. Disables NAT traversal to establish direct connections, in which case ports need to be opened manually on edge routers and/or firewalls."},
+	FLAG_ID:           {FLAG_ID, "a", "ID or friendly name for a listening node. This identifier is registered for signaling during NAT traversal. When the connecting side uses it, it doesn't need to know the other node's address."},
+	FLAG_ADDR:         {FLAG_ADDR, "a", "Address [host]:port. Or use -id in NAT traversal mode. In simple mode, this is the connect node's target address and the listen node's bind address."},
+	FLAG_BIND:         {FLAG_BIND, "a", "The adapter/interface to bind to, required only when '-P' is *-ICMP."},
+	FLAG_PROTO:        {FLAG_PROTO, "a", "Transport protocol for the tunnel. See '" + binaryName + " docs protos' for the list of supported ones. The special '.' option selects all available protocols for candidate generation with NAT traversal."},
+	FLAG_SPORT:        {FLAG_SPORT, "c", "Source port to use for the connection."},
+	FLAG_TADDR:        {FLAG_TADDR, "a", "Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR values. Defaults to 172.31.254.1/29 for connect nodes and 172.31.255.1/24 for listening nodes."},
+	FLAG_RETRY:        {FLAG_RETRY, "c", "Reconnect interval in seconds. Defaults to " + strconv.Itoa(config.DefaultRetryInterval) + "."},
+	FLAG_IDLE_TIMEOUT: {FLAG_IDLE_TIMEOUT, "a", "Idle timeout in seconds for tunnels. Defaults to " + strconv.Itoa(config.DefaultIdleTimeout) + "."},
+	FLAG_ROUTE:        {FLAG_ROUTE, "c", "Route subnets through the tunnel. Use 'full4', 'full6', 'full' (as shortcuts for full tunnel routing) or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'."},
+	// scripting settings
+	FLAG_SCRIPT: {FLAG_SCRIPT, "c", "Takes the path to an executable file that will be called on tunnel events. See '" + binaryName + " docs env' for the list of environment variables that are passed to the script."},
+	// logging settings
+	FLAG_VERBOSE: {FLAG_VERBOSE, "a", "Print more verbose output. Use 0 (default) for info, 1 for debug, 2 for trace."},
+	// certificate settings
+	FLAG_CERT: {FLAG_CERT, "a", "Path to a certificate file for mTLS."},
+	FLAG_KEY:  {FLAG_KEY, "a", "Path to a private key file for mTLS."},
+	// trust settings
+	FLAG_INSECURE: {FLAG_INSECURE, "a", "Insecure. Disable certificate verification."},
+	FLAG_CA:       {FLAG_CA, "a", "Path to a CA certificate or bundle file for mTLS."},
+	// auth settings
+	FLAG_AUTH:  {FLAG_AUTH, "a", "Authentication type. Set to 'jwt' to enable JWT authentication. More types will be supported in future versions."},
+	FLAG_JWK:   {FLAG_JWK, "l", "Path to a public key file used to verify JWT tokens. This can be a local file or a URL. PEM and JWKS (json) formats are supported."},
+	FLAG_TOKEN: {FLAG_TOKEN, "c", "Sets the token string for JWT client authentication. It is recommended to populate the " + config.EnvToken.Name() + " environment variable instead of using this flag."},
+	// NAT traversal settings
+	FLAG_STUN:   {FLAG_STUN, "a", "STUN server to query during NAT traversal."},
+	FLAG_MQTT:   {FLAG_MQTT, "a", "MQTT broker to use for NAT traversal signaling. See '" + binaryName + " -env' for additional configuration options."},
+	FLAG_SIGKEY: {FLAG_SIGKEY, "a", "Encryption key for signaling messages. Connecting peers need to use the same key as the listeners."},
+	// nerd settings
+	FLAG_MTU:     {FLAG_MTU, "a", "MTU (Maximum Transmission Unit) size of the tunnel adapter."},
+	FLAG_STREAMS: {FLAG_STREAMS, "c", "Open streams. The number of individual streams that the connecting side will open with stream based protocols like quic. Defaults to the number of CPU cores."},
+	FLAG_QSIZE:   {FLAG_QSIZE, "a", "Size of the packet queues used by tunnels."},
+	// WRED settings
+	FLAG_WRED_WF: {FLAG_WRED_WF, "a", "Weight factor for WRED, lower values mean more weight to recent packets. Defaults to " + strconv.FormatFloat(config.DefaultWredWF, 'f', -1, 64) + "."},
+	FLAG_WRED_DP: {FLAG_WRED_DP, "a", "Drop probability for WRED. Accepts decimals between 0 and 1. Defaults to " + strconv.FormatFloat(config.DefaultWredDP, 'f', -1, 64) + "."},
+	FLAG_WRED_TH: {FLAG_WRED_TH, "a", "Threshold for WRED as a fraction of the queue length. Accepts decimals between 0 and 1. Defaults to " + strconv.FormatFloat(config.DefaultWredThresh, 'f', -1, 64) + "."},
+}
 
 type Flags struct {
 	verbose        int
@@ -131,6 +131,7 @@ type Flags struct {
 	mtu            int
 	streamCount    int
 	retryInterval  int
+	idleTimeout    int
 	bindAdapter    string
 	wredWF         float64 // Weight factor for WRED
 	wredDP         float64 // Drop probability for WRED
@@ -189,14 +190,8 @@ func initPig(mode Mode) (*config.Config, common.Logger) {
 		err    error
 	)
 	flags = parsePigFlags(mode)
-	//cfg, err = loadConfigFile(flags.configPath)
-	//if err != nil {
-	//	log.NewBlockingLogger().Fatalf("Failed to load config file: %v", err)
-	//}
-	//if cfg == nil {
 	cfg = &config.Config{}
 	applyCommandLineFlags(cfg, flags, mode, log.NewBlockingLogger())
-	//}
 	switch cfg.LogConfig.File {
 	case "":
 		logger = log.NewLogger()
@@ -279,6 +274,7 @@ func defineFlags(flagSet *flag.FlagSet) *Flags {
 	flagSet.IntVar(&flags.srcPort, pigFlags[FLAG_SPORT][0], 0, pigFlags[FLAG_SPORT][2])
 	flagSet.StringVar(&flags.tunnelAddress, pigFlags[FLAG_TADDR][0], "", pigFlags[FLAG_TADDR][2])
 	flagSet.IntVar(&flags.retryInterval, pigFlags[FLAG_RETRY][0], config.DefaultRetryInterval, pigFlags[FLAG_RETRY][2])
+	flagSet.IntVar(&flags.idleTimeout, pigFlags[FLAG_IDLE_TIMEOUT][0], config.DefaultIdleTimeout, pigFlags[FLAG_IDLE_TIMEOUT][2])
 	flagSet.StringVar(&flags.route, pigFlags[FLAG_ROUTE][0], "", pigFlags[FLAG_ROUTE][2])
 	// scripting settings
 	flagSet.StringVar(&flags.scriptPath, pigFlags[FLAG_SCRIPT][0], "", pigFlags[FLAG_SCRIPT][2])
@@ -355,6 +351,7 @@ func applyCommandLineFlags(cfg *config.Config, flags *Flags, mode Mode, logger c
 
 	setConfigField(&tc.StreamCount, flags.streamCount)
 	setConfigField(&tc.ReconnectInterval, flags.retryInterval)
+	setConfigField(&tc.IdleTimeout, flags.idleTimeout)
 
 	setConfigField(&tc.Wred.MaxDropProbability, flags.wredDP)
 	setConfigField(&tc.Wred.MaxThreshold, flags.wredThresh)
@@ -383,33 +380,37 @@ func applyCommandLineFlags(cfg *config.Config, flags *Flags, mode Mode, logger c
 		cfg.LogConfig.Level = "info"
 	}
 
+	buildTrustSettingsFromFlags(tc, flags, logger)
 	buildAuthSettingsFromFlags(tc, flags, logger)
 	buildICESettingsFromFlags(tc, flags, logger)
 	buildRouteSettingsFromFlags(cfg, tc, flags, logger)
 }
 
-func buildAuthSettingsFromFlags(tc *config.TunnelConfig, flags *Flags, logger common.Logger) {
-	if tc.Auth != nil {
+func buildTrustSettingsFromFlags(tc *config.TunnelConfig, flags *Flags, logger common.Logger) {
+	if tc.Trust != nil {
 		return
 	}
-
-	tc.Auth = &config.AuthConfig{}
+	tc.Trust = &config.TrustConfig{}
 	if flags.mtlsCA != "" && !flags.insecure {
-		tc.Auth.MTLS = &config.MTLSConfig{
+		tc.Trust.MTLS = &config.MTLSConfig{
 			TrustPEM: flags.mtlsCA,
 		}
 	}
 	if tc.Direction == config.TunnelDirectionConnect && flags.certFile != "" {
-		if tc.Auth.MTLS == nil {
-			tc.Auth.MTLS = &config.MTLSConfig{}
+		if tc.Trust.MTLS == nil {
+			tc.Trust.MTLS = &config.MTLSConfig{}
 		}
-		tc.Auth.MTLS.CertFile = flags.certFile
-		tc.Auth.MTLS.KeyFile = flags.keyFile
+		tc.Trust.MTLS.CertFile = flags.certFile
+		tc.Trust.MTLS.KeyFile = flags.keyFile
 	}
+}
 
-	if flags.authType == "" {
+func buildAuthSettingsFromFlags(tc *config.TunnelConfig, flags *Flags, logger common.Logger) {
+	if tc.Auth != nil || flags.authType == "" {
 		return
 	}
+
+	tc.Auth = &config.AuthConfig{}
 
 	if !config.AuthType(flags.authType).IsValid() {
 		logger.Fatalf("Invalid authentication type: %s", flags.authType)
@@ -435,7 +436,7 @@ func buildICESettingsFromFlags(tc *config.TunnelConfig, flags *Flags, logger com
 
 	tc.ICE = &config.ICEConfig{
 		Enabled: true,
-		//STUNAddress: flags.stunServerAddr,
+		// STUNAddress: flags.stunServerAddr,
 	}
 
 	tc.ICE.Signaling = &config.ICESignalingOpts{
@@ -457,8 +458,11 @@ func applyICESettings(cfg *config.Config, flags *Flags, logger common.Logger) {
 		if tc.ICE == nil || !tc.ICE.Enabled {
 			continue
 		}
-		//setConfigField(&tc.ICE.STUNAddress, flags.stunServerAddr)
-		setConfigField(&cfg.STUNAddress, flags.stunServerAddr)
+
+		if len(cfg.STUNAddress) == 0 {
+			cfg.STUNAddress = []string{flags.stunServerAddr}
+		}
+
 		if tc.ICE.Signaling == nil {
 			tc.ICE.Signaling = &config.ICESignalingOpts{}
 		}
@@ -467,11 +471,6 @@ func applyICESettings(cfg *config.Config, flags *Flags, logger common.Logger) {
 }
 
 func configureEndpoint(tc *config.TunnelConfig, addr string, addrType string, logger common.Logger) error {
-	/*if addr == "." {
-		tc.Listen.Address = "0.0.0.0"
-		tc.Listen.Port = 0
-		return nil
-	}*/
 	address, strPort, err := net.SplitHostPort(addr)
 	if err != nil && strings.Contains(err.Error(), "missing port") {
 		address = addr
@@ -480,25 +479,12 @@ func configureEndpoint(tc *config.TunnelConfig, addr string, addrType string, lo
 	if err != nil {
 		return fmt.Errorf("failed to parse %s address: %v", addrType, err)
 	}
-	if address == "" {
-		address = "0.0.0.0"
-	}
 	if strPort == "" {
 		strPort = "0"
 	}
 	port, err := strconv.Atoi(strPort)
 	if err != nil {
 		return fmt.Errorf("failed to parse %s address port: %v", addrType, err)
-	}
-	if net.ParseIP(address) == nil {
-		ips, err := net.LookupIP(address)
-		if err != nil {
-			return fmt.Errorf("failed to resolve %s address: %v", addrType, err)
-		}
-		if len(ips) == 0 {
-			return fmt.Errorf("no IP addresses found for %s address: %s", addrType, address)
-		}
-		address = ips[0].String()
 	}
 	switch addrType {
 	case "listen":

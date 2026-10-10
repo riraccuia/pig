@@ -47,6 +47,9 @@ func getMQTTClientOptions(opts *Options) *mqtt.ClientOptions {
 	if opts.Password != "" {
 		mqttOpts.SetPassword(opts.Password)
 	}
+	if opts.Dialer != nil {
+		mqttOpts.SetDialer(opts.Dialer)
+	}
 	return mqttOpts
 }
 

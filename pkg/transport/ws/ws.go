@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
@@ -37,8 +38,7 @@ func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Tunnel
 }
 
 func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config) (transport.Listener, error) {
-	co.SetReadDeadline(time.Now().Add(time.Second * 10))
-	tr := NewWSListener(ctx)
+	tr := NewWSListener()
 	l := ice.NewListenerConn(co, nil)
 	go tr.ListenWithListener(l, tlsConfig)
 	return tr, nil
@@ -46,25 +46,25 @@ func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Tunnel
 
 func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func(ctx context.Context) (transport.Conn, error) {
 	return func(ctx context.Context) (transport.Conn, error) {
-		conn, err := Dial(
+		wsConn, err := Dial(
 			ctx,
-			fmt.Sprintf("%s:%d", config.Connect.Address, config.Connect.Port),
+			net.JoinHostPort(config.Connect.Address, strconv.Itoa(config.Connect.Port)),
 			tlsConfig,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to establish WebSocket connection: %w", err)
 		}
-		return conn, nil
+		return wsConn, nil
 	}
 }
 
 func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func(ctx context.Context) (transport.Listener, error) {
 	return func(ctx context.Context) (transport.Listener, error) {
-		tr := NewWSListener(ctx)
+		tr := NewWSListener()
 		go func() {
 			err := tr.Listen(
 				"ws",
-				fmt.Sprintf("%s:%d", config.Listen.Address, config.Listen.Port),
+				net.JoinHostPort(config.Listen.Address, strconv.Itoa(config.Listen.Port)),
 				tlsConfig.Clone(),
 			)
 			if err != nil && err != http.ErrServerClosed {

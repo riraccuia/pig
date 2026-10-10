@@ -23,6 +23,7 @@ import (
 func TestApplyCommandLineFlagsClientMode(t *testing.T) {
 	cfg := &config.Config{}
 	flags := &Flags{
+		iceDisabled:   true,
 		address:       "127.0.0.1:4444",
 		proto:         string(config.TransportQUIC),
 		srcPort:       5555,
@@ -60,14 +61,15 @@ func TestApplyCommandLineFlagsClientMode(t *testing.T) {
 	if tc.Auth == nil || tc.Auth.JWT == nil || tc.Auth.JWT.Token != "token-value" {
 		t.Fatalf("unexpected auth config: %#v", tc.Auth)
 	}
-	if tc.Auth.MTLS == nil || tc.Auth.MTLS.CertFile != "client.pem" || tc.Auth.MTLS.KeyFile != "client.key" || tc.Auth.MTLS.TrustPEM != "ca.pem" {
-		t.Fatalf("unexpected mtls config: %#v", tc.Auth.MTLS)
+	if tc.Trust.MTLS == nil || tc.Trust.MTLS.CertFile != "client.pem" || tc.Trust.MTLS.KeyFile != "client.key" || tc.Trust.MTLS.TrustPEM != "ca.pem" {
+		t.Fatalf("unexpected mtls config: %#v", tc.Trust.MTLS)
 	}
 }
 
 func TestApplyCommandLineFlagsServerMode(t *testing.T) {
 	cfg := &config.Config{}
 	flags := &Flags{
+		iceDisabled:   true,
 		address:       "0.0.0.0:7777",
 		proto:         string(config.TransportTLS),
 		tunnelAddress: "10.0.1.1/24",
@@ -103,8 +105,8 @@ func TestApplyCommandLineFlagsServerMode(t *testing.T) {
 	if tc.Auth == nil || tc.Auth.JWT == nil || tc.Auth.JWT.PublicKeySource != "keys.json" {
 		t.Fatalf("unexpected auth config: %#v", tc.Auth)
 	}
-	if tc.Auth.MTLS != nil {
-		t.Fatalf("unexpected mtls config in listen mode: %#v", tc.Auth.MTLS)
+	if tc.Trust.MTLS != nil {
+		t.Fatalf("unexpected mtls config in listen mode: %#v", tc.Trust.MTLS)
 	}
 }
 

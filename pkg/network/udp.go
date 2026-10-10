@@ -123,71 +123,63 @@ func PunchUDP(connOrSourcePort any, targetAddr string) (sPort int, err error) {
 	return
 }
 
-// UDPPacketConn wraps a connected UDP connection to provide a net.PacketConn interface.
+// PacketConn wraps a connected UDP connection to provide a net.PacketConn interface.
 // This allows a connected UDP socket (created with net.DialUDP) to be used as if it were
 // a listening UDP socket (created with net.ListenUDP).
-type UDPPacketConn struct {
-	co *net.UDPConn
+type PacketConn struct {
+	co net.Conn
 }
 
-// NewUDPPacketConn creates a new UDPPacketConn from a connected UDP connection.
+// NewPacketConn creates a new PacketConn from a connected UDP connection.
 // The connection should be one that was created using net.DialUDP.
-func NewUDPPacketConn(co *net.UDPConn) *UDPPacketConn {
+func NewPacketConn(co net.Conn) *PacketConn {
 	if co == nil {
 		panic("conn cannot be nil")
 	}
 
-	return &UDPPacketConn{
+	return &PacketConn{
 		co: co,
 	}
 }
 
-func (pc *UDPPacketConn) LocalAddr() net.Addr {
+func (pc *PacketConn) LocalAddr() net.Addr {
 	return pc.co.LocalAddr()
 }
 
-func (pc *UDPPacketConn) RemoteAddr() net.Addr {
+func (pc *PacketConn) RemoteAddr() net.Addr {
 	return pc.co.RemoteAddr()
 }
 
-func (pc *UDPPacketConn) Write(p []byte) (n int, err error) {
+func (pc *PacketConn) Write(p []byte) (n int, err error) {
 	return pc.co.Write(p)
 }
 
-func (pc *UDPPacketConn) Read(p []byte) (n int, err error) {
+func (pc *PacketConn) Read(p []byte) (n int, err error) {
 	return pc.co.Read(p)
 }
 
-func (pc *UDPPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
+func (pc *PacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 	n, err = pc.co.Read(p)
 	return n, pc.co.RemoteAddr(), err
 }
 
 // WriteTo writes a packet with payload p to addr.
-func (pc *UDPPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
+func (pc *PacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	return pc.co.Write(p)
 }
 
-func (pc *UDPPacketConn) SetReadBuffer(bytes int) error {
-	return pc.co.SetReadBuffer(bytes)
-}
-
-func (pc *UDPPacketConn) SetWriteBuffer(bytes int) error {
-	return pc.co.SetWriteBuffer(bytes)
-}
-
-func (pc *UDPPacketConn) SetDeadline(t time.Time) error {
+func (pc *PacketConn) SetDeadline(t time.Time) error {
 	return pc.co.SetDeadline(t)
 }
 
-func (pc *UDPPacketConn) SetReadDeadline(t time.Time) error {
+func (pc *PacketConn) SetReadDeadline(t time.Time) error {
 	return pc.co.SetReadDeadline(t)
 }
 
-func (pc *UDPPacketConn) SetWriteDeadline(t time.Time) error {
+func (pc *PacketConn) SetWriteDeadline(t time.Time) error {
 	return pc.co.SetWriteDeadline(t)
 }
 
-func (pc *UDPPacketConn) Close() error {
+func (pc *PacketConn) Close() error {
 	return pc.co.Close()
 }

@@ -19,12 +19,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/riraccuia/pig/pkg/ice/message"
-	"github.com/riraccuia/pig/pkg/stun"
 )
 
 func (s *Signaler) SendICEAnswer(topicBase string, offer *message.ICEMessage, answer *message.ICEMessage) (err error) {
@@ -61,18 +59,7 @@ type ReceivedOffer struct {
 }
 
 func (s *Signaler) ReceiveICEOffers(ctx context.Context) (offersChan <-chan *ReceivedOffer, topicBase string, err error) {
-	// Perform STUN query to get our public IP
-	var result *stun.BindingResult
-	result, err = s.stunClient.QueryStunServerUDP(&net.UDPAddr{IP: nil, Port: 0})
-	if err != nil {
-		if s.opts.Logger != nil {
-			s.opts.Logger.Errorf("SIG: STUN query failed: %v", err)
-		}
-		return nil, "", err
-	}
-	mappedIP := result.IP
-
-	topicBase = s.getTopicPrefix(mappedIP.String()) + "/"
+	topicBase = s.getTopicPrefix(s.opts.ServerID) + "/"
 	ch := make(chan *ReceivedOffer)
 
 	s.opts.Logger.Tracef("SIG: receiving ICE offers from topic: %s", topicBase+"+/offer")
@@ -142,7 +129,7 @@ func (s *Signaler) handleOfferMessage(msg []byte) (*message.ICEMessage, error) {
 }
 
 // waitForAnswer subscribes to the answer topic and waits for a response.
-func (s *Signaler) waitForAnswer(topicBase string, offer *message.ICEMessage) (answer *message.ICEMessage, err error) {
+func (s *Signaler) waitForAnswer(ctx context.Context, topicBase string, offer *message.ICEMessage) (answer *message.ICEMessage, err error) {
 	iceMsgChan := make(chan *message.ICEMessage)
 
 	// Subscribe to answer topic
@@ -169,8 +156,8 @@ func (s *Signaler) waitForAnswer(topicBase string, offer *message.ICEMessage) (a
 	case <-time.After(3 * time.Second):
 		s.opts.Logger.Errorf("SIG: timeout waiting for ICE answer")
 		err = fmt.Errorf("timeout waiting for ICE answer")
-	case <-s.ctx.Done():
-		err = s.ctx.Err()
+	case <-ctx.Done():
+		err = ctx.Err()
 	}
 
 	s.mqttClient.Unsubscribe(answerTopic)

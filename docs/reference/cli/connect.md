@@ -12,7 +12,7 @@ General options:
      opened manually on edge routers and/or firewalls.
  -id ID or friendly name for a listening node. This identifier is registered for signaling during NAT
      traversal. When the connecting side uses it, it doesn't need to know the other node's address.
- -a  Address host[:port]. Or use -id in NAT traversal mode. In simple mode, this is the connect node's
+ -a  Address [host]:port. Or use -id in NAT traversal mode. In simple mode, this is the connect node's
      target address and the listen node's bind address.
  -I  The adapter/interface to bind to, required only when '-P' is *-ICMP.
  -P  Transport protocol for the tunnel. See 'pig docs protos' for the list of supported ones. The
@@ -21,6 +21,7 @@ General options:
  -ta Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR
      values. Defaults to 172.31.254.1/29 for connect nodes and 172.31.255.1/24 for listening nodes.
  -r  Reconnect interval in seconds. Defaults to 5.
+ -t  Idle timeout in seconds for tunnels. Defaults to 0.
  -R  Route subnets through the tunnel. Use 'full4', 'full6', 'full' (as shortcuts for full tunnel
      routing) or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'.
 

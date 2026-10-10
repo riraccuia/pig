@@ -38,6 +38,12 @@ type Dialer interface {
 	Dial(ctx context.Context, network string, address string, config any) (Conn, error)
 }
 
+type DeadLiner interface {
+	SetDeadline(t time.Time) error
+	SetReadDeadline(t time.Time) error
+	SetWriteDeadline(t time.Time) error
+}
+
 type Conn interface {
 	IsStreamed() bool
 	Read(b []byte) (n int, err error)
@@ -50,4 +56,35 @@ type Conn interface {
 	SetDeadline(t time.Time) error
 	SetReadDeadline(t time.Time) error
 	SetWriteDeadline(t time.Time) error
+}
+
+// AtomicPacketConn may be implemented by a Conn that requires one IP packet
+// per Write (e.g. WireGuard). Outbound batching still accumulates packets, but
+// the flush path splits the batch on IP total length before writing.
+type AtomicPacketConn interface {
+	AtomicPacketWrites() bool
+}
+
+func GetUDPNetworkString(ipAddr net.IP) string {
+	r := "udp"
+	switch {
+	case ipAddr == nil:
+	case ipAddr.To4() == nil:
+		r = "udp6"
+	default:
+		r = "udp4"
+	}
+	return r
+}
+
+func GetTCPNetworkString(ipAddr net.IP) string {
+	r := "tcp"
+	switch {
+	case ipAddr == nil:
+	case ipAddr.To4() == nil:
+		r = "tcp6"
+	default:
+		r = "tcp4"
+	}
+	return r
 }
