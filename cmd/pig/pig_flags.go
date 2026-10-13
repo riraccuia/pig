@@ -88,7 +88,7 @@ var pigFlags = map[string][3]string{
 	FLAG_BIND:         {FLAG_BIND, "a", "The adapter/interface to bind to, required only when '-P' is *-ICMP."},
 	FLAG_PROTO:        {FLAG_PROTO, "a", "Transport protocol for the tunnel. See '" + binaryName + " docs protos' for the list of supported ones. The special '.' option selects all available protocols for candidate generation with NAT traversal."},
 	FLAG_SPORT:        {FLAG_SPORT, "c", "Source port to use for the connection."},
-	FLAG_TADDR:        {FLAG_TADDR, "a", "Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR values. Defaults to 172.31.254.1/29 for connect nodes and 172.31.255.1/24 for listening nodes."},
+	FLAG_TADDR:        {FLAG_TADDR, "a", "Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR values. Defaults to random generated /" + strconv.Itoa(config.DefaultConnectPrefixLengthV4) + " within " + config.DefaultConnectBasePrefixV4 + " for connect nodes and /" + strconv.Itoa(config.DefaultListenPrefixLengthV4) + " within " + config.DefaultListenBasePrefixV4 + " for listening nodes."},
 	FLAG_RETRY:        {FLAG_RETRY, "c", "Reconnect interval in seconds. Defaults to " + strconv.Itoa(config.DefaultRetryInterval) + "."},
 	FLAG_IDLE_TIMEOUT: {FLAG_IDLE_TIMEOUT, "a", "Idle timeout in seconds for tunnels. Defaults to " + strconv.Itoa(config.DefaultIdleTimeout) + "."},
 	FLAG_ROUTE:        {FLAG_ROUTE, "c", "Route subnets through the tunnel. Use 'full4', 'full6', 'full' (as shortcuts for full tunnel routing) or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'."},

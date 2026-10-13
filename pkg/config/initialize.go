@@ -20,9 +20,12 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"net/netip"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/riraccuia/pig/pkg/network"
 )
 
 var (
@@ -40,8 +43,10 @@ var (
 	DefaultICEProtocol      = TransportWS
 	DefaultICESTUNServer    = "stun.nextcloud.com:443"
 
-	DefaultTunnelAddressV4Connect = "172.31.254.1/29"
-	DefaultTunnelAddressV4Listen  = "172.31.255.1/24"
+	DefaultConnectBasePrefixV4   = "100.64.0.0/11"
+	DefaultListenBasePrefixV4    = "100.96.0.0/11"
+	DefaultConnectPrefixLengthV4 = 31
+	DefaultListenPrefixLengthV4  = 16
 
 	DefaultConnectOffset = time.Millisecond * 500
 
@@ -111,13 +116,14 @@ func (c *Config) Initialize() error {
 			}
 		case TunnelDirectionListen:
 			if c.Tunnels[i].Adapter == nil {
-				return fmt.Errorf("tunnel %d: listen tunnels require a dedicated adapter", i)
+				// listen tunnels require a dedicated adapter
+				c.Tunnels[i].Adapter = &AdapterConfig{}
 			}
 			adapterToInitialize = c.Tunnels[i].Adapter
 		}
 
 		if adapterToInitialize != nil {
-			if err := adapterToInitialize.InitializeTunnelAdapter(); err != nil {
+			if err := adapterToInitialize.InitializeTunnelAdapter(c.Tunnels[i].Direction); err != nil {
 				return fmt.Errorf("tunnel %d: %w", i, err)
 			}
 		}
@@ -165,16 +171,31 @@ func (c *RouteConfig) Initialize() error {
 	return nil
 }
 
-func (c *AdapterConfig) InitializeTunnelAdapter() error {
-	if len(c.TunnelAddress) == 0 {
-		return fmt.Errorf("tunnel adapter address not specified")
-	}
+func (c *AdapterConfig) InitializeTunnelAdapter(direction TunnelDirection) error {
 	if c.MTU == 0 {
 		c.MTU = DefaultMTU
 	}
 	if c.QueueSize == 0 {
 		c.QueueSize = DefaultQueueSize
 	}
+	if len(c.TunnelAddress) != 0 {
+		return nil
+	}
+	var (
+		generatedNet netip.Prefix
+		err          error
+	)
+	switch direction {
+	case TunnelDirectionConnect:
+		generatedNet, err = network.GenerateIPPrefix(DefaultConnectBasePrefixV4, DefaultConnectPrefixLengthV4, true)
+	case TunnelDirectionListen:
+		generatedNet, err = network.GenerateIPPrefix(DefaultListenBasePrefixV4, DefaultListenPrefixLengthV4, true)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to generate tunnel adapter address: %w", err)
+	}
+	c.TunnelAddress = []string{generatedNet.String()}
+	fmt.Printf("generated tunnel adapter address: %s\n", c.TunnelAddress[0])
 	return nil
 }
 
@@ -186,7 +207,11 @@ func (c *AdapterConfig) InitializeDefaultAdapter() error {
 		c.QueueSize = DefaultQueueSize
 	}
 	if len(c.TunnelAddress) == 0 {
-		c.TunnelAddress = []string{DefaultTunnelAddressV4Connect}
+		generatedNet, err := network.GenerateIPPrefix(DefaultConnectBasePrefixV4, DefaultConnectPrefixLengthV4, true)
+		if err != nil {
+			return fmt.Errorf("failed to generate tunnel adapter address: %w", err)
+		}
+		c.TunnelAddress = []string{generatedNet.String()}
 		return nil
 	}
 	hasV4Address := false
@@ -199,7 +224,11 @@ func (c *AdapterConfig) InitializeDefaultAdapter() error {
 	if hasV4Address {
 		return nil
 	}
-	c.TunnelAddress = append(c.TunnelAddress, DefaultTunnelAddressV4Connect)
+	generatedNet, err := network.GenerateIPPrefix(DefaultConnectBasePrefixV4, DefaultConnectPrefixLengthV4, true)
+	if err != nil {
+		return fmt.Errorf("failed to generate tunnel adapter address: %w", err)
+	}
+	c.TunnelAddress = append(c.TunnelAddress, generatedNet.String())
 	return nil
 }
 
