@@ -28,7 +28,7 @@ import (
 // towards a target endpoint.
 type PathFinder struct {
 	opts       *signaling.Options
-	pigProtos  []transport.ICEProtocolDefinition
+	protos     []transport.ICEProtocolDefinition
 	stunClient *stun.Client
 	signaler   *signaling.Signaler
 }
@@ -51,7 +51,7 @@ func NewPathFinder(opts *signaling.Options, useProtos []transport.ICEProtocolDef
 	}
 	return &PathFinder{
 		opts:       opts,
-		pigProtos:  useProtos,
+		protos:     useProtos,
 		stunClient: stunClient,
 		signaler:   signaler,
 	}, nil

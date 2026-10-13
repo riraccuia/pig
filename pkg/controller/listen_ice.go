@@ -52,7 +52,7 @@ func (c *Controller) getICEListenFunc(cfg *config.TunnelConfig) (func(ctx contex
 		return nil, fmt.Errorf("failed to create path connector: %w", err)
 	}
 	return func(ctx context.Context) (transport.Listener, error) {
-		c.logger.Infof("Starting ICE | Candidate protocols: %v | Listen port: %d", strings.Join(cfg.ICE.Protos, ", "), listenPort)
+		c.logger.Infof("Starting ICE | Accepted protocols: %v | Listen port: %d", strings.Join(cfg.ICE.Protos, ", "), listenPort)
 		offerPathsChan, err := pc.GetListenPaths(ctx, listenPort, c.adapters)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get listen paths: %w", err)

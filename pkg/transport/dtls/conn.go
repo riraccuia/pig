@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/pion/dtls/v3"
+	"github.com/pion/dtls/v4"
 	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/transport"
 )
@@ -52,8 +52,8 @@ func (c *DTLSConn) Flush() {
 }
 
 // Dial establishes a DTLS connection to the given address.
-func Dial(ctx context.Context, networkStr string, address *net.UDPAddr, dtlsOpts ...dtls.ClientOption) (*dtls.Conn, error) {
-	udpConn, err := network.DialUDP(networkStr, nil, address)
+func Dial(ctx context.Context, networkStr string, laddr *net.UDPAddr, address *net.UDPAddr, dtlsOpts ...dtls.ClientOption) (*dtls.Conn, error) {
+	udpConn, err := network.DialUDPContext(ctx, networkStr, laddr, address)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial UDP: %w", err)
 	}
@@ -64,7 +64,7 @@ func Dial(ctx context.Context, networkStr string, address *net.UDPAddr, dtlsOpts
 // DialConn establishes a DTLS connection using an existing UDP connection.
 func DialConn(ctx context.Context, conn net.Conn, dtlsOpts ...dtls.ClientOption) (*dtls.Conn, error) {
 	// Use the existing connection to establish DTLS
-	dtlsConn, err := dtls.ClientWithOptions(conn.(net.PacketConn), conn.RemoteAddr(), dtlsOpts...)
+	dtlsConn, err := dtls.Client(conn.(net.PacketConn), conn.RemoteAddr(), dtlsOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to establish DTLS connection: %w", err)
 	}

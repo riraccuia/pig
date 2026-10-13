@@ -17,6 +17,7 @@ package main
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -169,6 +170,20 @@ func parsePigFlags(mode Mode) *Flags {
 		printListenConnectUsage(mode)
 	}
 	flagSet.Parse(os.Args[startArg:])
+	// check for unexpected extra arguments
+	if flagSet.NArg() > 0 {
+		printListenConnectUsage(mode)
+		os.Exit(1)
+	}
+	// validate that passed flags are valid for the given mode
+	flagSet.Visit(func(f *flag.Flag) {
+		err := validatePassedFlag(f, mode)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Illegal flag '-%s' used in '%s' mode.\n\n", f.Name, mode)
+			printListenConnectUsage(mode)
+			os.Exit(1)
+		}
+	})
 	return flags
 }
 
@@ -227,6 +242,11 @@ func initPigConfig() *config.Config {
 	flag.StringVar(&configPath, FLAG_MAIN_CONFIG, "", "")
 	flag.StringVar(&toConfig, FLAG_TO_CFG, "", "")
 	flag.Parse()
+	// check for unexpected extra arguments
+	if flag.NArg() > 0 {
+		printConfigUsage()
+		os.Exit(1)
+	}
 	cfg, err := config.LoadConfigFromFile(configPath)
 	if err != nil {
 		log.NewBlockingLogger().Fatalf("Failed to load config file: %v", err)
@@ -258,6 +278,23 @@ func outputConfig(cfg *config.Config, format string) {
 		os.Stdout.Write([]byte(v))
 	}
 	os.Exit(0)
+}
+
+// validatePassedFlag validates that the passed flag is valid for the given mode
+func validatePassedFlag(f *flag.Flag, mode Mode) error {
+	wantMode := "c"
+	if mode == ModeListen {
+		wantMode = "l"
+	}
+	fd, ok := pigFlags[f.Name]
+	if !ok {
+		// flagSet.Parse() will return an error if the flag is not defined
+		return nil
+	}
+	if fd[1] == wantMode || fd[1] == "a" {
+		return nil
+	}
+	return errors.New("illegal flag")
 }
 
 func defineFlags(flagSet *flag.FlagSet) *Flags {
@@ -318,27 +355,29 @@ func applyCommandLineFlags(cfg *config.Config, flags *Flags, mode Mode, logger c
 	switch flags.iceDisabled {
 	case true:
 		if flags.proto == "." {
-			flags.proto = string(config.DefaultICEProtocol)
+			logger.Fatalf("A protocol must be specified in simple mode")
 		}
 		err := configureEndpoint(tc, flags.address, string(tc.Direction), logger)
 		if err != nil {
 			logger.Fatalf("Failed to configure %s address: %v", tc.Direction, err)
 		}
-		if flags.srcPort == 0 {
-			break
-		}
 		if tc.Direction == config.TunnelDirectionConnect {
 			tc.Connect.SrcPort = flags.srcPort
+			break
 		}
 	case false:
-		if flags.srcPort == 0 {
+		if tc.Direction == config.TunnelDirectionConnect {
+			tc.Connect.SrcPort = flags.srcPort
 			break
 		}
-		if tc.Direction == config.TunnelDirectionListen {
-			tc.Listen.Port = flags.srcPort
+		//tc.Listen.Port = flags.srcPort
+		if flags.address == "" {
 			break
 		}
-		tc.Connect.SrcPort = flags.srcPort
+		err := configureEndpoint(tc, flags.address, string(tc.Direction), logger)
+		if err != nil {
+			logger.Fatalf("Failed to configure %s address: %v", tc.Direction, err)
+		}
 	}
 
 	tc.Proto = config.TransportType(flags.proto)

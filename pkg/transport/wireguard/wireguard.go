@@ -106,8 +106,6 @@ func GetClientDialFunc(logger common.Logger, tunnelCfg *config.TunnelConfig, mtu
 }
 
 // GetServerListenFunc returns a function that creates WireGuard listeners.
-// The listener demuxes peers on one UDP socket (pion/transport/v2/udp) and
-// builds a DemuxBind-backed Conn per Accept.
 func GetServerListenFunc(logger common.Logger, tunnelCfg *config.TunnelConfig, mtu int) func(ctx context.Context) (transport.Listener, error) {
 	return func(ctx context.Context) (transport.Listener, error) {
 		opts, err := buildListenOpts(tunnelCfg, mtu)
@@ -153,10 +151,10 @@ func buildConnectOpts(tunnelCfg *config.TunnelConfig, mtu int) (*setupOpts, erro
 }
 
 func buildListenOpts(tunnelCfg *config.TunnelConfig, mtu int) (*setupOpts, error) {
-	wg := tunnelCfg.Trust.WireGuard
-	if wg == nil {
+	if tunnelCfg.Trust == nil || tunnelCfg.Trust.WireGuard == nil {
 		return nil, fmt.Errorf("wireguard config not specified")
 	}
+	wg := tunnelCfg.Trust.WireGuard
 	if len(wg.Peers) == 0 {
 		return nil, fmt.Errorf("no wireguard peers configured")
 	}
@@ -293,10 +291,10 @@ func listenPortFromIpc(dev *device.Device) (int, error) {
 
 // buildOptsFromConn builds setupOpts from WireGuard trust config and a connected UDP socket.
 func buildOptsFromConn(tunnelCfg *config.TunnelConfig, mtu int, udp *net.UDPConn, forConnect bool) (*setupOpts, error) {
-	wg := tunnelCfg.Trust.WireGuard
-	if wg == nil {
+	if tunnelCfg.Trust == nil || tunnelCfg.Trust.WireGuard == nil {
 		return nil, fmt.Errorf("wireguard config not specified")
 	}
+	wg := tunnelCfg.Trust.WireGuard
 	if len(wg.Peers) == 0 {
 		return nil, fmt.Errorf("no wireguard peers configured")
 	}

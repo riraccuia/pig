@@ -127,12 +127,12 @@ func PunchUDP(connOrSourcePort any, targetAddr string) (sPort int, err error) {
 // This allows a connected UDP socket (created with net.DialUDP) to be used as if it were
 // a listening UDP socket (created with net.ListenUDP).
 type PacketConn struct {
-	co net.Conn
+	co *net.UDPConn
 }
 
 // NewPacketConn creates a new PacketConn from a connected UDP connection.
 // The connection should be one that was created using net.DialUDP.
-func NewPacketConn(co net.Conn) *PacketConn {
+func NewPacketConn(co *net.UDPConn) *PacketConn {
 	if co == nil {
 		panic("conn cannot be nil")
 	}
@@ -178,6 +178,14 @@ func (pc *PacketConn) SetReadDeadline(t time.Time) error {
 
 func (pc *PacketConn) SetWriteDeadline(t time.Time) error {
 	return pc.co.SetWriteDeadline(t)
+}
+
+func (pc *PacketConn) SetReadBuffer(bytes int) error {
+	return pc.co.SetReadBuffer(bytes)
+}
+
+func (pc *PacketConn) SetWriteBuffer(bytes int) error {
+	return pc.co.SetWriteBuffer(bytes)
 }
 
 func (pc *PacketConn) Close() error {

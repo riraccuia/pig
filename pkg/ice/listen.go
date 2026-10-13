@@ -89,8 +89,8 @@ func (pc *PathFinder) processOffer(ctx context.Context, topicBase string, offer 
 		connectPaths     []*ConnectPath
 	)
 
-	answerCandidates, localInfo = pc.buildLocalCandidates(localEndpoints, listenPort)
-	answerCandidates = append(answerCandidates, pc.buildReflexiveCandidates(ctx, localEndpoints, localInfo)...)
+	answerCandidates, localInfo = pc.buildLocalCandidates(localEndpoints, listenPort, pc.protos)
+	answerCandidates = append(answerCandidates, pc.buildReflexiveCandidates(ctx, localEndpoints, localInfo, pc.protos)...)
 	answerCandidates = dedupCandidates(answerCandidates)
 
 	pc.opts.Logger.Tracef("ICE: preparing to send ICE answer to client. SessionID: %s", offer.Offer.SessionID)
@@ -129,7 +129,7 @@ func (pc *PathFinder) processOffer(ctx context.Context, topicBase string, offer 
 
 	for _, candidate := range offer.Offer.Candidates {
 		targetIP := net.ParseIP(candidate.Address)
-		for _, tr := range pc.pigProtos {
+		for _, tr := range pc.protos {
 			if tr.Network != candidate.Protocol {
 				continue
 			}

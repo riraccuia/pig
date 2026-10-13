@@ -22,6 +22,7 @@ import (
 	"net/http"
 
 	"github.com/coder/websocket"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -103,18 +104,22 @@ func DialConn(ctx context.Context, conn net.Conn, address string, tlsConfig *tls
 	}, nil
 }
 
-func Dial(ctx context.Context, address string, tlsConfig *tls.Config) (*WSConn, error) {
+func Dial(ctx context.Context, srcPort int, address string, tlsConfig *tls.Config) (*WSConn, error) {
 	scheme := "ws"
 	if tlsConfig != nil {
 		scheme = "wss"
 	}
 	wsURL := fmt.Sprintf("%s://%s", scheme, address)
 
+	dialer := network.NewDialer(0)
+	dialer.LocalAddr = &net.TCPAddr{
+		Port: srcPort,
+	}
+
 	httpClient := &http.Client{}
-	if tlsConfig != nil {
-		httpClient.Transport = &http.Transport{
-			TLSClientConfig: tlsConfig,
-		}
+	httpClient.Transport = &http.Transport{
+		DialContext:     dialer.DialContext,
+		TLSClientConfig: tlsConfig,
 	}
 
 	options := &websocket.DialOptions{

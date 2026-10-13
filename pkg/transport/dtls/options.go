@@ -17,45 +17,62 @@ package dtls
 import (
 	"crypto/tls"
 
-	"github.com/pion/dtls/v3"
+	"github.com/pion/dtls/v4"
 )
 
-func getClientOptions(tlsConfig *tls.Config, mtu int) (opts []dtls.ClientOption) {
-	if tlsConfig.InsecureSkipVerify {
-		opts = append(opts, dtls.WithInsecureSkipVerify(true))
-	}
-	if tlsConfig.ServerName != "" {
-		opts = append(opts, dtls.WithServerName(tlsConfig.ServerName))
+// ConvertToDTLSServerOptions produces a slice of ServerOption suitable for dtls.ServerWithOptions
+func ConvertToDTLSServerOptions(tlsCfg *tls.Config, mtu int) []dtls.ServerOption {
+	var opts []dtls.ServerOption
+
+	commonOpts := convertToDTLSCommonOptions(tlsCfg, mtu)
+	for _, opt := range commonOpts {
+		opts = append(opts, dtls.ServerOption(opt))
 	}
 
-	if len(tlsConfig.Certificates) > 0 {
-		opts = append(opts, dtls.WithCertificates(tlsConfig.Certificates...))
+	// Server-specific options
+	if tlsCfg.ClientCAs != nil {
+		opts = append(opts, dtls.WithClientCAs(tlsCfg.ClientCAs))
+	}
+	if tlsCfg.ClientAuth != tls.NoClientCert {
+		opts = append(opts, dtls.WithClientAuth(dtls.ClientAuthType(tlsCfg.ClientAuth)))
 	}
 
-	if tlsConfig.RootCAs != nil {
-		opts = append(opts, dtls.WithRootCAs(tlsConfig.RootCAs))
-	}
-
-	opts = append(opts, dtls.WithMTU(mtu))
-	return
+	return opts
 }
 
-func getServerOptions(tlsConfig *tls.Config, mtu int) (opts []dtls.ServerOption) {
-	if tlsConfig.InsecureSkipVerify {
-		opts = append(opts, dtls.WithInsecureSkipVerify(true))
-	}
-	if tlsConfig.ServerName != "" {
-		opts = append(opts, dtls.WithServerName(tlsConfig.ServerName))
+// ConvertToDTLSClientOptions produces a slice of ClientOption suitable for dtls.ClientWithOptions
+func ConvertToDTLSClientOptions(tlsCfg *tls.Config, mtu int) []dtls.ClientOption {
+	var opts []dtls.ClientOption
+
+	commonOpts := convertToDTLSCommonOptions(tlsCfg, mtu)
+	for _, opt := range commonOpts {
+		opts = append(opts, dtls.ClientOption(opt))
 	}
 
-	if len(tlsConfig.Certificates) > 0 {
-		opts = append(opts, dtls.WithCertificates(tlsConfig.Certificates...))
+	// Client-specific option
+	if tlsCfg.RootCAs != nil {
+		opts = append(opts, dtls.WithRootCAs(tlsCfg.RootCAs))
 	}
 
-	if tlsConfig.ClientCAs != nil {
-		opts = append(opts, dtls.WithClientCAs(tlsConfig.ClientCAs))
+	return opts
+}
+
+func convertToDTLSCommonOptions(tlsCfg *tls.Config, mtu int) []dtls.Option {
+	var opts []dtls.Option
+
+	if len(tlsCfg.Certificates) > 0 {
+		opts = append(opts, dtls.WithCertificates(tlsCfg.Certificates...))
+	}
+	if tlsCfg.InsecureSkipVerify {
+		opts = append(opts, dtls.WithInsecureSkipVerify(tlsCfg.InsecureSkipVerify))
+	}
+	if tlsCfg.ServerName != "" {
+		opts = append(opts, dtls.WithServerName(tlsCfg.ServerName))
+	}
+	if len(tlsCfg.NextProtos) > 0 {
+		opts = append(opts, dtls.WithSupportedProtocols(tlsCfg.NextProtos...))
 	}
 
 	opts = append(opts, dtls.WithMTU(mtu))
-	return
+	return opts
 }

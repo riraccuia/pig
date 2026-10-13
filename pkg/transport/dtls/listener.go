@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/pion/dtls/v3"
+	"github.com/pion/dtls/v4"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -47,7 +47,7 @@ func (l *DTLSListener) Accept() (net.Conn, error) {
 
 // Listen creates a DTLS listener on the given address.
 func Listen(networkstr string, laddr *net.UDPAddr, dtlsOpts ...dtls.ServerOption) (transport.Listener, error) {
-	listener, err := dtls.ListenWithOptions(networkstr, laddr, dtlsOpts...)
+	listener, err := dtls.ListenAddr(networkstr, laddr, dtlsOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DTLS listener: %w", err)
 	}

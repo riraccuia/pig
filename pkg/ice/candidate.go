@@ -91,11 +91,11 @@ func makeLocalCandidateKey(tr transport.ICEProtocolDefinition, ip net.IP) localC
 	}
 }
 
-func (pc *PathFinder) buildLocalCandidates(localEndpoints []LocalEndpoint, listenPort uint16) ([]message.ICECandidate, map[localCandidateKey]localCandidateInfo) {
+func (pc *PathFinder) buildLocalCandidates(localEndpoints []LocalEndpoint, listenPort uint16, protos []transport.ICEProtocolDefinition) ([]message.ICECandidate, map[localCandidateKey]localCandidateInfo) {
 	var candidates []message.ICECandidate
 	localInfo := make(map[localCandidateKey]localCandidateInfo)
 
-	for _, tr := range pc.pigProtos {
+	for _, tr := range protos {
 		for _, localEndpoint := range localEndpoints {
 			if tr.Network == transport.ICEProtocolTLSInICMP.Network && localEndpoint.IP.To4() == nil {
 				// skip IPv6 addresses for TLS-in-ICMP
@@ -117,7 +117,7 @@ func (pc *PathFinder) buildLocalCandidates(localEndpoints []LocalEndpoint, liste
 	return candidates, localInfo
 }
 
-func (pc *PathFinder) buildReflexiveCandidates(ctx context.Context, localEndpoints []LocalEndpoint, localInfo map[localCandidateKey]localCandidateInfo) []message.ICECandidate {
+func (pc *PathFinder) buildReflexiveCandidates(ctx context.Context, localEndpoints []LocalEndpoint, localInfo map[localCandidateKey]localCandidateInfo, protos []transport.ICEProtocolDefinition) []message.ICECandidate {
 	type ipPort struct {
 		ip   net.IP
 		port int
@@ -127,7 +127,7 @@ func (pc *PathFinder) buildReflexiveCandidates(ctx context.Context, localEndpoin
 		mappedAddrs = make(map[string]ipPort)
 	)
 
-	for _, tr := range pc.pigProtos {
+	for _, tr := range protos {
 		for _, localEndpoint := range localEndpoints {
 			if common.IsContextDone(ctx) {
 				return candidates

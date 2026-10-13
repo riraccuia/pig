@@ -48,6 +48,7 @@ func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, tlsCon
 	return func(ctx context.Context) (transport.Conn, error) {
 		wsConn, err := Dial(
 			ctx,
+			config.Connect.SrcPort,
 			net.JoinHostPort(config.Connect.Address, strconv.Itoa(config.Connect.Port)),
 			tlsConfig,
 		)
