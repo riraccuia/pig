@@ -67,7 +67,7 @@ type NativeTun struct {
 }
 
 var (
-	WintunTunnelType          = "pig"
+	WintunTunnelType          = "WinTun"
 	WintunStaticRequestedGUID *windows.GUID
 )
 
@@ -88,7 +88,7 @@ func CreateTUNWithRequestedGUID(ifname string, requestedGUID *windows.GUID) (*Na
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to create wintun adapter: %w", err)
+		return nil, err
 	}
 
 	tun := &NativeTun{

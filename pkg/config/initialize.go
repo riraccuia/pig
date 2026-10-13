@@ -87,7 +87,7 @@ func (c *Config) Initialize() error {
 	c.MQTTBroker.Initialize()
 
 	if c.hasDefaultOrConnectTunnels() || !c.Adapter.IsZero() {
-		if err := c.Adapter.Initialize(TunnelDirectionConnect); err != nil {
+		if err := c.Adapter.InitializeDefaultAdapter(); err != nil {
 			return err
 		}
 	}
@@ -112,7 +112,7 @@ func (c *Config) Initialize() error {
 			if c.Tunnels[i].Adapter == nil {
 				return fmt.Errorf("tunnel %d: listen tunnels require a dedicated adapter", i)
 			}
-			if err := c.Tunnels[i].Adapter.Initialize(TunnelDirectionListen); err != nil {
+			if err := c.Tunnels[i].Adapter.InitializeTunnelAdapter(); err != nil {
 				return fmt.Errorf("tunnel %d: %w", i, err)
 			}
 		}
@@ -160,7 +160,20 @@ func (c *RouteConfig) Initialize() error {
 	return nil
 }
 
-func (c *AdapterConfig) Initialize(direction TunnelDirection) error {
+func (c *AdapterConfig) InitializeTunnelAdapter() error {
+	if len(c.TunnelAddress) == 0 {
+		return fmt.Errorf("tunnel adapter address not specified")
+	}
+	if c.MTU == 0 {
+		c.MTU = DefaultMTU
+	}
+	if c.QueueSize == 0 {
+		c.QueueSize = DefaultQueueSize
+	}
+	return nil
+}
+
+func (c *AdapterConfig) InitializeDefaultAdapter() error {
 	if c.MTU == 0 {
 		c.MTU = DefaultMTU
 	}
@@ -169,9 +182,6 @@ func (c *AdapterConfig) Initialize(direction TunnelDirection) error {
 	}
 	if len(c.TunnelAddress) == 0 {
 		c.TunnelAddress = []string{DefaultTunnelAddressV4Connect}
-		if direction == TunnelDirectionListen {
-			c.TunnelAddress = []string{DefaultTunnelAddressV4Listen}
-		}
 		return nil
 	}
 	hasV4Address := false
@@ -184,13 +194,7 @@ func (c *AdapterConfig) Initialize(direction TunnelDirection) error {
 	if hasV4Address {
 		return nil
 	}
-	if direction == TunnelDirectionConnect {
-		c.TunnelAddress = append(c.TunnelAddress, DefaultTunnelAddressV4Connect)
-		return nil
-	}
-	if direction == TunnelDirectionListen {
-		c.TunnelAddress = append(c.TunnelAddress, DefaultTunnelAddressV4Listen)
-	}
+	c.TunnelAddress = append(c.TunnelAddress, DefaultTunnelAddressV4Connect)
 	return nil
 }
 
@@ -391,6 +395,10 @@ func (c *TunnelConfig) InitializeAuth() error {
 
 	if c.Auth.Type != "" && !c.Auth.Type.IsValid() {
 		return fmt.Errorf("invalid auth type: %s", c.Auth.Type)
+	}
+
+	if c.Auth.Type == "" {
+		c.Auth.Type = AuthTypeNone
 	}
 
 	switch c.Auth.Type {

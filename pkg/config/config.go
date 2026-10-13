@@ -594,10 +594,11 @@ func (c *Config) AdapterForTunnel(tunnel *TunnelConfig) *AdapterConfig {
 	/*if tunnel.Direction == TunnelDirectionConnect {
 		return &c.Adapter
 	}*/
-	if tunnel.Adapter != nil {
-		return tunnel.Adapter
+	if tunnel.Adapter == nil {
+		return &c.Adapter
 	}
-	return &c.Adapter
+	// adapter config is specified for the tunnel
+	return tunnel.Adapter
 }
 
 func (c *TunnelConfig) EndpointAddress() string {

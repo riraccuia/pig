@@ -16,6 +16,7 @@ package adapter
 
 import (
 	"fmt"
+	"net"
 
 	"github.com/riraccuia/pig/pkg/common"
 	"golang.org/x/sys/windows"
@@ -26,7 +27,17 @@ const tunName = "pig"
 func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
 	//wintun.SetLogger(nil)
 
-	nativeTun, err := CreateTUNWithRequestedGUID(tunName, WintunStaticRequestedGUID)
+	ifName := tunName
+	maxAttempts := 10
+	for i := range maxAttempts {
+		_, err := net.InterfaceByName(ifName)
+		if err != nil {
+			break
+		}
+		ifName = fmt.Sprintf("%s%d", tunName, i)
+	}
+
+	nativeTun, err := CreateTUNWithRequestedGUID(ifName, WintunStaticRequestedGUID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create wintun adapter: %v", err)
 	}

@@ -136,7 +136,7 @@ func (c *Controller) createClientAuthenticator(cfg *config.AuthConfig) (authenti
 }
 
 func (c *Controller) createServerAuthenticator(cfg *config.AuthConfig) (common.Authenticator, error) {
-	if cfg == nil {
+	if cfg == nil || cfg.Type == config.AuthTypeNone {
 		return nil, nil
 	}
 
