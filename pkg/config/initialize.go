@@ -45,7 +45,7 @@ var (
 
 	DefaultConnectBasePrefixV4   = "100.64.0.0/11"
 	DefaultListenBasePrefixV4    = "100.96.0.0/11"
-	DefaultConnectPrefixLengthV4 = 31
+	DefaultConnectPrefixLengthV4 = 30
 	DefaultListenPrefixLengthV4  = 16
 
 	DefaultConnectOffset = time.Millisecond * 500

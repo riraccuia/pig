@@ -19,7 +19,8 @@ General options:
      special '.' option selects all available protocols for candidate generation with NAT traversal.
  -p  Source port to use for the connection.
  -ta Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR
-     values. Defaults to 172.31.254.1/29 for connect nodes and 172.31.255.1/24 for listening nodes.
+     values. Defaults to random generated /30 within 100.64.0.0/11 for connect nodes and /16 within
+     100.96.0.0/11 for listening nodes.
  -r  Reconnect interval in seconds. Defaults to 5.
  -t  Idle timeout in seconds for tunnels. Defaults to 0.
  -R  Route subnets through the tunnel. Use 'full4', 'full6', 'full' (as shortcuts for full tunnel

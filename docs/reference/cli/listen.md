@@ -18,7 +18,8 @@ General options:
  -P  Transport protocol for the tunnel. See 'pig docs protos' for the list of supported ones. The
      special '.' option selects all available protocols for candidate generation with NAT traversal.
  -ta Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR
-     values. Defaults to 172.31.254.1/29 for connect nodes and 172.31.255.1/24 for listening nodes.
+     values. Defaults to random generated /30 within 100.64.0.0/11 for connect nodes and /16 within
+     100.96.0.0/11 for listening nodes.
  -t  Idle timeout in seconds for tunnels. Defaults to 0.
 
 Scripting options:
