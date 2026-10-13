@@ -103,16 +103,21 @@ func (c *Config) Initialize() error {
 			c.Tunnels[i].Name = fmt.Sprintf("tunnel-%d", i)
 		}
 
+		var adapterToInitialize *AdapterConfig
 		switch c.Tunnels[i].Direction {
 		case TunnelDirectionConnect:
-			/*if c.Tunnels[i].Adapter != nil {
-				return fmt.Errorf("tunnel %d: connect tunnels must use the top-level adapter", i)
-			}*/
+			if c.Tunnels[i].Adapter != nil {
+				adapterToInitialize = c.Tunnels[i].Adapter
+			}
 		case TunnelDirectionListen:
 			if c.Tunnels[i].Adapter == nil {
 				return fmt.Errorf("tunnel %d: listen tunnels require a dedicated adapter", i)
 			}
-			if err := c.Tunnels[i].Adapter.InitializeTunnelAdapter(); err != nil {
+			adapterToInitialize = c.Tunnels[i].Adapter
+		}
+
+		if adapterToInitialize != nil {
+			if err := adapterToInitialize.InitializeTunnelAdapter(); err != nil {
 				return fmt.Errorf("tunnel %d: %w", i, err)
 			}
 		}
