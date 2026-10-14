@@ -4,14 +4,13 @@
 
 # Packet Insertion Gear (pig)
 
-**pig** is a single binary that connects computers directly and securely to each other. 
+**Pig** is a single binary that connects computers directly and securely to each other. 
 
-Using NAT traversal techniques, it gets your endpoints connected through firewalls and NAT devices.\
-In other words, you shouldn't need to setup your network/s at all. In most cases.
+Run it on two machines and they find each other. No router setup required, in most cases.
 
 It has a small disk and memory footprint, it's fast and works on Linux, macOS, and Windows (and maybe mobile, at some point).
 
-Pigs can also be chained to create mesh networks.
+Pigs can also be chained to create mesh networks, or connect to any WireGuard VPN, even multiple ones at the same time.
 
 The project is still in early development, please open an issue if you find any bugs or have any suggestions.
 
@@ -23,17 +22,19 @@ It quickly became the primary tool for connecting to my home when I travel, doub
 
 ## What you can do
 
-**Connect two machines.** Simple or NAT traversal mode. Choose between traditional VPN-style tunnel and a less fiddly experience.
+**Connect machines.** Simple or NAT traversal mode. Choose between traditional VPN-style tunnel and a less fiddly experience.
 
 **Build a mesh.** Pigs can be chained.
 
-**Skip firewall plumbing.** Don't worry about setting up your network. Pig's NAT traversal approach can beat symmetric NAT, too. More details in the [docs](docs/nat/symmetric.md).
+**Pick a transport.** [QUIC, TLS, WebSocket, WireGuard, DTLS, TLS-in-ICMP](docs/reference/cli/protos.md), or let pig choose.
 
-**Pick a transport.** [QUIC, TLS, WebSocket, DTLS, TLS-in-ICMP](docs/reference/cli/protos.md), or let pig choose.
+**Use WireGuard two ways.** Pig-to-pig, or connect to any WireGuard VPN. You can keep several up together (VPN + pig, or two VPNs, etc...).
+
+**Skip firewall plumbing.** Don't worry about setting up your network. Pig's NAT traversal approach can beat symmetric NAT, too. More details in the [docs](docs/nat/symmetric.md).
 
 **Route traffic.** Pig can update the routing table for you, so packets go through the tunnel.
 
-**Authenticate.** mTLS, JWT, OAuth, OIDC.
+**Authenticate.** [JWT, OAuth, OIDC](docs/index.md#authentication), with any pig server on top of any of the supported transports.
 
 **Hook scripts.** Run setup/cleanup on tunnel events ([env vars](docs/reference/cli/env.md)).
 
@@ -113,9 +114,8 @@ Packages that make this project possible. Thanks to the authors for their work!
 - [pion/dtls](https://github.com/pion/dtls) - DTLS transport
 - [quic-go/quic-go](https://github.com/quic-go/quic-go) - QUIC transport
 - [rs/zerolog](https://github.com/rs/zerolog) - logging
-- [WireGuard/wintun](https://golang.zx2c4.com/wintun) - Windows TUN driver
-
-
+- [golang.zx2c4.com/wintun](https://golang.zx2c4.com/wintun) - Windows TUN driver
+- [golang.zx2c4.com/wireguard](https://golang.zx2c4.com/wireguard) - WireGuard transport
 
 ## License
 
