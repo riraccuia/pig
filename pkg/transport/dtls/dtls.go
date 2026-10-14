@@ -33,7 +33,7 @@ import (
 // GetClientFromConn creates a DTLS client connection from an existing connection.
 func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config, mtu int) (transport.Conn, error) {
 	opts := ConvertToDTLSClientOptions(tlsConfig, mtu)
-	packetConn := network.NewPacketConn(conn.(*net.UDPConn))
+	packetConn := network.ConnectedUdpToPacketConn(conn.(*net.UDPConn))
 	dtlsConn, err := DialConn(ctx, packetConn, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to establish DTLS connection: %w", err)
@@ -54,7 +54,7 @@ func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Tunnel
 // GetListenerFromConn creates a DTLS listener from an existing connection.
 func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config, mtu int) (transport.Listener, error) {
 	opts := ConvertToDTLSServerOptions(tlsConfig, mtu)
-	packetConn := network.NewPacketConn(co.(*net.UDPConn))
+	packetConn := network.ConnectedUdpToPacketConn(co.(*net.UDPConn))
 	listenerConn := ice.NewPacketListenerConn(packetConn, nil)
 	dtlsListener, err := dtls.NewListener(listenerConn, opts...)
 	if err != nil {

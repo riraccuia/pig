@@ -31,17 +31,17 @@ import (
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
 
-func (c *Controller) getDialFunc(cfg *config.TunnelConfig) (func(ctx context.Context) (transport.Conn, error), error) {
+func (c *Controller) getDialFunc(cfg *config.TunnelConfig, mtu int) (func(ctx context.Context) (transport.Conn, error), error) {
 	switch {
 	case cfg.ICE == nil || !cfg.ICE.Enabled:
-		return c.getClientDialFunc(cfg)
+		return c.getClientDialFunc(cfg, mtu)
 	case cfg.ICE != nil && cfg.ICE.Enabled:
-		return c.getICEDialFunc(cfg)
+		return c.getICEDialFunc(cfg, mtu)
 	}
 	return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 }
 
-func (c *Controller) getClientDialFunc(cfg *config.TunnelConfig) (func(ctx context.Context) (transport.Conn, error), error) {
+func (c *Controller) getClientDialFunc(cfg *config.TunnelConfig, mtu int) (func(ctx context.Context) (transport.Conn, error), error) {
 	targetAddr := cfg.Connect.Address
 
 	return func(ctx context.Context) (transport.Conn, error) {
@@ -88,9 +88,9 @@ func (c *Controller) getClientDialFunc(cfg *config.TunnelConfig) (func(ctx conte
 			if err != nil {
 				return nil, fmt.Errorf("failed to create TLS config: %w", err)
 			}
-			return dtls.GetClientDialFunc(c.logger, cfg, tlsConfig, c.cfg.Adapter.MTU)(ctx)
+			return dtls.GetClientDialFunc(c.logger, cfg, tlsConfig, mtu)(ctx)
 		case config.TransportWG:
-			return wireguard.GetClientDialFunc(c.logger, cfg, c.cfg.Adapter.MTU)(ctx)
+			return wireguard.GetClientDialFunc(c.logger, cfg, mtu)(ctx)
 		default:
 			return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 		}

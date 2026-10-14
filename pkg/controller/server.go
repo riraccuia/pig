@@ -68,13 +68,13 @@ func (c *Controller) startServerTunnel(ctx context.Context, tunnelCfg *config.Tu
 	if err != nil {
 		c.logger.Fatalf("Failed to create authenticator: %v", err)
 	}
-	listener, err = c.getListenFunc(tunnelCfg)
-	if err != nil {
-		c.logger.Fatalf("Failed to get server listener: %v", err)
-	}
 	adapter, err := c.createAdapter(tunnelCfg.Adapter, true)
 	if err != nil {
 		c.logger.Fatalf("Failed to create adapter: %v", err)
+	}
+	listener, err = c.getListenFunc(tunnelCfg, adapter.MTU())
+	if err != nil {
+		c.logger.Fatalf("Failed to get server listener: %v", err)
 	}
 	c.adapters.Store(adapter.Name(), adapter)
 	tunnel, err = server.NewWithAdapter(c.logger, tunnelCfg.Adapter, tunnelCfg, adapter, authenticator)

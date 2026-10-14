@@ -195,7 +195,6 @@ func (c *AdapterConfig) InitializeTunnelAdapter(direction TunnelDirection) error
 		return fmt.Errorf("failed to generate tunnel adapter address: %w", err)
 	}
 	c.TunnelAddress = []string{generatedNet.String()}
-	fmt.Printf("generated tunnel adapter address: %s\n", c.TunnelAddress[0])
 	return nil
 }
 
@@ -376,7 +375,7 @@ func (c *ICEConfig) Initialize(bindAdapter string, withProto TransportType, glob
 	}
 
 	if withProto == "." && len(c.Protos) == 0 {
-		c.Protos = []string{string(TransportWS), string(TransportQUIC), string(TransportDTLS), string(TransportTLS)}
+		c.Protos = []string{string(TransportWS), string(TransportQUIC), string(TransportTLS), string(TransportDTLS), string(TransportWG)}
 	}
 	if len(c.Protos) == 0 && withProto != "" {
 		c.Protos = strings.Split(string(withProto), ",")

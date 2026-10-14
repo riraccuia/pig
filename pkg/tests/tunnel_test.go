@@ -46,6 +46,10 @@ func NewMockTunnelAdapter(ip net.IP) *MockTunnelAdapter {
 	}
 }
 
+func (m *MockTunnelAdapter) MTU() int {
+	return 1300
+}
+
 func (m *MockTunnelAdapter) Read(b []byte) (int, error) {
 	data := <-m.writeChan
 	copy(b, data)

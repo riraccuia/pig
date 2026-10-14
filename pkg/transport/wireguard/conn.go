@@ -15,6 +15,7 @@
 package wireguard
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -50,6 +51,8 @@ type Conn struct {
 
 	readDeadline  atomic.Value // time.Time
 	writeDeadline atomic.Value // time.Time
+
+	readPending *bytes.Buffer
 }
 
 func (c *Conn) IsStreamed() bool { return false }
@@ -85,7 +88,11 @@ func (c *Conn) SetWriteDeadline(t time.Time) error {
 }
 
 func (c *Conn) Write(b []byte) (int, error) {
-	if err := waitChanSend(c.tun.outbound, b, c.tun.closed, loadTime(c.writeDeadline)); err != nil {
+	send, ok := c.WrapControlMessage(b)
+	if !ok {
+		send = b
+	}
+	if err := waitChanSend(c.tun.outbound, send, c.tun.closed, loadTime(c.writeDeadline)); err != nil {
 		return 0, err
 	}
 	if err := waitAck(c.tun.outAck, c.tun.closed); err != nil {
@@ -95,15 +102,24 @@ func (c *Conn) Write(b []byte) (int, error) {
 }
 
 func (c *Conn) Read(b []byte) (int, error) {
+	if c.readPending.Len() > 0 {
+		n, _ := c.readPending.Read(b)
+		return n, nil
+	}
 	pkt, err := waitChanRecv(c.tun.inbound, c.tun.closed, loadTime(c.readDeadline))
 	if err != nil {
 		return 0, err
+	}
+	n, ok := c.UnwrapControlMessage(b, pkt)
+	if ok {
+		c.ackInbound()
+		return n, nil
 	}
 	if len(b) < len(pkt) {
 		c.ackInbound()
 		return 0, io.ErrShortBuffer
 	}
-	n := copy(b, pkt)
+	n = copy(b, pkt)
 	c.ackInbound()
 	return n, nil
 }

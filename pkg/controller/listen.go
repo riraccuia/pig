@@ -30,17 +30,17 @@ import (
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
 
-func (c *Controller) getListenFunc(cfg *config.TunnelConfig) (func(ctx context.Context) (transport.Listener, error), error) {
+func (c *Controller) getListenFunc(cfg *config.TunnelConfig, mtu int) (func(ctx context.Context) (transport.Listener, error), error) {
 	switch {
 	case cfg.ICE == nil || !cfg.ICE.Enabled:
-		return c.getServerListenFunc(cfg)
+		return c.getServerListenFunc(cfg, mtu)
 	case cfg.ICE != nil && cfg.ICE.Enabled:
-		return c.getICEListenFunc(cfg)
+		return c.getICEListenFunc(cfg, mtu)
 	}
 	return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 }
 
-func (c *Controller) getServerListenFunc(cfg *config.TunnelConfig) (func(ctx context.Context) (transport.Listener, error), error) {
+func (c *Controller) getServerListenFunc(cfg *config.TunnelConfig, mtu int) (func(ctx context.Context) (transport.Listener, error), error) {
 	switch cfg.Proto {
 	case config.TransportQUIC:
 		tlsConfig, err := c.createTLSConfig(config.TunnelDirectionListen, cfg)
@@ -75,9 +75,9 @@ func (c *Controller) getServerListenFunc(cfg *config.TunnelConfig) (func(ctx con
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return dtls.GetServerListenFunc(c.logger, cfg, tlsConfig, cfg.Adapter.MTU), nil
+		return dtls.GetServerListenFunc(c.logger, cfg, tlsConfig, mtu), nil
 	case config.TransportWG:
-		return wireguard.GetServerListenFunc(c.logger, cfg, cfg.Adapter.MTU), nil
+		return wireguard.GetServerListenFunc(c.logger, cfg, mtu), nil
 	default:
 		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 	}

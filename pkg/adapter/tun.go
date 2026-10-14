@@ -33,11 +33,16 @@ type deadliner interface {
 
 type TUNAdapter struct {
 	io.ReadWriteCloser
+	mtu     int
 	ip      net.IP
 	ipv6    net.IP
 	ipNet   *net.IPNet
 	ipv6Net *net.IPNet
 	ifName  string
+}
+
+func (t *TUNAdapter) MTU() int {
+	return t.mtu
 }
 
 func (t *TUNAdapter) IP() net.IP {

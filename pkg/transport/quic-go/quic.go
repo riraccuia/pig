@@ -80,7 +80,7 @@ func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Tunnel
 		return nil, errors.New("quic: tls.Config not set")
 	}
 
-	packetConn := network.NewPacketConn(conn.(*net.UDPConn))
+	packetConn := network.ConnectedUdpToPacketConn(conn.(*net.UDPConn))
 	tr := &quic.Transport{
 		Conn: packetConn,
 	}
@@ -117,7 +117,7 @@ func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Tunnel
 		EnableDatagrams:    true,
 		MaxIdleTimeout:     idleTimeout,
 	}
-	packetConn := network.NewPacketConn(co.(*net.UDPConn))
+	packetConn := network.ConnectedUdpToPacketConn(co.(*net.UDPConn))
 	tr := &quic.Transport{
 		Conn: packetConn,
 	}

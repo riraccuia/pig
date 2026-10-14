@@ -15,6 +15,7 @@
 package wireguard
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/hex"
@@ -22,6 +23,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/riraccuia/pig/pkg/ice"
 	"github.com/riraccuia/pig/pkg/transport/wireguard/conn"
@@ -62,7 +64,7 @@ func GetClientFromConn(ctx context.Context, co net.Conn, tunnelCfg *config.Tunne
 		return nil, err
 	}
 	bind := conn.NewSimpleBind(udpConn)
-	wgConn, err := newConnWithBind(opts, bind)
+	wgConn, err := newConnWithBindWaitHandshake(ctx, opts, bind)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +103,7 @@ func GetClientDialFunc(logger common.Logger, tunnelCfg *config.TunnelConfig, mtu
 		if err != nil {
 			return nil, err
 		}
-		return newConn(opts)
+		return newConnWithBindWaitHandshake(ctx, opts, conn.NewDefaultBind())
 	}
 }
 
@@ -234,10 +236,70 @@ func newConnWithBind(opts *setupOpts, bind wconn.Bind) (*Conn, error) {
 	}
 
 	return &Conn{
-		dev:        dev,
-		tun:        ft,
-		localAddr:  localAddr,
-		remoteAddr: opts.remoteAddr,
+		dev:         dev,
+		tun:         ft,
+		localAddr:   localAddr,
+		remoteAddr:  opts.remoteAddr,
+		readPending: new(bytes.Buffer),
+	}, nil
+}
+
+func newConnWithBindWaitHandshake(ctx context.Context, opts *setupOpts, bind wconn.Bind) (*Conn, error) {
+	ft := newFakeTUN("pig-wg", opts.mtu)
+	devLogger := device.NewLogger(device.LogLevelError, "wg: ")
+	dev := device.NewDevice(ft, bind, devLogger)
+
+	uapi := buildUAPI(opts)
+	if err := dev.IpcSet(uapi); err != nil {
+		dev.Close()
+		_ = ft.Close()
+		return nil, fmt.Errorf("failed to configure wireguard device: %w", err)
+	}
+	if err := dev.Up(); err != nil {
+		dev.Close()
+		_ = ft.Close()
+		return nil, fmt.Errorf("failed to bring up wireguard device: %w", err)
+	}
+
+	localAddr := opts.localAddr
+	if port, err := listenPortFromIpc(dev); err == nil && port > 0 {
+		// figure out the ephemeral port from the device
+		localAddr.Port = port
+	}
+
+	err := dev.IpcSet(fmt.Sprintf("public_key=%s\npersistent_keepalive_interval=%d\n", opts.peers[0].publicKeyHex, 1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to set keepalive: %w", err)
+	}
+
+outer:
+	for !common.IsContextDone(ctx) {
+		time.Sleep(time.Second * 1)
+		cfg, err := dev.IpcGet()
+		if err != nil {
+			return nil, err
+		}
+		for _, line := range strings.Split(cfg, "\n") {
+			if strings.HasPrefix(line, "last_handshake_time_sec=") {
+				sec, _ := strconv.ParseInt(strings.TrimPrefix(line, "last_handshake_time_sec="), 10, 64)
+				if sec > 0 {
+					break outer
+				}
+			}
+		}
+	}
+
+	err = dev.IpcSet(fmt.Sprintf("public_key=%s\npersistent_keepalive_interval=%d\n", opts.peers[0].publicKeyHex, opts.peers[0].keepalive))
+	if err != nil {
+		return nil, fmt.Errorf("failed to set keepalive: %w", err)
+	}
+
+	return &Conn{
+		dev:         dev,
+		tun:         ft,
+		localAddr:   localAddr,
+		remoteAddr:  opts.remoteAddr,
+		readPending: new(bytes.Buffer),
 	}, nil
 }
 

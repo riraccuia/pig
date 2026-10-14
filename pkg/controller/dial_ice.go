@@ -38,7 +38,7 @@ import (
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
 
-func (c *Controller) getICEDialFunc(cfg *config.TunnelConfig) (func(ctx context.Context) (transport.Conn, error), error) {
+func (c *Controller) getICEDialFunc(cfg *config.TunnelConfig, mtu int) (func(ctx context.Context) (transport.Conn, error), error) {
 	tlsConfig, err := c.createTLSConfig(config.TunnelDirectionConnect, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create TLS config: %w", err)
@@ -81,17 +81,17 @@ func (c *Controller) getICEDialFunc(cfg *config.TunnelConfig) (func(ctx context.
 		time.Sleep(time.Millisecond * 100)
 
 		switch selectedPath.Protocol.Protocol {
-		case "ws":
+		case string(config.TransportWS):
 			return ws.GetClientFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
-		case "quic":
+		case string(config.TransportQUIC):
 			return qt.GetClientFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
-		case "dtls":
-			return dtls.GetClientFromConn(ctx, selectedPath.Conn, cfg, tlsConfig, c.cfg.Adapter.MTU)
-		case "tls":
+		case string(config.TransportDTLS):
+			return dtls.GetClientFromConn(ctx, selectedPath.Conn, cfg, tlsConfig, mtu)
+		case string(config.TransportTLS):
 			return trtls.GetClientFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
-		case "wg":
-			return wireguard.GetClientFromConn(ctx, selectedPath.Conn, cfg, c.cfg.Adapter.MTU)
-		case "tls-in-icmp":
+		case string(config.TransportWG):
+			return wireguard.GetClientFromConn(ctx, selectedPath.Conn, cfg, mtu)
+		case string(config.TransportTLSICMP):
 			return tlsicmp.GetClientFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
 		}
 		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)

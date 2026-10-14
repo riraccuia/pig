@@ -99,13 +99,11 @@ func (c *Controller) newClientTunnel(ctx context.Context, tunnelCfg *config.Tunn
 		return nil, nil, fmt.Errorf("failed to create authenticator: %w", err)
 	}
 
-	dialer, err := c.getDialFunc(tunnelCfg)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create dialer: %w", err)
-	}
-
-	var sharedTa common.TunnelAdapter
-	switch tunnelCfg.Adapter {
+	var (
+		adapterCfg = tunnelCfg.Adapter
+		useAdapter common.TunnelAdapter
+	)
+	switch adapterCfg {
 	case nil:
 		if c.sharedClientAdapter == nil {
 			return nil, nil, fmt.Errorf("adapter not initialized; call StartClient first")
@@ -113,18 +111,24 @@ func (c *Controller) newClientTunnel(ctx context.Context, tunnelCfg *config.Tunn
 		if c.demux == nil {
 			return nil, nil, fmt.Errorf("demux not initialized; call StartClient first")
 		}
-		sharedTa = c.demux.NewAdapter(ctx, 1024)
+		adapterCfg = &c.cfg.Adapter
+		useAdapter = c.demux.NewAdapter(ctx, 1024)
 	default:
 		tunAdapter, err := c.createAdapter(tunnelCfg.Adapter, false)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create adapter: %w", err)
 		}
-		sharedTa = tunAdapter
+		useAdapter = tunAdapter
 	}
 
-	tunnel, err := client.NewWithAdapter(c.logger, &c.cfg.Adapter, tunnelCfg, sharedTa, authenticator)
+	tunnel, err := client.NewWithAdapter(c.logger, adapterCfg, tunnelCfg, useAdapter, authenticator)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create client: %w", err)
+	}
+
+	dialer, err := c.getDialFunc(tunnelCfg, useAdapter.MTU())
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create dialer: %w", err)
 	}
 
 	return tunnel.WithBufferPool(c.bufferPool), dialer, nil

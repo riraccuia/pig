@@ -51,6 +51,7 @@ func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
 	adapter := &TUNAdapter{
 		ReadWriteCloser: nativeTun,
 		ifName:          nativeTun.Name(),
+		mtu:             config.MTU,
 	}
 
 	ip, ipNet, err := getAdapterAddress(adapter.Name(), windows.AF_INET)

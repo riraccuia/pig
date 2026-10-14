@@ -34,6 +34,7 @@ func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
 	adapter := &TUNAdapter{
 		ReadWriteCloser: tun,
 		ifName:          ifName,
+		mtu:             config.MTU,
 	}
 
 	ip, ipNet, err := getAdapterAddress(ifName, unix.AF_INET)

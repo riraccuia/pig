@@ -39,6 +39,9 @@ func (c *DTLSConn) IsStreamed() bool {
 	return false
 }
 
+// AtomicPacketWrites reports that each Write must carry one IP packet.
+func (c *DTLSConn) AtomicPacketWrites() bool { return true }
+
 func (c *DTLSConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
 	return nil, transport.ErrNotImplemented
 }
@@ -57,7 +60,7 @@ func Dial(ctx context.Context, networkStr string, laddr *net.UDPAddr, address *n
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial UDP: %w", err)
 	}
-	conn := network.NewPacketConn(udpConn)
+	conn := network.ConnectedUdpToPacketConn(udpConn)
 	return DialConn(ctx, conn, dtlsOpts...)
 }
 

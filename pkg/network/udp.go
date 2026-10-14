@@ -130,9 +130,9 @@ type PacketConn struct {
 	co *net.UDPConn
 }
 
-// NewPacketConn creates a new PacketConn from a connected UDP connection.
+// ConnectedUdpToPacketConn creates a new PacketConn from a connected UDP connection.
 // The connection should be one that was created using net.DialUDP.
-func NewPacketConn(co *net.UDPConn) *PacketConn {
+func ConnectedUdpToPacketConn(co *net.UDPConn) *PacketConn {
 	if co == nil {
 		panic("conn cannot be nil")
 	}
@@ -159,7 +159,8 @@ func (pc *PacketConn) Read(p []byte) (n int, err error) {
 }
 
 func (pc *PacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
-	n, err = pc.co.Read(p)
+	//n, err = pc.co.Read(p)
+	n, _, err = pc.co.ReadFrom(p)
 	return n, pc.co.RemoteAddr(), err
 }
 
@@ -190,4 +191,17 @@ func (pc *PacketConn) SetWriteBuffer(bytes int) error {
 
 func (pc *PacketConn) Close() error {
 	return pc.co.Close()
+}
+
+func (pc *PacketConn) SyscallConn() (syscall.RawConn, error) {
+	return pc.co.SyscallConn()
+}
+
+func (pc *PacketConn) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
+	n, oobn, flags, _, err = pc.co.ReadMsgUDP(b, oob)
+	return n, oobn, flags, pc.co.RemoteAddr().(*net.UDPAddr), err
+}
+
+func (pc *PacketConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
+	return pc.co.WriteMsgUDP(b, oob, nil)
 }
