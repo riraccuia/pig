@@ -2,10 +2,11 @@
 
 WireGuard is one of the supported pig transports (`-P wg` / `"proto": "wg"`).
 
-You can use it two ways:
+You can use it in a few different ways:
 
-- **Pig-to-pig:** both sides run pig over WireGuard.
 - **Any WireGuard VPN:** pig is a normal WireGuard client toward a provider or your own WireGuard server.
+- **Pig-to-pig:** both sides run pig over WireGuard.
+- **Hybrid:** multiple tunnels at once, mix of pig-to-pig and pig-to-VPN.
 
 Keys and peers live in the tunnel `trust.wireguard` block, or in `PIG_WG_*` environment variables.\
 There are currently no dedicated CLI flags for WireGuard keys.
@@ -33,7 +34,7 @@ PUB=$(\
 printf '%s\n' "$PUB"
 ```
 
-## Pig-to-pig
+## Pig-to-pig WireGuard
 
 Generate a key pair on each machine. Put your private key and the peer’s public key in config or env.\
 Env is mandatory for CLI usage, while using config files allows both env and explicit keys.
@@ -81,7 +82,8 @@ private_key = "AlicePriv"
 [[tunnels.trust.wireguard.peers]]
 public_key = "BobPub"
 ```
-If you'd rather keep the keys and env vars, you can omit the `private_key` and `public_key` fields.
+
+If you'd rather keep the keys as environment variables, you can omit the `private_key` and `public_key` fields.
 Empty `private_key` / `public_key` fields are filled from `PIG_WG_PRIVATE_KEY` and `PIG_WG_PEER_PUBLIC_KEY`.
 
 ```bash
@@ -147,12 +149,12 @@ NAT traversal works the same as all other pig transports: enable ICE and use a s
 
 Full field list: [config reference](../reference/config/config.md). Env vars: `pig -docs env` or [env](../reference/cli/env.md).
 
-## Connect to a WireGuard VPN
+## Connect to any WireGuard VPN provider
 
 WireGuard VPN services are becoming more and more popular. Some, like [Proton VPN](https://proton.me/vpn), even have a free tier.
-You can use pig to connect to them.
+Pig can connect to them natively.
 
-Example CLI command and `wg.conf` for a provider with endpoint `vpn.example.com:51820`, send all IPv4/IPv6 traffic through the tunnel.
+Example CLI command and `wg.conf` for a provider with endpoint `vpn.example.com:51820`, sending all IPv4/IPv6 traffic through the tunnel.
 
 **Using CLI:**
 
@@ -219,17 +221,17 @@ sudo pig -config wg.conf
 ## Several at once
 
 One of the most powerful features of pig is the ability to run multiple tunnels at once.
-Currently, this more complex setup is only available via a config file.
+Currently, this more complex setup is only available using a config file.
 
 Below is an example `multi.toml` that illustrates the use of this feature.
 
 The first tunnel (`my-vpn`) is a pure WireGuard connection to a public VPN provider.
 
-The second tunnel (`home-pig`) is a normal pig connect to a listener on your home network.
+The second tunnel (`home-pig`) is a pig-to-pig connection to a listener sitting in a home network.
 It uses NAT traversal so you don’t need a public home IP, and it only sends the home LAN (`192.168.1.0/24`) through the tunnel, everything else stays on `my-vpn`.
 The cherry picked protocols are `ws` (WebSocket, based on TCP) and `quic` (based on UDP), the fastest of the two protos to establish a connection will win.
 
-To stand up the home listener, see the [exit node](../../examples/exit-node/README.md) example (Docker Compose is the quick path) and the [Docker documentation](../../docs/docker/docker.md). 
+To stand up the home listener, see the [exit node](../../examples/exit-node/README.md) example and the [Docker documentation](../../docs/docker/docker.md). 
 Use the same `server_id` and `encryption_key` on both sides.
 
 ```bash
@@ -285,6 +287,7 @@ encryption_key = "home-signaling-secret-passphrase"
 
 ```
 
+Run with it:
 ```bash
 sudo pig -config multi.toml
 ```
