@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	DefaultMTU           = 1400
+	DefaultMTU           = 1420
 	DefaultQueueSize     = 256
 	DefaultStreamCount   = 0
 	DefaultIdleTimeout   = 0
@@ -410,7 +410,12 @@ func (c *TunnelConfig) InitializeTrust() error {
 	if c.Proto == TransportWG {
 		switch c.Trust.WireGuard {
 		case nil:
-			return errors.New("wireguard parameters not specified")
+			if EnvWGPrivateKey.Get() == "" || EnvWGPeerPublicKey.Get() == "" {
+				return errors.New("wireguard parameters not specified")
+			}
+			// if env vars are set, fallthrough to the default case
+			c.Trust.WireGuard = &WireGuardConfig{}
+			fallthrough
 		default:
 			if err := c.Trust.WireGuard.Initialize(c.Direction); err != nil {
 				return err

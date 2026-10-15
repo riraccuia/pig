@@ -60,7 +60,7 @@ func New(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *conf
 
 // NewWithAdapter creates a new Server instance with a caller-supplied adapter.
 func NewWithAdapter(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *config.TunnelConfig, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Server, error) {
-	logger.Infof("Creating server with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), adapterCfg.MTU)
+	logger.Infof("Creating server with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), adapter.MTU())
 	queueSize := adapterCfg.QueueSize
 	if queueSize <= 0 {
 		queueSize = config.DefaultQueueSize
@@ -74,7 +74,7 @@ func NewWithAdapter(logger common.Logger, adapterCfg *config.AdapterConfig, tunn
 		outbound:   make(common.PacketQueue, queueSize),
 		bufferPool: &sync.Pool{
 			New: func() any {
-				return make([]byte, adapterCfg.MTU)
+				return make([]byte, adapter.MTU())
 			},
 		},
 		authenticator: authenticator,

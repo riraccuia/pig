@@ -5,6 +5,7 @@ Table of contents for pig user documentation. New guides are added here by topic
 ## Getting started
 
 - [Quick start](getting-started/quick-start.md)
+- [CLI overview](getting-started/cli-overview.md)
 
 ## Installation
 
@@ -23,6 +24,10 @@ Table of contents for pig user documentation. New guides are added here by topic
 - [JWT](auth/jwt.md)
 - [OAuth](auth/oauth.md)
 - [OIDC](auth/oidc.md)
+
+## WireGuard
+
+- [WireGuard](wireguard/wireguard.md)
 
 ## Docker
 

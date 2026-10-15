@@ -74,7 +74,7 @@ func (client *ClientTunnel) handleInbound(ctx context.Context, connOrStream io.R
 				break // Partial packet, wait for more data
 			}
 
-			if totalLen > client.parent.adapterCfg.MTU {
+			if totalLen > client.parent.adapter.MTU() {
 				client.logger.Debugf("IPv=%d,len=%d,proto=%d | %d:%s->%s:%d | discarded, too long",
 					prePkt.Version(), totalLen, prePkt.Protocol(),
 					prePkt.SourcePort(), prePkt.SourceIP(),

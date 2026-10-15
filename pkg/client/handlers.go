@@ -93,7 +93,7 @@ func (c *Client) processInbound(ctx context.Context, connOrStream io.ReadWriteCl
 
 			totalLen := prePkt.TotalLength()
 
-			if totalLen > c.adapterConfig.MTU {
+			if totalLen > c.adapter.MTU() {
 				// consume the packet and continue
 				c.logger.Debugf("received packet inbound with unexpected length: %d", totalLen)
 				processed += totalLen
@@ -105,7 +105,7 @@ func (c *Client) processInbound(ctx context.Context, connOrStream io.ReadWriteCl
 			}
 
 			// Get new packet from pool and copy data
-			buf := c.bufferPool.GetBuffer(c.adapterConfig.MTU)
+			buf := c.bufferPool.GetBuffer(c.adapter.MTU())
 			copy(buf[:totalLen], unprocessed[processed:processed+totalLen])
 
 			var pkt network.IPPacket

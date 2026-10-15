@@ -86,14 +86,14 @@ var pigFlags = map[string][3]string{
 	FLAG_ID:           {FLAG_ID, "a", "ID or friendly name for a listening node. This identifier is registered for signaling during NAT traversal. When the connecting side uses it, it doesn't need to know the other node's address."},
 	FLAG_ADDR:         {FLAG_ADDR, "a", "Address [host]:port. Or use -id in NAT traversal mode. In simple mode, this is the connect node's target address and the listen node's bind address."},
 	FLAG_BIND:         {FLAG_BIND, "a", "The adapter/interface to bind to, required only when '-P' is *-ICMP."},
-	FLAG_PROTO:        {FLAG_PROTO, "a", "Transport protocol for the tunnel. See '" + binaryName + " docs protos' for the list of supported ones. The special '.' option selects all available protocols for candidate generation with NAT traversal."},
+	FLAG_PROTO:        {FLAG_PROTO, "a", "Transport protocol for the tunnel. See '" + binaryName + " -docs protos' for the list of supported ones. The special '.' option selects all available protocols for candidate generation with NAT traversal."},
 	FLAG_SPORT:        {FLAG_SPORT, "c", "Source port to use for the connection."},
 	FLAG_TADDR:        {FLAG_TADDR, "a", "Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR values. Defaults to random generated /" + strconv.Itoa(config.DefaultConnectPrefixLengthV4) + " within " + config.DefaultConnectBasePrefixV4 + " for connect nodes and /" + strconv.Itoa(config.DefaultListenPrefixLengthV4) + " within " + config.DefaultListenBasePrefixV4 + " for listening nodes."},
 	FLAG_RETRY:        {FLAG_RETRY, "c", "Reconnect interval in seconds. Defaults to " + strconv.Itoa(config.DefaultRetryInterval) + "."},
 	FLAG_IDLE_TIMEOUT: {FLAG_IDLE_TIMEOUT, "a", "Idle timeout in seconds for tunnels. Defaults to " + strconv.Itoa(config.DefaultIdleTimeout) + "."},
 	FLAG_ROUTE:        {FLAG_ROUTE, "c", "Route subnets through the tunnel. Use 'full4', 'full6', 'full' (as shortcuts for full tunnel routing) or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'."},
 	// scripting settings
-	FLAG_SCRIPT: {FLAG_SCRIPT, "c", "Takes the path to an executable file that will be called on tunnel events. See '" + binaryName + " docs env' for the list of environment variables that are passed to the script."},
+	FLAG_SCRIPT: {FLAG_SCRIPT, "c", "Takes the path to an executable file that will be called on tunnel events. See '" + binaryName + " -docs env' for the list of environment variables that are passed to the script."},
 	// logging settings
 	FLAG_VERBOSE: {FLAG_VERBOSE, "a", "Print more verbose output. Use 0 (default) for info, 1 for debug, 2 for trace."},
 	// certificate settings
@@ -108,7 +108,7 @@ var pigFlags = map[string][3]string{
 	FLAG_TOKEN: {FLAG_TOKEN, "c", "Sets the token string for JWT client authentication. It is recommended to populate the " + config.EnvToken.Name() + " environment variable instead of using this flag."},
 	// NAT traversal settings
 	FLAG_STUN:   {FLAG_STUN, "a", "STUN server to query during NAT traversal."},
-	FLAG_MQTT:   {FLAG_MQTT, "a", "MQTT broker to use for NAT traversal signaling. See '" + binaryName + " -env' for additional configuration options."},
+	FLAG_MQTT:   {FLAG_MQTT, "a", "MQTT broker to use for NAT traversal signaling. See '" + binaryName + " -docs env' for additional configuration options."},
 	FLAG_SIGKEY: {FLAG_SIGKEY, "a", "Encryption key for signaling messages. Connecting peers need to use the same key as the listeners."},
 	// nerd settings
 	FLAG_MTU:     {FLAG_MTU, "a", "MTU (Maximum Transmission Unit) size of the tunnel adapter."},

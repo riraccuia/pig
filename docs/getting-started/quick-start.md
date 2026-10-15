@@ -47,7 +47,7 @@ In this case, on Bob side, you have a few shortcuts to tell pig to build a full 
 | `-k`        | Skip certificate verification                    |
 
 
-Full CLI reference: [CLI overview](../reference/cli/pig.md) or `pig -h`.
+CLI tips: [CLI overview](cli-overview.md). Full flag list: [CLI reference](../reference/cli/pig.md) or `pig -h`.
 
 Stop with `Ctrl+C`.
 
@@ -79,7 +79,8 @@ See the [config reference](../reference/config/config.md).
 
 ## Next steps
 
-- [CLI overview](../reference/cli/pig.md)
+- [CLI overview](cli-overview.md)
+- [CLI reference](../reference/cli/pig.md)
 - [Connect](../reference/cli/connect.md) / [Listen](../reference/cli/listen.md)
 - [NAT traversal](../nat/nat.md)
 - [Docker](../docker/docker.md)

@@ -39,7 +39,7 @@ func (c *Controller) doStartClient(ctx context.Context, cfg *config.Config) {
 	adapterCfg := &cfg.Adapter
 	connectTunnels := tunnelsByDirection(cfg, config.TunnelDirectionConnect)
 
-	c.logger.Infof("Starting pig connect runtime | MTU: %d | Tunnels: %d", adapterCfg.MTU, len(connectTunnels))
+	c.logger.Infof("Starting pig connect runtime | Tunnels: %d", len(connectTunnels))
 
 	c.scriptExecutor = script.New(c.logger, cfg.ScriptPath)
 
@@ -62,8 +62,9 @@ func (c *Controller) setupSharedClientAdapter(ctx context.Context, cfg *config.A
 		return err
 	}
 	c.sharedClientAdapter = adapter
-	c.demux = demux.New(c.logger, c.sharedClientAdapter, cfg.MTU).WithBufferPool(c.bufferPool)
+	c.demux = demux.New(c.logger, c.sharedClientAdapter, c.sharedClientAdapter.MTU()).WithBufferPool(c.bufferPool)
 	c.demux.Start(ctx)
+	c.logger.Infof("Created shared adapter %s, IP: %s, MTU %d", c.sharedClientAdapter.Name(), c.sharedClientAdapter.IP(), c.sharedClientAdapter.MTU())
 	return nil
 }
 
@@ -92,7 +93,7 @@ func (c *Controller) newClientTunnel(ctx context.Context, tunnelCfg *config.Tunn
 	if tunnelCfg.ICE == nil || !tunnelCfg.ICE.Enabled {
 		transportStr = fmt.Sprintf("| Transport:%s |", tunnelCfg.Proto)
 	}
-	c.logger.Infof("Adding tunnel %s Target: %s:%d", transportStr, tunnelCfg.Connect.Address, tunnelCfg.Connect.Port)
+	c.logger.Infof("Adding tunnel %s %s Target: %s:%d", tunnelCfg.Name, transportStr, tunnelCfg.Connect.Address, tunnelCfg.Connect.Port)
 
 	authenticator, err := c.createClientAuthenticator(tunnelCfg.Auth)
 	if err != nil {
