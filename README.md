@@ -10,7 +10,7 @@ Run it on two machines and they find each other. No router setup required, in mo
 
 It has a small disk and memory footprint, it's fast and works on Linux, macOS, and Windows (and maybe mobile, at some point).
 
-Pigs can also be chained to create mesh networks, or connect to any WireGuard VPN, even multiple ones at the same time.
+Pigs can also be chained to create mesh networks, or connect to any [WireGuard](docs/wireguard/wireguard.md) VPN, even multiple ones at the same time.
 
 The project is still in early development, please open an issue if you find any bugs or have any suggestions.
 
@@ -28,7 +28,7 @@ It quickly became the primary tool for connecting to my home when I travel, doub
 
 **Pick a transport.** [QUIC, TLS, WebSocket, WireGuard, DTLS, TLS-in-ICMP](docs/reference/cli/protos.md), or let pig choose.
 
-**Use WireGuard two ways.** Pig-to-pig, or connect to any WireGuard VPN. You can keep several up together (VPN + pig, or two VPNs, etc...).
+**Use WireGuard two ways.** Pig-to-pig, or connect to any WireGuard VPN. You can keep several up together (VPN + pig, or two VPNs, etc...). Check out the [WireGuard documentation](docs/wireguard/wireguard.md).
 
 **Skip firewall plumbing.** Don't worry about setting up your network. Pig's NAT traversal approach can beat symmetric NAT, too. More details in the [docs](docs/nat/symmetric.md).
 
