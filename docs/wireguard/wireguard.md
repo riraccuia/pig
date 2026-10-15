@@ -11,10 +11,14 @@ You can use it in a few different ways:
 Keys and peers live in the tunnel `trust.wireguard` block, or in `PIG_WG_*` environment variables.\
 There are currently no dedicated CLI flags for WireGuard keys.
 
+Also see:
+- [Config reference](../reference/config/config.md)
+- Env vars: `pig -docs env` or [env](../reference/cli/env.md)
+
 ## Generating keys
 
 Pig requires keys as per the WireGuard specification.
-You can generate them in the [official way](https://www.wireguard.com/quickstart/#key-generation) and skip the rest of this section.
+You can generate them in the [official way](https://www.wireguard.com/quickstart/#key-generation) and skip the rest of this section.\
 Or have some fun with openssl:
 
 **Private key:**
@@ -41,7 +45,11 @@ Env is mandatory for CLI usage, while using config files allows both env and exp
 
 ### Alice (listen) 
 
-Private `AlicePriv`, peer public `BobPub`.
+
+| Key | Value |
+|-----|-------|
+| Private | `AlicePriv` |
+| Peer public | `BobPub` |
 
 **Using CLI:**
 
@@ -72,9 +80,6 @@ proto = "wg"
 address = "" # dual stack
 port = 51820
 
-[tunnels.ice]
-enabled = false
-
 # Anything from this point on can be omitted when using env
 [tunnels.trust.wireguard]
 private_key = "AlicePriv"
@@ -86,13 +91,17 @@ public_key = "BobPub"
 If you'd rather keep the keys as environment variables, you can omit the `private_key` and `public_key` fields.
 Empty `private_key` / `public_key` fields are filled from `PIG_WG_PRIVATE_KEY` and `PIG_WG_PEER_PUBLIC_KEY`.
 
+Run with it:
 ```bash
-sudo pig -config alice.toml
+sudo ./pig -config alice.toml
 ```
 
 ### Bob (connect)
 
-Private `BobPriv`, peer public `AlicePub`.
+| Key | Value |
+|-----|-------|
+| Private | `BobPriv` |
+| Peer public | `AlicePub` |
 
 **Using CLI:**
 
@@ -130,9 +139,6 @@ type = "tunnel"
 address = "alice.example.com"
 port = 51820
 
-[tunnels.ice]
-enabled = false
-
 # Anything from this point on can be omitted when using env
 [tunnels.trust.wireguard]
 private_key = "BobPriv"
@@ -141,13 +147,12 @@ private_key = "BobPriv"
 public_key = "AlicePub"
 ```
 
+Run with it:
 ```bash
-sudo pig -config bob.toml
+sudo ./pig -config bob.toml
 ```
 
 NAT traversal works the same as all other pig transports: enable ICE and use a shared `-id` / signaling config instead of a fixed `connect` / `listen` address. See [NAT traversal](../nat/nat.md).
-
-Full field list: [config reference](../reference/config/config.md). Env vars: `pig -docs env` or [env](../reference/cli/env.md).
 
 ## Connect to any WireGuard VPN provider
 
@@ -215,7 +220,7 @@ public_key = "your_peer_key_from_the_provider"
 ```
 
 ```bash
-sudo pig -config wg.conf
+sudo ./pig -config wg.conf
 ```
 
 ## Several at once
@@ -223,20 +228,18 @@ sudo pig -config wg.conf
 One of the most powerful features of pig is the ability to run multiple tunnels at once.
 Currently, this more complex setup is only available using a config file.
 
-Below is an example `multi.toml` that illustrates the use of this feature.
+Below is an example `multi.toml` config that illustrates the use of this feature.
 
 The first tunnel (`my-vpn`) is a pure WireGuard connection to a public VPN provider.
 
 The second tunnel (`home-pig`) is a pig-to-pig connection to a listener sitting in a home network.
-It uses NAT traversal so you don’t need a public home IP, and it only sends the home LAN (`192.168.1.0/24`) through the tunnel, everything else stays on `my-vpn`.
+It uses NAT traversal (ICE section) so you don’t need a public home IP, and it only sends the home LAN (`192.168.1.0/24`) through the tunnel, everything else stays on `my-vpn`.
 The cherry picked protocols are `ws` (WebSocket, based on TCP) and `quic` (based on UDP), the fastest of the two protos to establish a connection will win.
 
 To stand up the home listener, see the [exit node](../../examples/exit-node/README.md) example and the [Docker documentation](../../docs/docker/docker.md). 
 Use the same `server_id` and `encryption_key` on both sides.
 
-```bash
-sudo ./pig -config multi.toml
-```
+As usual, take a look at the [config reference](../reference/config/config.md) for more options.
 
 ```toml
 [route]
@@ -289,7 +292,5 @@ encryption_key = "home-signaling-secret-passphrase"
 
 Run with it:
 ```bash
-sudo pig -config multi.toml
+sudo ./pig -config multi.toml
 ```
-
-See the [config reference](../reference/config/config.md) for the `tunnels` array, and the [exit node](../../examples/exit-node/README.md) example for a multi-machine layout.

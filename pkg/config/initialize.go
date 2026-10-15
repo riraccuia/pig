@@ -277,15 +277,15 @@ func (c *TunnelConfig) Initialize(bindAdapter string, globalStunServers []string
 		}
 	}*/
 
-	if err := c.ICE.Initialize(bindAdapter, c.Proto, globalStunServers, defaultMqttBroker); err != nil {
-		return err
-	}
-
 	if err := c.validateTransportAndTarget(bindAdapter); err != nil {
 		return err
 	}
 
 	if err := c.TLSConfig.Initialize(c.Direction); err != nil {
+		return err
+	}
+
+	if err := c.InitializeICE(bindAdapter, globalStunServers, defaultMqttBroker); err != nil {
 		return err
 	}
 
@@ -309,10 +309,15 @@ func (c *WireGuardConfig) Initialize(direction TunnelDirection) error {
 		return err
 	}
 
+	pubKeyFromEnv := EnvWGPeerPublicKey.Get()
+
 	if len(c.Peers) == 0 {
+		if pubKeyFromEnv == "" {
+			return errors.New("wireguard peer public key not specified")
+		}
 		c.Peers = []WireGuardPeer{
 			{
-				PublicKey:    EnvWGPeerPublicKey.Get(),
+				PublicKey:    pubKeyFromEnv,
 				PresharedKey: EnvWGPSK.Get(),
 				AllowedIPs:   DefaultWGAllowedIPs,
 				Keepalive:    DefaultWGKeepaliveConnect,
@@ -359,68 +364,110 @@ func validateWGKey(key, field string) error {
 	return nil
 }
 
-func (c *ICEConfig) Initialize(bindAdapter string, withProto TransportType, globalStunServers []string, defaultMqttBroker *MQTTBrokerConfig) error {
-	if c == nil || !c.Enabled {
+// dotExpandICEProtos resolves all the ICE protocols that are supported by the tunnel config.
+// It is used with the idiomatic proto = "." syntax meaning "all pig supported ICE-capable protocols".
+func (c *TunnelConfig) dotExpandICEProtos() []string {
+	c.ICE.Protos = []string{string(TransportWS), string(TransportQUIC), string(TransportTLS), string(TransportDTLS)}
+	hasWGConfig := c.Trust != nil && c.Trust.WireGuard != nil
+	hasWGEnv := EnvWGPrivateKey.Get() != "" && EnvWGPeerPublicKey.Get() != ""
+	if !hasWGConfig && !hasWGEnv {
+		return c.ICE.Protos
+	}
+	// only use wireguard if there's a valid trust configuration for it
+	c.ICE.Protos = append(c.ICE.Protos, string(TransportWG))
+	return c.ICE.Protos
+}
+
+func (c *TunnelConfig) InitializeICE(bindAdapter string, globalStunServers []string, defaultMqttBroker *MQTTBrokerConfig) error {
+	if c.ICE == nil || !c.ICE.Enabled {
 		return nil
 	}
 
-	if len(c.STUNAddress) == 0 {
-		c.STUNAddress = globalStunServers
+	if len(c.ICE.STUNAddress) == 0 {
+		c.ICE.STUNAddress = globalStunServers
 	}
-	if c.Signaling == nil {
-		c.Signaling = &ICESignalingOpts{}
+	if c.ICE.Signaling == nil {
+		c.ICE.Signaling = &ICESignalingOpts{}
 	}
-	if c.Signaling.MQTT == nil {
-		c.Signaling.MQTT = defaultMqttBroker
+	if c.ICE.Signaling.MQTT == nil {
+		c.ICE.Signaling.MQTT = defaultMqttBroker
 	}
-
-	if withProto == "." && len(c.Protos) == 0 {
-		c.Protos = []string{string(TransportWS), string(TransportQUIC), string(TransportTLS), string(TransportDTLS), string(TransportWG)}
+	if c.Proto == "." && len(c.ICE.Protos) == 0 {
+		c.ICE.Protos = c.dotExpandICEProtos()
 	}
-	if len(c.Protos) == 0 && withProto != "" {
-		c.Protos = strings.Split(string(withProto), ",")
+	if len(c.ICE.Protos) == 0 && c.Proto != "" {
+		c.ICE.Protos = strings.Split(string(c.Proto), ",")
 	}
-	if len(c.Protos) == 0 {
+	if len(c.ICE.Protos) == 0 {
 		return fmt.Errorf("no ICE protocols specified")
 	}
 
-	for _, proto := range c.Protos {
+	var hasWG bool
+	for _, proto := range c.ICE.Protos {
+		p := TransportType(proto)
 		switch {
-		case !TransportType(proto).IsICEProtocol():
+		case !p.IsICEProtocol():
 			return fmt.Errorf("invalid ICE protocol: %s", proto)
-		case proto == string(TransportTLSICMP) && bindAdapter == "":
+		case p == TransportWG:
+			hasWG = true
+		case p == TransportTLSICMP && bindAdapter == "":
 			return fmt.Errorf("bind adapter not specified, but required for %s", proto)
 		}
 	}
 
+	if !hasWG {
+		return nil
+	}
+	// make sure that the trust config can be initialized
+	if c.Trust == nil {
+		c.Trust = &TrustConfig{}
+	}
+	if c.Trust.WireGuard == nil {
+		c.Trust.WireGuard = &WireGuardConfig{}
+	}
 	return nil
 }
 
+// InitializeTrust initializes the trust config, it must be called after the ICE config is initialized
 func (c *TunnelConfig) InitializeTrust() error {
-	if c == nil || c.Trust == nil {
+	if c == nil {
 		return nil
 	}
 
-	if c.Trust.MTLS != nil {
-		if err := c.Trust.MTLS.Initialize(c.Direction); err != nil {
-			return err
-		}
-	}
-
-	if c.Proto == TransportWG {
-		switch c.Trust.WireGuard {
-		case nil:
-			if EnvWGPrivateKey.Get() == "" || EnvWGPeerPublicKey.Get() == "" {
-				return errors.New("wireguard parameters not specified")
+	if c.Trust != nil {
+		if c.Trust.MTLS != nil {
+			if err := c.Trust.MTLS.Initialize(c.Direction); err != nil {
+				return err
 			}
-			// if env vars are set, fallthrough to the default case
-			c.Trust.WireGuard = &WireGuardConfig{}
-			fallthrough
-		default:
+		}
+
+		if c.Trust.WireGuard != nil {
 			if err := c.Trust.WireGuard.Initialize(c.Direction); err != nil {
 				return err
 			}
 		}
+	}
+
+	if c.Proto != TransportWG {
+		return nil
+	}
+
+	if c.ICE != nil && c.ICE.Enabled {
+		return nil
+	}
+
+	if c.Trust != nil && c.Trust.WireGuard != nil {
+		return nil
+	}
+
+	if c.Trust == nil {
+		c.Trust = &TrustConfig{}
+	}
+	if c.Trust.WireGuard == nil {
+		c.Trust.WireGuard = &WireGuardConfig{}
+	}
+	if err := c.Trust.WireGuard.Initialize(c.Direction); err != nil {
+		return err
 	}
 
 	return nil
@@ -557,21 +604,6 @@ func (c *TunnelConfig) needsConnectTarget() bool {
 		return false
 	}
 	return true
-}
-
-func resolveTargetAddress(address *string, kind string) error {
-	if *address == "" || net.ParseIP(*address) != nil {
-		return nil
-	}
-	ips, err := net.LookupIP(*address)
-	if err != nil {
-		return fmt.Errorf("failed to resolve %s address: %w", kind, err)
-	}
-	if len(ips) == 0 {
-		return fmt.Errorf("no IP addresses found for %s address: %s", kind, *address)
-	}
-	*address = ips[0].String()
-	return nil
 }
 
 func (c *TLSConfig) Initialize(direction TunnelDirection) error {
