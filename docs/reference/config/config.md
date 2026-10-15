@@ -23,7 +23,7 @@
 | Field | Type | Optional | Default | Description |
 | --- | --- | --- | --- | --- |
 | `tunnel_address` | []string | false | - | CIDR format. |
-| `mtu` | int | false | 1400 | Maximum Transmission Unit. |
+| `mtu` | int | false | 1420 | Maximum Transmission Unit. |
 | `bind_adapter` | string? | true | - | Adapter name to bind to, e.g. "eth0". Only required when 'proto' is tls-in-icmp. |
 | `queue_size` | int? | true | 256 | Size of the network queues for the tunnel. |
 

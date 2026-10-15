@@ -15,7 +15,7 @@ General options:
  -a  Address [host]:port. Or use -id in NAT traversal mode. In simple mode, this is the connect node's
      target address and the listen node's bind address.
  -I  The adapter/interface to bind to, required only when '-P' is *-ICMP.
- -P  Transport protocol for the tunnel. See 'pig docs protos' for the list of supported ones. The
+ -P  Transport protocol for the tunnel. See 'pig -docs protos' for the list of supported ones. The
      special '.' option selects all available protocols for candidate generation with NAT traversal.
  -ta Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR
      values. Defaults to random generated /30 within 100.64.0.0/11 for connect nodes and /16 within
@@ -43,7 +43,7 @@ Auth options:
 
 NAT traversal options:
  -stun STUN server to query during NAT traversal.
- -mqtt MQTT broker to use for NAT traversal signaling. See 'pig -env' for additional configuration
+ -mqtt MQTT broker to use for NAT traversal signaling. See 'pig -docs env' for additional configuration
        options.
  -sk   Encryption key for signaling messages. Connecting peers need to use the same key as the listeners.
 
