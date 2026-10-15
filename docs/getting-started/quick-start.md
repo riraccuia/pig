@@ -36,20 +36,19 @@ In this case, on Bob side, you have a few shortcuts to tell pig to build a full 
 - `-R full6` all ipv6 local traffic through the tunnel
 - `-R full` all local traffic from both families through the tunnel
 
+Flags we used so far:
+| Flag        | Meaning                                             |
+| ----------- | --------------------------------------------------- |
+| `-l` / `-c` | Listen or connect mode                              |
+| `-id`       | Shared, friendly name for NAT traversal signaling   |
+| `-sk`       | Shared encryption passphrase for NAT-T signaling    |
+| `-P .`      | Try all available transports as ICE candidates      |
+| `-R`        | Tunnel routes to bring up on the connect side       |
+| `-k`        | Skip certificate verification                       |
 
-| Flag        | Meaning                                          |
-| ----------- | ------------------------------------------------ |
-| `-l` / `-c` | Listen or connect                                |
-| `-id`       | Shared name for NAT traversal signaling          |
-| `-sk`       | Shared encryption passphrase for NAT-T signaling |
-| `-P .`      | Try all available transports as ICE candidates   |
-| `-R`        | Tunnel routes to bring up on the connect side    |
-| `-k`        | Skip certificate verification                    |
 
-
-CLI tips: [CLI overview](cli-overview.md). Full flag list: [CLI reference](../reference/cli/pig.md) or `pig -h`.
-
-Stop with `Ctrl+C`.
+CLI tips: [CLI overview](cli-overview.md).\
+Full flag list: [CLI reference](../reference/cli/pig.md) or `pig -h`.
 
 ## Simple mode
 
@@ -57,10 +56,10 @@ If you prefer a fixed address and open ports yourself (no smarts):
 
 ```bash
 # Alice
-sudo pig -l -s -a 0.0.0.0:443 -P quic -k
+sudo ./pig -l -s -a 0.0.0.0:443 -P quic -k
 
 # Bob
-sudo pig -c -s -a alice.example.com:443 -P quic -k -R 192.168.1.100/32
+sudo ./pig -c -s -a alice.example.com:443 -P quic -k -R 192.168.1.100/32
 ```
 
 `-s` (simple mode) disables NAT traversal. `-a` is the listen bind address or the connect target.
@@ -70,12 +69,13 @@ sudo pig -c -s -a alice.example.com:443 -P quic -k -R 192.168.1.100/32
 Turn flags into a file:
 
 ```bash
-pig -l -id pig-demo-alice -sk passphrase -P . -k -to-cfg json > alice.json
-sudo pig -config alice.json
+./pig -l -id pig-demo-alice -sk passphrase -P . -k -to-cfg json > alice.json
+sudo ./pig -config alice.json
 ```
 
 Json and toml formats are supported (`-to-cfg toml`).\
-See the [config reference](../reference/config/config.md).
+
+Check out the [config reference](../reference/config/config.md) for the full list of options.
 
 ## Next steps
 
