@@ -27,6 +27,7 @@ import (
 
 // WSListener implements transport.Listener for WebSocket connections.
 type WSListener struct {
+	listener  net.Listener
 	server    *http.Server
 	connChan  chan *WSConn
 	closeOnce sync.Once
@@ -37,6 +38,13 @@ func NewWSListener() *WSListener {
 	return &WSListener{
 		connChan: make(chan *WSConn),
 	}
+}
+
+func (t *WSListener) Addr() net.Addr {
+	if t.listener == nil {
+		return nil
+	}
+	return t.listener.Addr()
 }
 
 func (t *WSListener) Accept() (net.Conn, error) {
@@ -78,6 +86,7 @@ func (t *WSListener) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Listen starts the WebSocket server on the given address.
 func (t *WSListener) ListenWithListener(l net.Listener, tlsConfig *tls.Config) error {
+	t.listener = l
 	t.server = &http.Server{
 		Handler:   t,
 		TLSConfig: tlsConfig,
@@ -107,8 +116,12 @@ func (t *WSListener) Listen(network, address string, tlsConfig *tls.Config) erro
 		TLSConfig: tlsConfig,
 	}
 
+	t.listener = ln
+
 	if tlsConfig != nil {
-		return t.server.ServeTLS(ln, "", "")
+		go t.server.ServeTLS(ln, "", "")
+		return nil
 	}
-	return t.server.Serve(ln)
+	go t.server.Serve(ln)
+	return nil
 }

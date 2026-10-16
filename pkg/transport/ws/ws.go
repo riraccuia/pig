@@ -68,16 +68,14 @@ func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, tlsC
 		}
 		networkStr := transport.GetTCPNetworkString(laddr.IP)
 		tr := NewWSListener()
-		go func() {
-			err := tr.Listen(
-				networkStr,
-				laddr.String(),
-				tlsConfig.Clone(),
-			)
-			if err != nil && err != http.ErrServerClosed {
-				logger.Errorf("WebSocket server error: %v", err)
-			}
-		}()
+		err = tr.Listen(
+			networkStr,
+			laddr.String(),
+			tlsConfig.Clone(),
+		)
+		if err != nil && err != http.ErrServerClosed {
+			logger.Errorf("WebSocket server error: %v", err)
+		}
 		return tr, nil
 	}
 }

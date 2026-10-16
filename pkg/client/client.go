@@ -77,7 +77,7 @@ func New(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *conf
 // In the multi-tunnel case the controller passes a per-tunnel virtual adapter
 // (tunnelAdapter) so that reads only deliver packets routed to this tunnel.
 func NewWithAdapter(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *config.TunnelConfig, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Client, error) {
-	logger.Infof("Creating client with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), adapter.MTU())
+	logger.Infof("%s | Creating client with adapter %s, IP: %s, MTU %d", tunnelCfg.Name, adapter.Name(), adapter.IP(), adapter.MTU())
 
 	adapterConfig := adapterCfg
 	if tunnelCfg.Adapter != nil {

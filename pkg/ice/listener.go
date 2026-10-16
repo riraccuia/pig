@@ -46,6 +46,9 @@ func NewListener(ctx context.Context, localAddr net.Addr) *Listener {
 }
 
 func (l *Listener) Addr() net.Addr {
+	if l.localAddr == nil {
+		return nil
+	}
 	return l.localAddr
 }
 

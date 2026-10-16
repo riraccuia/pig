@@ -31,6 +31,13 @@ func NewQuicTransport(listener *quic.Listener) *QuicListener {
 	return &QuicListener{listener: listener}
 }
 
+func (t *QuicListener) Addr() net.Addr {
+	if t.listener == nil {
+		return nil
+	}
+	return t.listener.Addr()
+}
+
 func (t *QuicListener) Accept() (net.Conn, error) {
 	conn, err := t.listener.Accept(context.Background())
 	if err != nil {

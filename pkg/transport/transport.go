@@ -30,8 +30,7 @@ type Stream interface {
 }
 
 type Listener interface {
-	Accept() (net.Conn, error)
-	Close() error
+	net.Listener
 }
 
 type Dialer interface {

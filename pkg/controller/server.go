@@ -36,7 +36,7 @@ func (c *Controller) doStartServer(ctx context.Context, cfg *config.Config) {
 	}
 
 	listenTunnels := tunnelsByDirection(cfg, config.TunnelDirectionListen)
-	c.logger.Infof("Starting pig listen runtime | Tunnels: %d", len(listenTunnels))
+	c.logger.Infof("Starting pig listen runtime | Listeners: %d", len(listenTunnels))
 
 	for _, tunnelCfg := range listenTunnels {
 		c.startServerTunnel(ctx, tunnelCfg)
@@ -50,18 +50,18 @@ func (c *Controller) startServerTunnel(ctx context.Context, tunnelCfg *config.Tu
 		authenticator common.Authenticator
 	)
 
-	transportStr := "|"
+	transportStr := tunnelCfg.Name
 	if tunnelCfg.ICE == nil || !tunnelCfg.ICE.Enabled {
-		transportStr = fmt.Sprintf("| Transport:%s |", tunnelCfg.Proto)
+		transportStr += fmt.Sprintf(" | Transport:%s", tunnelCfg.Proto)
 	}
 
-	c.logger.Infof("Starting tunnel %s", transportStr)
+	c.logger.Infof("Starting listener %s", transportStr)
 
 	if tunnelCfg.ICE != nil && tunnelCfg.ICE.Enabled {
 		c.logger.Info("ICE enabled | STUN server: ", tunnelCfg.ICE.STUNAddress, " | MQTT broker: ", tunnelCfg.ICE.Signaling.MQTT.Address)
 	}
 	if tunnelCfg.Adapter == nil {
-		c.logger.Fatalf("Listen tunnel %s requires a dedicated adapter", tunnelCfg.Name)
+		c.logger.Fatalf("Listener %s requires a dedicated adapter", tunnelCfg.Name)
 	}
 
 	authenticator, err := c.createServerAuthenticator(tunnelCfg.Auth)

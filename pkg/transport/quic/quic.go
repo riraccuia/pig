@@ -98,6 +98,14 @@ func (c *QuicConn) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
+func (t *QuicTransport) Addr() net.Addr {
+	if t.endpoint == nil {
+		return nil
+	}
+	addr := net.TCPAddrFromAddrPort(t.endpoint.LocalAddr())
+	return addr
+}
+
 func (t *QuicTransport) Accept() (net.Conn, error) {
 	conn, err := t.endpoint.Accept(t.ctx)
 	if err != nil {

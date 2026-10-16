@@ -168,10 +168,10 @@ func ReadToken(r io.Reader) (string, error) {
 		return "", fmt.Errorf("failed to read token length: short read %d", n)
 	}
 	tokenLen := int(buf[0])<<8 | int(buf[1])
-	if tokenLen > n {
+	for tokenLen > n-2 {
 		return "", fmt.Errorf("failed to read token: short read %d", n)
 	}
-	return string(buf[2:n]), nil
+	return string(buf[2 : 2+tokenLen]), nil
 }
 
 // SendToken sends a JWT token over the connection.

@@ -89,11 +89,11 @@ func (c *Controller) AddClientTunnel(ctx context.Context, tunnelCfg *config.Tunn
 }
 
 func (c *Controller) newClientTunnel(ctx context.Context, tunnelCfg *config.TunnelConfig) (*client.Client, func(ctx context.Context) (transport.Conn, error), error) {
-	transportStr := "|"
+	transportStr := tunnelCfg.Name
 	if tunnelCfg.ICE == nil || !tunnelCfg.ICE.Enabled {
-		transportStr = fmt.Sprintf("| Transport:%s |", tunnelCfg.Proto)
+		transportStr += fmt.Sprintf(" | Transport:%s | Target: %s:%d", tunnelCfg.Proto, tunnelCfg.Connect.Address, tunnelCfg.Connect.Port)
 	}
-	c.logger.Infof("Adding tunnel %s %s Target: %s:%d", tunnelCfg.Name, transportStr, tunnelCfg.Connect.Address, tunnelCfg.Connect.Port)
+	c.logger.Infof("Adding tunnel %s", transportStr)
 
 	authenticator, err := c.createClientAuthenticator(tunnelCfg.Auth)
 	if err != nil {

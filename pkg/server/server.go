@@ -60,7 +60,7 @@ func New(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *conf
 
 // NewWithAdapter creates a new Server instance with a caller-supplied adapter.
 func NewWithAdapter(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *config.TunnelConfig, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Server, error) {
-	logger.Infof("Creating server with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), adapter.MTU())
+	logger.Infof("%s | Creating server with adapter %s, IP: %s, MTU %d", tunnelCfg.Name, adapter.Name(), adapter.IP(), adapter.MTU())
 	queueSize := adapterCfg.QueueSize
 	if queueSize <= 0 {
 		queueSize = config.DefaultQueueSize
@@ -100,7 +100,12 @@ func (s *Server) Start(ctx context.Context, listenFunc func(ctx context.Context)
 	}
 	s.listener = listener
 
-	s.logger.Infof("Listening on %s:%d", s.config.Listen.Address, s.config.Listen.Port)
+	listenAddr := "*"
+	if s.listener.Addr() != nil {
+		listenAddr = s.listener.Addr().String()
+	}
+
+	s.logger.Infof("Listening on %s", listenAddr)
 
 	s.wg.Go(func() { s.acceptClients(ctx) })
 	s.wg.Go(func() { s.processInbound(ctx) })

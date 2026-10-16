@@ -106,6 +106,13 @@ func newSharedListener(ctx context.Context, logger common.Logger, bindAddr *net.
 	return l, nil
 }
 
+func (l *sharedListener) Addr() net.Addr {
+	if l.localAddr == nil {
+		return nil
+	}
+	return l.localAddr
+}
+
 // Accept implements the Listener interface.
 func (l *sharedListener) Accept() (net.Conn, error) {
 	select {

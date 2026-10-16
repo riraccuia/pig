@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/riraccuia/pig/pkg/auth/jwt"
 	"github.com/riraccuia/pig/pkg/common"
 )
 
@@ -88,26 +89,9 @@ func NewServerAuthenticator(cfg Config) (common.Authenticator, error) {
 	}, nil
 }
 
-// ReadToken reads a framed token from r.
-func ReadToken(r io.Reader) (string, error) {
-	buf := make([]byte, 1<<11)
-	n, err := r.Read(buf)
-	if err != nil {
-		return "", fmt.Errorf("failed to read token length: %w", err)
-	}
-	if n < 2 {
-		return "", fmt.Errorf("failed to read token length: short read %d", n)
-	}
-	tokenLen := int(buf[0])<<8 | int(buf[1])
-	if tokenLen > n {
-		return "", fmt.Errorf("failed to read token: short read %d", n)
-	}
-	return string(buf[2:n]), nil
-}
-
 // Authenticate reads a framed access token and verifies it.
 func (a *ServerAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter) error {
-	raw, err := ReadToken(rw)
+	raw, err := jwt.ReadToken(rw)
 	if err != nil {
 		return err
 	}

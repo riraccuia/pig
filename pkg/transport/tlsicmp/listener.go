@@ -35,6 +35,13 @@ func newListener(icmpListener transport.Listener, tlsConfig *tls.Config) *listen
 	}
 }
 
+func (l *listener) Addr() net.Addr {
+	if l.icmpListener == nil {
+		return nil
+	}
+	return l.icmpListener.Addr()
+}
+
 // Accept implements transport.Listener.
 func (l *listener) Accept() (net.Conn, error) {
 	// Accept underlying ICMP connection
