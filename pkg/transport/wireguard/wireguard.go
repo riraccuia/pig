@@ -35,6 +35,8 @@ import (
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
+const DefaultHandshakeTimeout = 10 * time.Second
+
 type peerOpts struct {
 	publicKeyHex    string
 	presharedKeyHex string
@@ -88,7 +90,7 @@ func GetListenerFromConn(ctx context.Context, co net.Conn, tunnelCfg *config.Tun
 		return nil, err
 	}
 	bind := conn.NewSimpleBind(udpConn)
-	wgConn, err := newConnWithBind(opts, bind)
+	wgConn, err := newConnWithBindWaitHandshake(ctx, opts, bind)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +116,7 @@ func GetServerListenFunc(logger common.Logger, tunnelCfg *config.TunnelConfig, m
 		if err != nil {
 			return nil, err
 		}
-		return newSharedListener(opts)
+		return newSharedListener(ctx, opts)
 	}
 }
 
@@ -245,6 +247,9 @@ func newConnWithBind(opts *setupOpts, bind wconn.Bind) (*Conn, error) {
 }
 
 func newConnWithBindWaitHandshake(ctx context.Context, opts *setupOpts, bind wconn.Bind) (*Conn, error) {
+	ctx, cancel := context.WithTimeout(ctx, DefaultHandshakeTimeout)
+	defer cancel()
+
 	ft := newFakeTUN("pig-wg", opts.mtu)
 	devLogger := device.NewLogger(device.LogLevelError, "wg: ")
 	dev := device.NewDevice(ft, bind, devLogger)
@@ -272,21 +277,31 @@ func newConnWithBindWaitHandshake(ctx context.Context, opts *setupOpts, bind wco
 		return nil, fmt.Errorf("failed to set keepalive: %w", err)
 	}
 
+	loopTimer := time.NewTimer(0)
+	defer loopTimer.Stop()
+
 outer:
-	for !common.IsContextDone(ctx) {
-		time.Sleep(time.Second * 1)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-loopTimer.C:
+		}
 		cfg, err := dev.IpcGet()
 		if err != nil {
 			return nil, err
 		}
 		for _, line := range strings.Split(cfg, "\n") {
-			if strings.HasPrefix(line, "last_handshake_time_sec=") {
-				sec, _ := strconv.ParseInt(strings.TrimPrefix(line, "last_handshake_time_sec="), 10, 64)
-				if sec > 0 {
-					break outer
-				}
+			if !strings.HasPrefix(line, "last_handshake_time_sec=") {
+				continue
 			}
+			sec, _ := strconv.ParseInt(strings.TrimPrefix(line, "last_handshake_time_sec="), 10, 64)
+			if sec > 0 {
+				break outer
+			}
+			break
 		}
+		loopTimer.Reset(time.Millisecond * 500)
 	}
 
 	err = dev.IpcSet(fmt.Sprintf("public_key=%s\npersistent_keepalive_interval=%d\n", opts.peers[0].publicKeyHex, opts.peers[0].keepalive))

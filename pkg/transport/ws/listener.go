@@ -96,6 +96,11 @@ func (t *WSListener) ListenWithListener(l net.Listener, tlsConfig *tls.Config) e
 
 // Listen starts the WebSocket server on the given address.
 func (t *WSListener) Listen(network, address string, tlsConfig *tls.Config) error {
+	ln, err := net.Listen(network, address)
+	if err != nil {
+		return err
+	}
+
 	t.server = &http.Server{
 		Addr:      address,
 		Handler:   t,
@@ -103,7 +108,7 @@ func (t *WSListener) Listen(network, address string, tlsConfig *tls.Config) erro
 	}
 
 	if tlsConfig != nil {
-		return t.server.ListenAndServeTLS("", "")
+		return t.server.ServeTLS(ln, "", "")
 	}
-	return t.server.ListenAndServe()
+	return t.server.Serve(ln)
 }

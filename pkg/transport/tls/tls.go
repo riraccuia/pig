@@ -56,9 +56,14 @@ func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, tlsCon
 			Port: config.Connect.SrcPort,
 		}
 
-		addr := net.JoinHostPort(config.Connect.Address, strconv.Itoa(config.Connect.Port))
+		joinedAddr := net.JoinHostPort(config.Connect.Address, strconv.Itoa(config.Connect.Port))
+		raddr, err := net.ResolveTCPAddr("tcp", joinedAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve TCP address: %w", err)
+		}
+		networkStr := transport.GetTCPNetworkString(raddr.IP)
 
-		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig.Clone())
+		conn, err := tls.DialWithDialer(dialer, networkStr, raddr.String(), tlsConfig.Clone())
 		if err != nil {
 			return nil, fmt.Errorf("failed to establish TLS connection: %w", err)
 		}
@@ -71,8 +76,13 @@ func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, tlsCon
 
 func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func(ctx context.Context) (transport.Listener, error) {
 	return func(ctx context.Context) (transport.Listener, error) {
-		addr := net.JoinHostPort(config.Listen.Address, strconv.Itoa(config.Listen.Port))
-		listener, err := tls.Listen("tcp", addr, tlsConfig.Clone())
+		joinedAddr := net.JoinHostPort(config.Listen.Address, strconv.Itoa(config.Listen.Port))
+		laddr, err := net.ResolveTCPAddr("tcp", joinedAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve TCP address: %w", err)
+		}
+		networkStr := transport.GetTCPNetworkString(laddr.IP)
+		listener, err := tls.Listen(networkStr, laddr.String(), tlsConfig.Clone())
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS listener: %w", err)
 		}

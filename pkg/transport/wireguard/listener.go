@@ -15,6 +15,7 @@
 package wireguard
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -31,11 +32,12 @@ const (
 // Listener accepts WireGuard peers over a shared UDP socket (pion transport demux).
 // Each Accept builds a Conn with DemuxBind for that remote.
 type Listener struct {
+	ctx  context.Context
 	ln   net.Listener
 	opts *setupOpts
 }
 
-func newSharedListener(opts *setupOpts) (*Listener, error) {
+func newSharedListener(ctx context.Context, opts *setupOpts) (*Listener, error) {
 	lc := udp.ListenConfig{
 		AcceptFilter: func(b []byte) bool {
 			if len(b) < 4 {
@@ -49,6 +51,7 @@ func newSharedListener(opts *setupOpts) (*Listener, error) {
 		return nil, fmt.Errorf("wireguard listen: %w", err)
 	}
 	return &Listener{
+		ctx:  ctx,
 		ln:   ln,
 		opts: opts,
 	}, nil
@@ -59,7 +62,7 @@ func (l *Listener) Accept() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	c, err := l.acceptPeer(raw)
+	c, err := l.acceptPeer(l.ctx, raw)
 	if err != nil {
 		_ = raw.Close()
 		return nil, err
@@ -67,7 +70,7 @@ func (l *Listener) Accept() (net.Conn, error) {
 	return c, nil
 }
 
-func (l *Listener) acceptPeer(raw net.Conn) (*Conn, error) {
+func (l *Listener) acceptPeer(ctx context.Context, raw net.Conn) (*Conn, error) {
 	remote := raw.RemoteAddr()
 	if remote == nil {
 		return nil, fmt.Errorf("wireguard accept: missing remote addr")
@@ -83,7 +86,7 @@ func (l *Listener) acceptPeer(raw net.Conn) (*Conn, error) {
 
 	bind := conn.NewSimpleBind(raw)
 
-	wgConn, err := newConnWithBind(&opts, bind)
+	wgConn, err := newConnWithBindWaitHandshake(ctx, &opts, bind)
 	if err != nil {
 		return nil, err
 	}

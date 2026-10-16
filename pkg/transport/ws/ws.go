@@ -30,7 +30,7 @@ import (
 )
 
 func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config) (transport.Conn, error) {
-	wsConn, err := DialConn(ctx, conn, conn.RemoteAddr().String(), tlsConfig)
+	wsConn, err := DialConn(ctx, conn, conn.RemoteAddr().String(), tlsConfig.Clone())
 	if err != nil {
 		return nil, fmt.Errorf("failed to establish WebSocket connection: %w", err)
 	}
@@ -40,7 +40,7 @@ func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Tunnel
 func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config) (transport.Listener, error) {
 	tr := NewWSListener()
 	l := ice.NewListenerConn(co, nil)
-	go tr.ListenWithListener(l, tlsConfig)
+	go tr.ListenWithListener(l, tlsConfig.Clone())
 	return tr, nil
 }
 
@@ -50,7 +50,7 @@ func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, tlsCon
 			ctx,
 			config.Connect.SrcPort,
 			net.JoinHostPort(config.Connect.Address, strconv.Itoa(config.Connect.Port)),
-			tlsConfig,
+			tlsConfig.Clone(),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to establish WebSocket connection: %w", err)
@@ -61,11 +61,17 @@ func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, tlsCon
 
 func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func(ctx context.Context) (transport.Listener, error) {
 	return func(ctx context.Context) (transport.Listener, error) {
+		joinedAddr := net.JoinHostPort(config.Listen.Address, strconv.Itoa(config.Listen.Port))
+		laddr, err := net.ResolveTCPAddr("tcp", joinedAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve TCP address: %w", err)
+		}
+		networkStr := transport.GetTCPNetworkString(laddr.IP)
 		tr := NewWSListener()
 		go func() {
 			err := tr.Listen(
-				"ws",
-				net.JoinHostPort(config.Listen.Address, strconv.Itoa(config.Listen.Port)),
+				networkStr,
+				laddr.String(),
 				tlsConfig.Clone(),
 			)
 			if err != nil && err != http.ErrServerClosed {

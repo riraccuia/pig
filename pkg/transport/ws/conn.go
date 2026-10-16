@@ -131,7 +131,10 @@ func Dial(ctx context.Context, srcPort int, address string, tlsConfig *tls.Confi
 		return nil, fmt.Errorf("failed to dial websocket: %w", err)
 	}
 
-	remoteAddr, _ := net.ResolveTCPAddr("tcp", address)
+	remoteAddr, err := net.ResolveTCPAddr("tcp", address)
+	if err != nil {
+		return nil, err
+	}
 
 	netConn := websocket.NetConn(ctx, wsConn, websocket.MessageBinary)
 
