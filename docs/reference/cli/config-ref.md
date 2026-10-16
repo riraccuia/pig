@@ -279,17 +279,15 @@ ICESignalingOpts
 +----------------+-------------------+----------+---------+--------------------------------------------------+
 
 WireGuardPeer
-+---------------+-----------+----------+---------+-----------------------------------------------------------+
-| Field         | Type      | Optional | Default | Description                                               |
-+---------------+-----------+----------+---------+-----------------------------------------------------------+
-| public_key    | string    | false    | -       | Peer WireGuard public key (standard base64 encoding of 32 |
-|               |           |          |         | bytes).                                                   |
-| preshared_key | string?   | true     | -       | Optional WireGuard preshared key for this peer (standard  |
-|               |           |          |         | base64 encoding of 32 bytes).                             |
-| allowed_ips   | []string? | true     | -       | AllowedIPs for this peer as CIDR prefixes. Empty falls    |
-|               |           |          |         | back to wireguard.allowed_ips.                            |
-| keepalive     | int?      | true     | -       | Persistent keepalive interval in seconds for this peer.   |
-|               |           |          |         | Negative means unset; falls back to wireguard.keepalive.  |
-+---------------+-----------+----------+---------+-----------------------------------------------------------+
++---------------+---------+----------+---------+-------------------------------------------------------------+
+| Field         | Type    | Optional | Default | Description                                                 |
++---------------+---------+----------+---------+-------------------------------------------------------------+
+| public_key    | string  | false    | -       | Peer WireGuard public key (standard base64 encoding of 32   |
+|               |         |          |         | bytes).                                                     |
+| preshared_key | string? | true     | -       | Optional WireGuard preshared key for this peer (standard    |
+|               |         |          |         | base64 encoding of 32 bytes).                               |
+| keepalive     | int?    | true     | -       | Persistent keepalive interval in seconds for this peer.     |
+|               |         |          |         | Negative means unset; falls back to wireguard.keepalive.    |
++---------------+---------+----------+---------+-------------------------------------------------------------+
 
 ```

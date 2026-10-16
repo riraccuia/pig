@@ -35,7 +35,10 @@ import (
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-const DefaultHandshakeTimeout = 10 * time.Second
+var (
+	DefaultHandshakeTimeout = 10 * time.Second
+	DefaultWGAllowedIPs     = []string{"0.0.0.0/0", "::/0"}
+)
 
 type peerOpts struct {
 	publicKeyHex    string
@@ -206,7 +209,7 @@ func peerOptsFromConfig(p config.WireGuardPeer) (peerOpts, error) {
 		publicKeyHex:    pubHex,
 		presharedKeyHex: pskHex,
 		keepalive:       p.Keepalive,
-		allowedIPs:      append([]string(nil), p.AllowedIPs...),
+		allowedIPs:      append([]string(nil), DefaultWGAllowedIPs...),
 	}, nil
 }
 

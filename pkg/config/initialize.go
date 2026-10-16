@@ -319,7 +319,6 @@ func (c *WireGuardConfig) Initialize(direction TunnelDirection) error {
 			{
 				PublicKey:    pubKeyFromEnv,
 				PresharedKey: EnvWGPSK.Get(),
-				AllowedIPs:   DefaultWGAllowedIPs,
 				Keepalive:    DefaultWGKeepaliveConnect,
 			},
 		}
@@ -336,14 +335,6 @@ func (c *WireGuardConfig) Initialize(direction TunnelDirection) error {
 		}
 		if c.Peers[i].Keepalive == 0 && direction == TunnelDirectionConnect {
 			c.Peers[i].Keepalive = DefaultWGKeepaliveConnect
-		}
-		if len(c.Peers[i].AllowedIPs) == 0 {
-			c.Peers[i].AllowedIPs = append([]string(nil), DefaultWGAllowedIPs...)
-		}
-		for _, cidr := range c.Peers[i].AllowedIPs {
-			if _, _, err := net.ParseCIDR(cidr); err != nil {
-				return fmt.Errorf("invalid wireguard allowed_ips %q: %w", cidr, err)
-			}
 		}
 	}
 

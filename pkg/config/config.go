@@ -240,9 +240,6 @@ type WireGuardPeer struct {
 	// desc=Optional WireGuard preshared key for this peer (standard base64 encoding of 32 bytes).
 	PresharedKey string `toml:"preshared_key" json:"preshared_key"`
 	// optional=true
-	// desc=AllowedIPs for this peer as CIDR prefixes. Empty falls back to wireguard.allowed_ips.
-	AllowedIPs []string `toml:"allowed_ips" json:"allowed_ips"`
-	// optional=true
 	// desc=Persistent keepalive interval in seconds for this peer. Negative means unset; falls back to wireguard.keepalive.
 	Keepalive int `toml:"keepalive" json:"keepalive"`
 }

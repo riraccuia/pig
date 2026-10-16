@@ -112,7 +112,6 @@ func (Config) DescribeFields() map[string]common.FieldMeta {
 		"tunnels[].trust.mtls.trust_pem":                  {Optional: true, Desc: "TrustPEM is the path to the trust bundle for MTLS, if not provided, the system CA will be used. In client mode, this is used to validate the server certificate. In server mode, this is used to validate client certificates."},
 		"tunnels[].trust.wireguard":                       {Optional: true, Desc: "WireGuard configuration. Required when proto is \"wg\"."},
 		"tunnels[].trust.wireguard.peers":                 {Optional: true, Desc: "WireGuard peers. On connect, peers[0] is the remote peer. On listen, every entry is an authorized client."},
-		"tunnels[].trust.wireguard.peers[].allowed_ips":   {Optional: true, Desc: "AllowedIPs for this peer as CIDR prefixes. Empty falls back to wireguard.allowed_ips."},
 		"tunnels[].trust.wireguard.peers[].keepalive":     {Optional: true, Desc: "Persistent keepalive interval in seconds for this peer. Negative means unset; falls back to wireguard.keepalive."},
 		"tunnels[].trust.wireguard.peers[].preshared_key": {Optional: true, Desc: "Optional WireGuard preshared key for this peer (standard base64 encoding of 32 bytes)."},
 		"tunnels[].trust.wireguard.peers[].public_key":    {Desc: "Peer WireGuard public key (standard base64 encoding of 32 bytes)."},
