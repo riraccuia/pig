@@ -15,19 +15,41 @@
 package ice
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice/message"
-	"github.com/riraccuia/pig/pkg/ice/signaling"
 	"github.com/riraccuia/pig/pkg/stun"
+	"github.com/riraccuia/pig/pkg/transport"
 )
 
-func (pc *PathConnector) GetConnectPaths(ctx context.Context, target *config.ConnectTarget) (cp []*ConnectPath, scheduledAt time.Time, err error) {
-	localEndpoints, err := GetLocalEndpoints("", pc.excludedAdapters)
+// selectConnectProtos selects the topmost unique protos by underlying network.
+// E.g. if we have quic and dtls, that are both UDP-based, we only need to keep the preferred one.
+// Protocols with lower component IDs are preferred.
+func selectConnectProtos(protos []transport.ICEProtocolDefinition) []transport.ICEProtocolDefinition {
+	out := slices.SortedStableFunc(slices.Values(protos), func(a, b transport.ICEProtocolDefinition) int {
+		return cmp.Compare(a.ComponentID, b.ComponentID)
+	})
+	// only keep the topmost unique protos by underlying network
+	m := make(map[string]transport.ICEProtocolDefinition)
+	out = slices.DeleteFunc(out, func(i transport.ICEProtocolDefinition) bool {
+		if _, ok := m[i.Network]; ok {
+			return true
+		}
+		m[i.Network] = i
+		return false
+	})
+	return out
+}
+
+func (pc *PathFinder) GetConnectPaths(ctx context.Context, target config.ConnectTarget, excludedAdapters *sync.Map) (cp []*ConnectPath, scheduledAt time.Time, err error) {
+	localEndpoints, err := GetLocalEndpoints("", excludedAdapters)
 	if err != nil {
 		return nil, time.Time{}, err
 	}
@@ -38,15 +60,14 @@ func (pc *PathConnector) GetConnectPaths(ctx context.Context, target *config.Con
 	var (
 		offerCandidates []message.ICECandidate
 		localInfo       map[localCandidateKey]localCandidateInfo
+		protos          = selectConnectProtos(pc.protos)
 	)
 
-	offerCandidates, localInfo = buildLocalCandidates(pc.pigProtos, localEndpoints, uint16(target.SrcPort))
-	offerCandidates = append(offerCandidates, buildReflexiveCandidates(pc.pigProtos, localEndpoints, localInfo, pc.opts)...)
+	offerCandidates, localInfo = pc.buildLocalCandidates(localEndpoints, uint16(target.SrcPort), protos)
+	offerCandidates = append(offerCandidates, pc.buildReflexiveCandidates(ctx, localEndpoints, localInfo, protos)...)
 	offerCandidates = dedupCandidates(offerCandidates)
 
-	var (
-		offer, answer *message.ICEMessage
-	)
+	var offer, answer *message.ICEMessage
 
 	offer, err = message.GenerateICEMessage(message.ICEMessageTypeOffer, offerCandidates)
 	if err != nil {
@@ -57,7 +78,7 @@ func (pc *PathConnector) GetConnectPaths(ctx context.Context, target *config.Con
 	// natType = 2 // TODO: remove this
 	offer.NATType = natType
 
-	answer, err = signaling.GatherICECandidates(ctx, pc.opts, target.Address, offer)
+	answer, err = pc.signaler.GatherICECandidates(ctx, target.Address, offer)
 	if err != nil {
 		return
 	}
@@ -78,7 +99,7 @@ func (pc *PathConnector) GetConnectPaths(ctx context.Context, target *config.Con
 
 	for _, candidate := range answer.Candidates {
 		targetIP := net.ParseIP(candidate.Address)
-		for _, tr := range pc.pigProtos {
+		for _, tr := range protos {
 			if tr.Network != candidate.Protocol {
 				continue
 			}
@@ -132,7 +153,8 @@ func (pc *PathConnector) GetConnectPaths(ctx context.Context, target *config.Con
 	T4 := offer.Timestamp[1]
 
 	// print all Ts to trace log
-	pc.opts.Logger.Tracef("ICE: T1=%v, T2=%v, T3=%v, T4=%v",
+	pc.opts.Logger.Tracef(
+		"ICE: T1=%v, T2=%v, T3=%v, T4=%v",
 		T1,
 		T2,
 		T3,
@@ -151,7 +173,7 @@ func (pc *PathConnector) GetConnectPaths(ctx context.Context, target *config.Con
 
 	// adjust the connect offset to the one-way latency
 	// this way we should be more accurate in case we need a further attempt
-	pc.SetConnectOffset(oneWayLatency)
+	// pc.SetConnectOffset(oneWayLatency)
 
 	scheduledAt = time.UnixMilli(answer.Timestamp[1] - clockOffset).Add(offer.ConnectOffsetDuration)
 

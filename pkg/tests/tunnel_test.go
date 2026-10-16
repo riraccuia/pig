@@ -46,6 +46,10 @@ func NewMockTunnelAdapter(ip net.IP) *MockTunnelAdapter {
 	}
 }
 
+func (m *MockTunnelAdapter) MTU() int {
+	return 1300
+}
+
 func (m *MockTunnelAdapter) Read(b []byte) (int, error) {
 	data := <-m.writeChan
 	copy(b, data)
@@ -386,7 +390,7 @@ func getServerQUICListenFunc(cfg *config.Config) func(ctx context.Context) (tran
 		if err != nil {
 			return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
 		}
-		return qt.NewQuicTransport(ctx, endpoint), nil
+		return qt.NewQuicTransport(endpoint), nil
 	}
 }
 

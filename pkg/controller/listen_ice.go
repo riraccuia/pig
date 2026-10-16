@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,24 +28,32 @@ import (
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice"
 	"github.com/riraccuia/pig/pkg/ice/signaling"
-	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/transport"
 	"github.com/riraccuia/pig/pkg/transport/dtls"
 	qt "github.com/riraccuia/pig/pkg/transport/quic-go"
 	trtls "github.com/riraccuia/pig/pkg/transport/tls"
 	"github.com/riraccuia/pig/pkg/transport/tlsicmp"
+	"github.com/riraccuia/pig/pkg/transport/wireguard"
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
 
-func (c *Controller) getICEListenFunc(cfg *config.TunnelConfig) (func(ctx context.Context) (transport.Listener, error), error) {
+func (c *Controller) getICEListenFunc(cfg *config.TunnelConfig, mtu int) (func(ctx context.Context) (transport.Listener, error), error) {
 	listenPort := uint16(cfg.Listen.Port)
 	if listenPort == 0 {
 		// use a random port
 		listenPort = uint16(rand.Intn(65535-1024) + 1024)
 	}
-	c.logger.Infof("Starting ICE | Candidate protocols: %v | Listen port: %d", strings.Join(cfg.ICE.Protos, ", "), listenPort)
+
+	sigOpts := signaling.GetOptions(c.logger, cfg.ICE)
+	sigOpts.Dialer = c.newBypassDialer(time.Second * 5)
+
+	pc, err := ice.NewPathFinder(sigOpts, cfg.ICE.UseProtos())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create path connector: %w", err)
+	}
 	return func(ctx context.Context) (transport.Listener, error) {
-		offerPathsChan, err := ice.NewPathConnector(signaling.GetOptions(c.logger, cfg.ICE), cfg.ICE.UseProtos(), c.adapters).GetListenPaths(ctx, listenPort)
+		c.logger.Infof("Starting ICE | Accepted protocols: %v | Listen port: %d", strings.Join(cfg.ICE.Protos, ", "), listenPort)
+		offerPathsChan, err := pc.GetListenPaths(ctx, listenPort, c.adapters)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get listen paths: %w", err)
 		}
@@ -56,24 +63,24 @@ func (c *Controller) getICEListenFunc(cfg *config.TunnelConfig) (func(ctx contex
 			return nil, err
 		}
 		iceListener := ice.NewListener(ctx, nil)
-		go c.receiveICEServerConnectPaths(ctx, cfg, cfg.Adapter.BindAdapter, cfg.Adapter.MTU, tlsConfig, offerPathsChan, iceListener)
+		go c.receiveICEServerConnectPaths(ctx, cfg, mtu, tlsConfig, offerPathsChan, iceListener)
 		return iceListener, nil
 	}, nil
 }
 
-func (c *Controller) receiveICEServerConnectPaths(ctx context.Context, cfg *config.TunnelConfig, bindAdapter string, mtu int, tlsConfig *tls.Config, offerPathsChan <-chan *ice.OfferPaths, pigListener *ice.Listener) {
+func (c *Controller) receiveICEServerConnectPaths(ctx context.Context, cfg *config.TunnelConfig, mtu int, tlsConfig *tls.Config, offerPathsChan <-chan *ice.OfferPaths, pigListener *ice.Listener) {
 	for {
 		select {
 		case <-ctx.Done():
 			c.logger.Errorf("Aborting listen paths processor: %v", ctx.Err())
 			return
 		case offerPaths := <-offerPathsChan:
-			go c.processICEServerConnectPaths(ctx, cfg, bindAdapter, mtu, tlsConfig, offerPaths, pigListener)
+			go c.processICEServerConnectPaths(ctx, cfg, mtu, tlsConfig, offerPaths, pigListener)
 		}
 	}
 }
 
-func (c *Controller) processICEServerConnectPaths(ctx context.Context, cfg *config.TunnelConfig, bindAdapter string, mtu int, tlsConfig *tls.Config, offerPaths *ice.OfferPaths, pigListener *ice.Listener) {
+func (c *Controller) processICEServerConnectPaths(ctx context.Context, cfg *config.TunnelConfig, mtu int, tlsConfig *tls.Config, offerPaths *ice.OfferPaths, pigListener *ice.Listener) {
 	var (
 		err          error
 		nominatedPtr atomic.Pointer[ice.ConnectPath]
@@ -95,7 +102,7 @@ func (c *Controller) processICEServerConnectPaths(ctx context.Context, cfg *conf
 	for _, cp := range offerPaths.ConnectPaths {
 		path := cp
 		wg.Go(func() {
-			if c.connectICEListenPath(bindCtx, path, bindAdapter, &nominatedPtr) {
+			if c.connectICEListenPath(bindCtx, path, cfg.Adapter.BindAdapter, &nominatedPtr) {
 				// the controlling side nominated the path, cancel the context
 				bindCancel()
 			}
@@ -114,17 +121,17 @@ func (c *Controller) processICEServerConnectPaths(ctx context.Context, cfg *conf
 
 	var l transport.Listener
 	switch selectedPath.Protocol.Protocol {
-	case "quic":
-		co := network.NewUDPPacketConn(selectedPath.Conn.(*net.UDPConn))
-		l, err = qt.GetListenerFromConn(ctx, co, cfg, tlsConfig)
-	case "ws":
+	case string(config.TransportQUIC):
+		l, err = qt.GetListenerFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
+	case string(config.TransportWS):
 		l, err = ws.GetListenerFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
-	case "dtls":
-		co := network.NewUDPPacketConn(selectedPath.Conn.(*net.UDPConn))
-		l, err = dtls.GetListenerFromConn(ctx, co, cfg, tlsConfig, mtu)
-	case "tls":
+	case string(config.TransportDTLS):
+		l, err = dtls.GetListenerFromConn(ctx, selectedPath.Conn, cfg, tlsConfig, mtu)
+	case string(config.TransportTLS):
 		l, err = trtls.GetListenerFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
-	case "tls-in-icmp":
+	case string(config.TransportWG):
+		l, err = wireguard.GetListenerFromConn(ctx, selectedPath.Conn, cfg, mtu)
+	case string(config.TransportTLSICMP):
 		l, err = tlsicmp.GetListenerFromConn(ctx, selectedPath.Conn, cfg, tlsConfig)
 	}
 	if err != nil {

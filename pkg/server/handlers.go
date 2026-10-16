@@ -17,14 +17,18 @@ package server
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/network"
+	"github.com/riraccuia/pig/pkg/transport"
 )
 
 func (client *ClientTunnel) handleInbound(ctx context.Context, connOrStream io.ReadWriteCloser) {
 	// assign a queue to the client
 	inbound := client.parent.getInboundPktQueue()
+	// load the idle timeout settings from the parent config
+	idleTimeout := time.Duration(client.parent.config.IdleTimeout) * time.Second
 
 	const readBufferSize = 64 * 1024 // 64KB buffer
 	buffer := make([]byte, readBufferSize)
@@ -35,6 +39,9 @@ func (client *ClientTunnel) handleInbound(ctx context.Context, connOrStream io.R
 			return
 		}
 
+		if idleTimeout > 0 {
+			connOrStream.(transport.DeadLiner).SetReadDeadline(time.Now().Add(idleTimeout))
+		}
 		// Read more data
 		n, err := connOrStream.Read(buffer[len(unprocessed):])
 		if err != nil {
@@ -67,8 +74,8 @@ func (client *ClientTunnel) handleInbound(ctx context.Context, connOrStream io.R
 				break // Partial packet, wait for more data
 			}
 
-			if totalLen > client.parent.adapterCfg.MTU {
-				client.logger.Debugf("IPv=%d,len=%d,proto=%d | %d%s->%s:%d | discarded, too long",
+			if totalLen > client.parent.adapter.MTU() {
+				client.logger.Debugf("IPv=%d,len=%d,proto=%d | %d:%s->%s:%d | discarded, too long",
 					prePkt.Version(), totalLen, prePkt.Protocol(),
 					prePkt.SourcePort(), prePkt.SourceIP(),
 					prePkt.DestinationIP(), prePkt.DestinationPort(),

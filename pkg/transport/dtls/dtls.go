@@ -19,55 +19,44 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"strconv"
+	"time"
 
-	"github.com/pion/dtls/v3"
+	"github.com/pion/dtls/v4"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/ice"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
 // GetClientFromConn creates a DTLS client connection from an existing connection.
 func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config, mtu int) (transport.Conn, error) {
-	dtlsConfig := &dtls.Config{
-		InsecureSkipVerify: tlsConfig.InsecureSkipVerify,
-		ServerName:         tlsConfig.ServerName,
-		MTU:                mtu,
-	}
-
-	if len(tlsConfig.Certificates) > 0 {
-		dtlsConfig.Certificates = []tls.Certificate{tlsConfig.Certificates[0]}
-	}
-
-	if tlsConfig.RootCAs != nil {
-		dtlsConfig.RootCAs = tlsConfig.RootCAs
-	}
-
-	dtlsConn, err := DialConn(ctx, conn, conn.RemoteAddr().String(), dtlsConfig)
+	opts := ConvertToDTLSClientOptions(tlsConfig, mtu)
+	packetConn := network.ConnectedUdpToPacketConn(conn.(*net.UDPConn))
+	dtlsConn, err := DialConn(ctx, packetConn, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to establish DTLS connection: %w", err)
 	}
-	return dtlsConn, nil
+	idleTimeout := time.Duration(config.IdleTimeout) * time.Second
+	if idleTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, idleTimeout)
+		defer cancel()
+	}
+	err = dtlsConn.HandshakeContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to handshake: %w", err)
+	}
+	return NewDTLSConn(dtlsConn), nil
 }
 
 // GetListenerFromConn creates a DTLS listener from an existing connection.
 func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.TunnelConfig, tlsConfig *tls.Config, mtu int) (transport.Listener, error) {
-	dtlsConfig := &dtls.Config{
-		InsecureSkipVerify: tlsConfig.InsecureSkipVerify,
-		ServerName:         tlsConfig.ServerName,
-		MTU:                mtu,
-	}
-
-	if len(tlsConfig.Certificates) > 0 {
-		dtlsConfig.Certificates = []tls.Certificate{tlsConfig.Certificates[0]}
-	}
-
-	if tlsConfig.ClientCAs != nil {
-		dtlsConfig.ClientCAs = tlsConfig.ClientCAs
-	}
-
-	listenerConn := ice.NewPacketListenerConn(co, nil)
-	dtlsListener, err := dtls.NewListener(listenerConn, dtlsConfig)
+	opts := ConvertToDTLSServerOptions(tlsConfig, mtu)
+	packetConn := network.ConnectedUdpToPacketConn(co.(*net.UDPConn))
+	listenerConn := ice.NewPacketListenerConn(packetConn, nil)
+	dtlsListener, err := dtls.NewListener(listenerConn, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DTLS listener: %w", err)
 	}
@@ -77,53 +66,56 @@ func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Tunnel
 // GetClientDialFunc returns a function that creates DTLS client connections.
 func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config, mtu int) func(ctx context.Context) (transport.Conn, error) {
 	return func(ctx context.Context) (transport.Conn, error) {
-		dtlsConfig := &dtls.Config{
-			InsecureSkipVerify: tlsConfig.InsecureSkipVerify,
-			ServerName:         tlsConfig.ServerName,
-			MTU:                mtu,
+		udpAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(config.Connect.Address, strconv.Itoa(config.Connect.Port)))
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve address: %w", err)
+		}
+		networkStr := transport.GetUDPNetworkString(udpAddr.IP)
+
+		laddr := &net.UDPAddr{
+			Port: config.Connect.SrcPort,
 		}
 
-		if len(tlsConfig.Certificates) > 0 {
-			dtlsConfig.Certificates = []tls.Certificate{tlsConfig.Certificates[0]}
-		}
-
-		if tlsConfig.RootCAs != nil {
-			dtlsConfig.RootCAs = tlsConfig.RootCAs
-		}
-
-		conn, err := Dial(
+		opts := ConvertToDTLSClientOptions(tlsConfig, mtu)
+		dtlsConn, err := Dial(
 			ctx,
-			fmt.Sprintf("%s:%d", config.Connect.Address, config.Connect.Port),
-			dtlsConfig,
+			networkStr,
+			laddr,
+			udpAddr,
+			opts...,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to establish DTLS connection: %w", err)
 		}
-		return conn, nil
+		idleTimeout := time.Duration(config.IdleTimeout) * time.Second
+		if idleTimeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, idleTimeout)
+			defer cancel()
+		}
+		err = dtlsConn.HandshakeContext(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to handshake: %w", err)
+		}
+		return NewDTLSConn(dtlsConn), nil
 	}
 }
 
 // GetServerListenFunc returns a function that creates DTLS server listeners.
 func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config, mtu int) func(ctx context.Context) (transport.Listener, error) {
 	return func(ctx context.Context) (transport.Listener, error) {
-		dtlsConfig := &dtls.Config{
-			InsecureSkipVerify: tlsConfig.InsecureSkipVerify,
-			ServerName:         tlsConfig.ServerName,
-			MTU:                mtu,
-		}
+		opts := ConvertToDTLSServerOptions(tlsConfig, mtu)
 
-		if len(tlsConfig.Certificates) > 0 {
-			dtlsConfig.Certificates = []tls.Certificate{tlsConfig.Certificates[0]}
+		udpAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(config.Listen.Address, strconv.Itoa(config.Listen.Port)))
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve address: %w", err)
 		}
-
-		if tlsConfig.ClientCAs != nil {
-			dtlsConfig.ClientCAs = tlsConfig.ClientCAs
-		}
+		networkStr := transport.GetUDPNetworkString(udpAddr.IP)
 
 		listener, err := Listen(
-			"udp",
-			fmt.Sprintf("%s:%d", config.Listen.Address, config.Listen.Port),
-			dtlsConfig,
+			networkStr,
+			udpAddr,
+			opts...,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create DTLS listener: %w", err)

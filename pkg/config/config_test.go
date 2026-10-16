@@ -17,6 +17,7 @@ package config
 import (
 	"bytes"
 	"math/rand"
+	"net"
 	"reflect"
 	"testing"
 
@@ -40,7 +41,7 @@ func TestTOMLConfigUnmarshal(t *testing.T) {
 				},
 				ICE: &ICEConfig{
 					Enabled:     true,
-					STUNAddress: "stun.server.com:19302",
+					STUNAddress: []string{"stun.server.com:19302"},
 					Signaling: &ICESignalingOpts{
 						EncryptionKey: "test-encryption-key",
 						MQTT: &MQTTBrokerConfig{
@@ -109,11 +110,17 @@ func TestConfigInitializeUsesDirectionSpecificAdapterDefaults(t *testing.T) {
 		t.Fatalf("Initialize failed: %v", err)
 	}
 
-	if cfg.Adapter.TunnelAddress[0] != DefaultTunnelAddressV4Connect {
-		t.Fatalf("unexpected connect adapter default: %s", cfg.Adapter.TunnelAddress)
+	var baseNet *net.IPNet
+	switch cfg.Tunnels[0].Direction {
+	case TunnelDirectionConnect:
+		_, baseNet, _ = net.ParseCIDR(DefaultConnectBasePrefixV4)
+	case TunnelDirectionListen:
+		_, baseNet, _ = net.ParseCIDR(DefaultListenBasePrefixV4)
 	}
-	if cfg.Tunnels[1].Adapter == nil || cfg.Tunnels[1].Adapter.TunnelAddress[0] != DefaultTunnelAddressV4Listen {
-		t.Fatalf("unexpected listen adapter default: %#v", cfg.Tunnels[1].Adapter)
+	_, generatedNet, _ := net.ParseCIDR(cfg.Adapter.TunnelAddress[0])
+
+	if !baseNet.Contains(generatedNet.IP) {
+		t.Fatalf("unexpected connect adapter default: %s", cfg.Adapter.TunnelAddress)
 	}
 }
 

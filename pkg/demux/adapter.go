@@ -110,6 +110,7 @@ func (a *Adapter) Close() error {
 	a.cancel()
 	return nil
 }
+func (a *Adapter) MTU() int           { return a.parent.adapter.MTU() }
 func (a *Adapter) IP() net.IP         { return a.parent.adapter.IP() }
 func (a *Adapter) IP6() net.IP        { return a.parent.adapter.IP6() }
 func (a *Adapter) IPNet() *net.IPNet  { return a.parent.adapter.IPNet() }

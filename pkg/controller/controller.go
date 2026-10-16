@@ -31,16 +31,16 @@ import (
 
 type Controller struct {
 	sync.WaitGroup
-	cfg            *config.Config
-	logger         common.Logger
-	routeManager   route.Manager
-	scriptExecutor *script.Executor
-	clientAdapter  common.TunnelAdapter
-	demux          *demux.Demux
-	routeRequests  chan routeRequest
-	tunnels        *sync.Map
-	adapters       *sync.Map
-	bufferPool     common.BufferPool
+	cfg                 *config.Config
+	logger              common.Logger
+	routeManager        route.Manager
+	scriptExecutor      *script.Executor
+	sharedClientAdapter common.TunnelAdapter
+	demux               *demux.Demux
+	routeRequests       chan routeRequest
+	tunnels             *sync.Map
+	adapters            *sync.Map
+	bufferPool          common.BufferPool
 }
 
 func New() *Controller {
@@ -55,9 +55,9 @@ func (c *Controller) Start(ctx context.Context) {
 	if c.cfg == nil {
 		c.logger.Fatal("no config loaded")
 	}
-	c.ManageRoutes(ctx)
-	c.StartClient(ctx)
-	c.StartServer(ctx)
+	c.manageRoutes(ctx)
+	c.startClient(ctx)
+	c.startServer(ctx)
 }
 
 func (c *Controller) WithLogger(logger common.Logger) *Controller {
@@ -136,7 +136,25 @@ func (c *Controller) createAdapter(cfg *config.AdapterConfig, multiQueue bool) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adapter: %w", err)
 	}
+	c.adapters.Store(a.Name(), a)
+	c.routeManager.ExcludeAdapterForLookup(a.Name())
 	return a, nil
+}
+
+func (c *Controller) Close() {
+	c.logger.Infof("Route manager shutting down, cleaning up all routes")
+	if err := c.routeManager.Cleanup(); err != nil {
+		c.logger.Errorf("Failed to cleanup routes: %v", err)
+	}
+
+	c.adapters.Range(func(key, value any) bool {
+		a := value.(common.TunnelAdapter)
+		a.Close()
+		return true
+	})
+	c.adapters = &sync.Map{}
+
+	c.logger.Flush()
 }
 
 func tunnelsByDirection(cfg *config.Config, direction config.TunnelDirection) []*config.TunnelConfig {

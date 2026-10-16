@@ -16,6 +16,7 @@ package adapter
 
 import (
 	"fmt"
+	"net"
 
 	"github.com/riraccuia/pig/pkg/common"
 	"golang.org/x/sys/windows"
@@ -26,25 +27,43 @@ const tunName = "pig"
 func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
 	//wintun.SetLogger(nil)
 
-	adapter, err := CreateTUNWithRequestedGUID(tunName, WintunStaticRequestedGUID)
+	ifName := tunName
+	maxAttempts := 10
+	for i := range maxAttempts {
+		_, err := net.InterfaceByName(ifName)
+		if err != nil {
+			break
+		}
+		ifName = fmt.Sprintf("%s%d", tunName, i)
+	}
+
+	nativeTun, err := CreateTUNWithRequestedGUID(ifName, WintunStaticRequestedGUID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create wintun adapter: %v", err)
 	}
 
-	err = configureWinTun(adapter, config)
+	err = configureWinTun(nativeTun, config)
 	if err != nil {
-		adapter.Close()
+		nativeTun.Close()
 		return nil, fmt.Errorf("failed to configure adapter: %v", err)
 	}
 
-	_, ipNet, err := getAdapterAddress(adapter.Name(), windows.AF_INET)
-	if err == nil {
-		adapter.ip = ipNet
+	adapter := &TUNAdapter{
+		ReadWriteCloser: nativeTun,
+		ifName:          nativeTun.Name(),
+		mtu:             config.MTU,
 	}
 
-	_, ipNet, err = getAdapterAddress(adapter.Name(), windows.AF_INET6)
+	ip, ipNet, err := getAdapterAddress(adapter.Name(), windows.AF_INET)
 	if err == nil {
-		adapter.ipv6 = ipNet
+		adapter.ip = ip
+		adapter.ipNet = ipNet
+	}
+
+	ip, ipNet, err = getAdapterAddress(adapter.Name(), windows.AF_INET6)
+	if err == nil {
+		adapter.ipv6 = ip
+		adapter.ipv6Net = ipNet
 	}
 
 	return adapter, nil

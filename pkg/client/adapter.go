@@ -34,7 +34,7 @@ func (c *Client) readFromAdapter(ctx context.Context) {
 			return
 		}
 
-		buf := c.bufferPool.GetBuffer(c.adapterConfig.MTU)
+		buf := c.bufferPool.GetBuffer(c.adapter.MTU())
 		_, err := c.adapter.Read(buf[:])
 		if err != nil {
 			c.bufferPool.PutBuffer(buf)

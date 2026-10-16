@@ -60,6 +60,7 @@ func printListenConnectUsage(mode Mode) {
 	printFlagMode(w, mode, pigFlags[FLAG_SPORT])
 	printFlagMode(w, mode, pigFlags[FLAG_TADDR])
 	printFlagMode(w, mode, pigFlags[FLAG_RETRY])
+	printFlagMode(w, mode, pigFlags[FLAG_IDLE_TIMEOUT])
 	printFlagMode(w, mode, pigFlags[FLAG_ROUTE])
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Scripting options:")

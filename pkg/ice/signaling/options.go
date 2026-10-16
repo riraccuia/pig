@@ -15,6 +15,7 @@
 package signaling
 
 import (
+	"net"
 	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
@@ -46,13 +47,16 @@ type Options struct {
 	Logger common.Logger
 
 	// STUNServer is the address of the STUN server to use for NAT traversal.
-	STUNServer string
+	STUNServer []string
 
 	// Protocol offers to use.
 	Protocol string
 
 	// ConnectOffset is the connect offset in milliseconds.
 	ConnectOffset time.Duration
+
+	// Dialer is a custom dialer to use for any signaling operations.
+	Dialer *net.Dialer
 }
 
 func GetOptions(logger common.Logger, cfg *config.ICEConfig) *Options {

@@ -18,7 +18,7 @@ import (
 	"context"
 	"net"
 	"net/http"
-	"time"
+	"sync"
 
 	"crypto/tls"
 
@@ -27,47 +27,36 @@ import (
 
 // WSListener implements transport.Listener for WebSocket connections.
 type WSListener struct {
-	server   *http.Server
-	ctx      context.Context
-	cancel   context.CancelCauseFunc
-	connChan chan *WSConn
+	server    *http.Server
+	connChan  chan *WSConn
+	closeOnce sync.Once
 }
 
 // NewWSListener creates a new WebSocket transport.
-func NewWSListener(ctx context.Context) *WSListener {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	ctx, cancel := context.WithCancelCause(ctx)
-
+func NewWSListener() *WSListener {
 	return &WSListener{
-		ctx:      ctx,
-		cancel:   cancel,
 		connChan: make(chan *WSConn),
 	}
 }
 
 func (t *WSListener) Accept() (net.Conn, error) {
-	if t.ctx.Err() != nil {
+	conn, ok := <-t.connChan
+	if !ok {
 		return nil, net.ErrClosed
 	}
-	select {
-	case <-t.ctx.Done():
-		return nil, t.ctx.Err()
-	case conn := <-t.connChan:
-		conn.SetReadDeadline(time.Time{})
-		return conn, nil
-	}
+	return conn, nil
 }
 
 func (t *WSListener) Close() error {
-	if t.ctx.Err() != nil {
-		return nil
-	}
-	t.cancel(net.ErrClosed)
-	if t.server != nil {
-		t.server.Close() // this will close the listener but not the websocket connection
-	}
+	t.closeOnce.Do(func() {
+		if t.server == nil {
+			return
+		}
+		close(t.connChan)
+		// this will close the listener but not the websocket connection
+		t.server.Close()
+		t.server = nil
+	})
 	return nil
 }
 
@@ -107,6 +96,11 @@ func (t *WSListener) ListenWithListener(l net.Listener, tlsConfig *tls.Config) e
 
 // Listen starts the WebSocket server on the given address.
 func (t *WSListener) Listen(network, address string, tlsConfig *tls.Config) error {
+	ln, err := net.Listen(network, address)
+	if err != nil {
+		return err
+	}
+
 	t.server = &http.Server{
 		Addr:      address,
 		Handler:   t,
@@ -114,7 +108,7 @@ func (t *WSListener) Listen(network, address string, tlsConfig *tls.Config) erro
 	}
 
 	if tlsConfig != nil {
-		return t.server.ListenAndServeTLS("", "")
+		return t.server.ServeTLS(ln, "", "")
 	}
-	return t.server.ListenAndServe()
+	return t.server.Serve(ln)
 }

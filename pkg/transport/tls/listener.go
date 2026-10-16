@@ -21,15 +21,11 @@ import (
 )
 
 type TLSListener struct {
-	listener net.Listener
-}
-
-func NewTLSListener(listener net.Listener) *TLSListener {
-	return &TLSListener{listener: listener}
+	net.Listener
 }
 
 func (t *TLSListener) Accept() (net.Conn, error) {
-	conn, err := t.listener.Accept()
+	conn, err := t.Listener.Accept()
 	if err != nil {
 		return nil, err
 	}
@@ -37,9 +33,7 @@ func (t *TLSListener) Accept() (net.Conn, error) {
 	if !ok {
 		return nil, fmt.Errorf("accepted connection is not a TLS connection")
 	}
-	return NewTLSConn(tlsConn), nil
-}
-
-func (t *TLSListener) Close() error {
-	return t.listener.Close()
+	return &TLSConn{
+		Conn: tlsConn,
+	}, nil
 }

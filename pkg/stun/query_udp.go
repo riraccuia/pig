@@ -24,27 +24,28 @@ import (
 
 // QueryServerUDP is a convenience function that queries a STUN server over UDP.
 // It discovers the IP address and port as seen from the public internet.
-func QueryServerUDP(stunServerAddr string, connOrLocalAddr any) (*BindingResult, error) {
-	client := NewClient(stunServerAddr)
-	return client.QueryStunServerUDP(connOrLocalAddr)
+func QueryServerUDP(ctx context.Context, stunServerAddr string, connOrLocalAddr any) (*BindingResult, error) {
+	client := &Client{}
+	client.AddServer(stunServerAddr)
+	return client.QueryStunServerUDP(ctx, connOrLocalAddr)
 }
 
 // QueryStunServerUDP takes a UDP connection or a source port and queries the STUN server over UDP.
 // This method discovers your public IP address and port as seen from the internet.
 // It accepts either an existing UDP connection (*net.UDPConn) or a local address (*net.UDPAddr).
 // If a source port is provided, a new UDP connection will be established and closed after the query.
-func (c *Client) QueryStunServerUDP(connOrLocalAddr any) (*BindingResult, error) {
+func (c *Client) QueryStunServerUDP(ctx context.Context, connOrLocalAddr any) (*BindingResult, error) {
 	conn, ok := connOrLocalAddr.(*net.UDPConn)
 	if ok {
 		network := "udp4"
 		if conn.LocalAddr().(*net.UDPAddr).IP.To4() == nil {
 			network = "udp6"
 		}
-		serverAddr, err := net.ResolveUDPAddr(network, c.ServerAddr)
+		serverAddr, err := c.resolveServerAddr(network, conn.LocalAddr())
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve STUN server address (%s) %s: %w", network, c.ServerAddr, err)
+			return nil, fmt.Errorf("failed to resolve STUN server address (%s) %s: %w", network, c.Servers, err)
 		}
-		return c.queryStunServerUDP(serverAddr, conn)
+		return c.queryStunServerUDP(ctx, serverAddr.(*net.UDPAddr), conn)
 	}
 	localAddr, ok := connOrLocalAddr.(*net.UDPAddr)
 	if !ok {
@@ -59,35 +60,35 @@ func (c *Client) QueryStunServerUDP(connOrLocalAddr any) (*BindingResult, error)
 	default:
 		network = "udp4"
 	}
-	serverAddr, err := net.ResolveUDPAddr(network, c.ServerAddr)
+	serverAddr, err := c.resolveServerAddr(network, localAddr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve STUN server address (%s) %s: %w", network, c.ServerAddr, err)
+		return nil, fmt.Errorf("failed to resolve STUN server address (%s) %s: %w", network, c.Servers, err)
 	}
-	return c.queryStunServerUDP(serverAddr, localAddr)
+	return c.queryStunServerUDP(ctx, serverAddr.(*net.UDPAddr), localAddr)
 }
 
 // QueryStunServerUDP sends a STUN Binding Request and returns the mapped IP and port.
 // It uses the client's configured ServerAddr. connOrLocalAddr is the UDP connection or the local address to send from.
-func (c *Client) queryStunServerUDP(serverAddr *net.UDPAddr, connOrLocalAddr any) (*BindingResult, error) {
-	request, err := BuildBindingRequest(c.bindingOptions)
+func (c *Client) queryStunServerUDP(ctx context.Context, serverAddr *net.UDPAddr, connOrLocalAddr any) (*BindingResult, error) {
+	request, err := BuildBindingRequest(&c.BindingOptions)
 	if err != nil {
 		return nil, err
 	}
 
 	// Send request and receive response
-	response, err := c.sendStunRequestUDP(serverAddr, connOrLocalAddr, request, request.Header.TransactionID)
+	response, err := c.sendStunRequestUDP(ctx, serverAddr, connOrLocalAddr, request, request.Header.TransactionID)
 	if err != nil {
 		return nil, err
 	}
 
-	result, err := ProcessBindingResponse(response, request.Header.TransactionID, c.bindingOptions)
+	result, err := ProcessBindingResponse(response, request.Header.TransactionID, &c.BindingOptions)
 	result.ServerAddr = serverAddr.String()
 	return result, err
 }
 
 // sendStunRequestUDP sends a STUN UDP request and receives the response.
 // connOrSrcPort is the UDP connection or the source port to send from.
-func (c *Client) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrLocalAddr any, request *Message, txID [12]byte) (response *Message, err error) {
+func (c *Client) sendStunRequestUDP(ctx context.Context, serverAddr *net.UDPAddr, connOrLocalAddr any, request *Message, txID [12]byte) (response *Message, err error) {
 	udpConn, ok := connOrLocalAddr.(net.Conn)
 	if !ok {
 		laddr, ok := connOrLocalAddr.(*net.UDPAddr)
@@ -104,7 +105,7 @@ func (c *Client) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrLocalAddr any
 
 	srcPort := udpConn.LocalAddr().(*net.UDPAddr).Port
 
-	c.logger("info", fmt.Sprintf("STUN: Sending Binding Request over UDP from :%d to %s (TX ID: %x)", srcPort, serverAddr, txID[:4]))
+	c.logger()("info", fmt.Sprintf("STUN: Sending Binding Request over UDP from :%d to %s (TX ID: %x)", srcPort, serverAddr, txID[:4]))
 
 	// Send request
 	_, err = request.WriteTo(udpConn)
@@ -114,7 +115,7 @@ func (c *Client) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrLocalAddr any
 
 	// Receive response with timeout
 	responseBytes := make([]byte, 1500) // MTU size buffer
-	udpConn.SetReadDeadline(time.Now().Add(c.receiveTimeout))
+	udpConn.SetReadDeadline(c.deadline(ctx, time.Now()))
 	defer udpConn.SetReadDeadline(time.Time{})
 	n, err := udpConn.Read(responseBytes)
 	//n, remoteAddr, err := udpConn.ReadFromUDP(responseBytes)
@@ -128,7 +129,7 @@ func (c *Client) sendStunRequestUDP(serverAddr *net.UDPAddr, connOrLocalAddr any
 	// Trim buffer to actual received size
 	responseBytes = responseBytes[:n]
 
-	c.logger("trace", fmt.Sprintf("STUN: Received %d bytes response over UDP from %s", n, serverAddr))
+	c.logger()("trace", fmt.Sprintf("STUN: Received %d bytes response over UDP from %s", n, serverAddr))
 
 	return DecodeMessage(responseBytes)
 }
@@ -156,5 +157,5 @@ func (c *Client) createUDPConnection(serverAddr *net.UDPAddr, laddr *net.UDPAddr
 	if !ok {
 		return nil, fmt.Errorf("failed to convert server address %s to netip.Addr", serverAddr.IP)
 	}
-	return c.dialer.DialUDP(context.Background(), "udp", netip.AddrPortFrom(dialLaddr, uint16(laddr.Port)), netip.AddrPortFrom(dialRaddr, uint16(serverAddr.Port)))
+	return c.dialer().DialUDP(context.Background(), "udp", netip.AddrPortFrom(dialLaddr, uint16(laddr.Port)), netip.AddrPortFrom(dialRaddr, uint16(serverAddr.Port)))
 }

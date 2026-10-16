@@ -17,45 +17,27 @@ package signaling
 import (
 	"context"
 	"fmt"
-	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/riraccuia/pig/pkg/ice/message"
-	"github.com/riraccuia/pig/pkg/network"
-	"github.com/riraccuia/pig/pkg/stun"
 )
 
 // Signaler handles ICE signaling operations.
 type Signaler struct {
-	ctx          context.Context
 	opts         *Options
-	stunClient   *stun.Client
 	mqttClient   mqtt.Client
 	mqttLostConn chan struct{}
 }
 
 // NewSignaler creates a new signaler instance.
-func NewSignaler(ctx context.Context, opts *Options) (*Signaler, error) {
+func NewSignaler(opts *Options) (*Signaler, error) {
 	if opts == nil {
 		return nil, fmt.Errorf("Options not set")
 	}
 
-	if opts.STUNServer == "" {
-		return nil, fmt.Errorf("STUN server is not set")
-	}
-
 	s := &Signaler{
-		ctx:  ctx,
 		opts: opts,
 	}
-
-	s.stunClient = stun.NewClient(
-		opts.STUNServer,
-	).WithDialer(
-		network.NewDialer(time.Second * 5),
-	).WithLoggerFunc(
-		opts.Logger.PrintLevel,
-	)
 
 	// Create and connect MQTT client
 	client, err := s.connectMQTTClient()
@@ -70,24 +52,14 @@ func NewSignaler(ctx context.Context, opts *Options) (*Signaler, error) {
 }
 
 // GatherICECandidates performs a STUN query, publishes an offer, and waits for an answer.
-func GatherICECandidates(ctx context.Context, opts *Options, targetHost string, offer *message.ICEMessage) (answer *message.ICEMessage, err error) {
-	signaler, err := NewSignaler(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
-	defer signaler.Disconnect()
-	return signaler.GatherICECandidates(targetHost, offer)
-}
-
-// GatherICECandidates performs a STUN query, publishes an offer, and waits for an answer.
-func (s *Signaler) GatherICECandidates(targetHost string, offer *message.ICEMessage) (answer *message.ICEMessage, err error) {
+func (s *Signaler) GatherICECandidates(ctx context.Context, targetHost string, offer *message.ICEMessage) (answer *message.ICEMessage, err error) {
 	topicBase := s.getTopicPrefix(targetHost) + "/"
 	err = s.publishICEOffer(topicBase, offer)
 	if err != nil {
 		return nil, err
 	}
 	// Wait for answer
-	return s.waitForAnswer(topicBase, offer)
+	return s.waitForAnswer(ctx, topicBase, offer)
 }
 
 func (s *Signaler) GetOptions() *Options {

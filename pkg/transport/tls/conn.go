@@ -25,10 +25,6 @@ type TLSConn struct {
 	*tls.Conn
 }
 
-func NewTLSConn(conn *tls.Conn) *TLSConn {
-	return &TLSConn{Conn: conn}
-}
-
 func (t *TLSConn) IsStreamed() bool {
 	return false
 }

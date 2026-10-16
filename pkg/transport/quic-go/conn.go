@@ -29,19 +29,7 @@ type QuicConn struct {
 }
 
 type QuicStream struct {
-	stream *quic.Stream
-}
-
-func (s *QuicStream) Read(p []byte) (n int, err error) {
-	return s.stream.Read(p)
-}
-
-func (s *QuicStream) Write(p []byte) (n int, err error) {
-	return s.stream.Write(p)
-}
-
-func (s *QuicStream) Close() error {
-	return s.stream.Close()
+	*quic.Stream
 }
 
 func (s *QuicStream) Flush() error {
@@ -85,11 +73,7 @@ func (c *QuicConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
 	if err != nil {
 		return nil, err
 	}
-	/*_, err = stream.Read([]byte{0})
-	if err != nil {
-		return nil, err
-	}*/
-	return &QuicStream{stream: stream}, nil
+	return &QuicStream{Stream: stream}, nil
 }
 
 func (c *QuicConn) NewStream(ctx context.Context) (transport.Stream, error) {
@@ -100,11 +84,7 @@ func (c *QuicConn) NewStream(ctx context.Context) (transport.Stream, error) {
 	if err != nil {
 		return nil, err
 	}
-	/*_, err = stream.Write([]byte{0})
-	if err != nil {
-		return nil, err
-	}*/
-	return &QuicStream{stream: stream}, nil
+	return &QuicStream{Stream: stream}, nil
 }
 
 func (c *QuicConn) LocalAddr() net.Addr {

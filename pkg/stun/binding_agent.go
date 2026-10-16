@@ -76,6 +76,9 @@ func NewBindingAgent(config *BindingAgentConfig) *BindingAgent {
 }
 
 func (b *BindingAgent) Clone() *BindingAgent {
+	if b == nil {
+		return nil
+	}
 	return &BindingAgent{
 		config:    b.config,
 		requests:  &sync.Map{},

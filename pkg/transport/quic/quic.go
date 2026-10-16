@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"strconv"
 	"time"
 
 	"github.com/riraccuia/pig/pkg/config"
@@ -45,8 +46,8 @@ func NewQuicConn(conn *quic.Conn) *QuicConn {
 	return &QuicConn{conn: conn}
 }
 
-func NewQuicTransport(ctx context.Context, endpoint *quic.Endpoint) *QuicTransport {
-	return &QuicTransport{ctx: ctx, endpoint: endpoint}
+func NewQuicTransport(endpoint *quic.Endpoint) *QuicTransport {
+	return &QuicTransport{endpoint: endpoint}
 }
 
 func (c *QuicConn) Read(b []byte) (n int, err error) {
@@ -126,7 +127,7 @@ func GetClientDialFunc(ctx context.Context, logger *log.Logger, config *config.T
 		conn, err := endpoint.Dial(
 			ctx,
 			"udp",
-			fmt.Sprintf("%s:%d", config.Connect.Address, config.Connect.Port),
+			net.JoinHostPort(config.Connect.Address, strconv.Itoa(config.Connect.Port)),
 			&quic.Config{
 				TLSConfig: tlsConfig.Clone(),
 			},
@@ -142,7 +143,7 @@ func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config
 	return func() (transport.Listener, error) {
 		endpoint, err := quic.Listen(
 			"udp",
-			fmt.Sprintf("%s:%d", config.Listen.Address, config.Listen.Port),
+			net.JoinHostPort(config.Listen.Address, strconv.Itoa(config.Listen.Port)),
 			&quic.Config{
 				TLSConfig: tlsConfig.Clone(),
 			},
@@ -150,6 +151,6 @@ func GetServerListenFunc(ctx context.Context, logger *log.Logger, config *config
 		if err != nil {
 			return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
 		}
-		return NewQuicTransport(ctx, endpoint), nil
+		return NewQuicTransport(endpoint), nil
 	}
 }

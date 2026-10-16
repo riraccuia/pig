@@ -55,7 +55,7 @@ func (r *Route) IsDirectlyConnected() bool {
 	if r.Gateway != nil && !r.Gateway.Equal(net.IPv4zero) && !r.Gateway.Equal(net.IPv6zero) {
 		return false
 	}
-	return r.LinkAddr != nil
+	return true
 }
 
 func (r Route) HasGateway() bool {

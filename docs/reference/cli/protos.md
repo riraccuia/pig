@@ -11,6 +11,7 @@ Example:
 | Name         | Description                                   |
 +------------- +---------------------------------------------- +
 | dtls         | DTLS (Datagram Transport Layer Security)      |
+| wg           | WireGuard (userspace)                         |
 | quic         | QUIC (Quick UDP Internet Connections)         |
 | tls          | TLS (Transport Layer Security)                |
 | ws           | WebSocket                                     |

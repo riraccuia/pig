@@ -170,20 +170,15 @@ func (a *ServerAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter
 
 // SendToken sends a JWT token over the connection.
 func SendToken(rw io.ReadWriter, token string) error {
-	// Convert token to bytes
+	// convert token to bytes
 	tokenBytes := []byte(token)
 	tokenLen := len(tokenBytes)
-
-	// Write token length (2 bytes)
+	// serialize token length (2 bytes)
 	lenBuf := []byte{byte(tokenLen >> 8), byte(tokenLen)}
-	if _, err := rw.Write(lenBuf); err != nil {
-		return fmt.Errorf("failed to write token length: %w", err)
-	}
-
-	// Write token
-	if _, err := rw.Write(tokenBytes); err != nil {
+	// write token
+	_, err := rw.Write(append(lenBuf, tokenBytes...))
+	if err != nil {
 		return fmt.Errorf("failed to write token: %w", err)
 	}
-
 	return nil
 }

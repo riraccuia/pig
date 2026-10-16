@@ -12,23 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !windows
-
 package adapter
 
 import (
+	"errors"
+	"io"
 	"net"
+	"time"
 )
 
-// Tunnel represents a generic tunnel interface.
-type Interface interface {
-	Read(p []byte) (n int, err error)
-	Write(p []byte) (n int, err error)
-	Close() error
+type indexer interface {
+	Index() int
+}
+
+type deadliner interface {
+	SetDeadline(t time.Time) error
+	SetReadDeadline(t time.Time) error
+	SetWriteDeadline(t time.Time) error
 }
 
 type TUNAdapter struct {
-	iface   Interface
+	io.ReadWriteCloser
+	mtu     int
 	ip      net.IP
 	ipv6    net.IP
 	ipNet   *net.IPNet
@@ -36,16 +41,8 @@ type TUNAdapter struct {
 	ifName  string
 }
 
-func (t *TUNAdapter) Read(b []byte) (int, error) {
-	return t.iface.Read(b)
-}
-
-func (t *TUNAdapter) Write(b []byte) (int, error) {
-	return t.iface.Write(b)
-}
-
-func (t *TUNAdapter) Close() error {
-	return t.iface.Close()
+func (t *TUNAdapter) MTU() int {
+	return t.mtu
 }
 
 func (t *TUNAdapter) IP() net.IP {
@@ -69,9 +66,33 @@ func (t *TUNAdapter) Name() string {
 }
 
 func (t *TUNAdapter) Index() int {
+	if indexer, ok := t.ReadWriteCloser.(indexer); ok {
+		return indexer.Index()
+	}
 	iface, err := net.InterfaceByName(t.ifName)
 	if err != nil {
 		return -1
 	}
 	return iface.Index
+}
+
+func (t *TUNAdapter) SetDeadline(time time.Time) error {
+	if deadliner, ok := t.ReadWriteCloser.(deadliner); ok {
+		return deadliner.SetDeadline(time)
+	}
+	return errors.New("not implemented")
+}
+
+func (t *TUNAdapter) SetReadDeadline(time time.Time) error {
+	if deadliner, ok := t.ReadWriteCloser.(deadliner); ok {
+		return deadliner.SetReadDeadline(time)
+	}
+	return errors.New("not implemented")
+}
+
+func (t *TUNAdapter) SetWriteDeadline(time time.Time) error {
+	if deadliner, ok := t.ReadWriteCloser.(deadliner); ok {
+		return deadliner.SetWriteDeadline(time)
+	}
+	return errors.New("not implemented")
 }

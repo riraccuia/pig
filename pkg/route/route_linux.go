@@ -365,7 +365,7 @@ func (b *linuxBackend) buildRouteNetlinkMessageRaw(rt *Route, nlType uint16, fla
 	if rt.Interface != "" {
 		iface, err := net.InterfaceByName(rt.Interface)
 		if err != nil {
-			return nil, fmt.Errorf("interface %s not found: %w", rt.Interface, err)
+			return nil, fmt.Errorf("interface %s not found", rt.Interface)
 		}
 		oif := make([]byte, 4)
 		binary.NativeEndian.PutUint32(oif, uint32(iface.Index))

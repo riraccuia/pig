@@ -31,6 +31,10 @@ func newManager(ctx context.Context) (Manager, error) {
 // Stub implementation for GetAdapterIP on non-macOS platforms.
 type stubManager struct{}
 
+func (s *stubManager) ExcludeAdapterForLookup(adapterName string) {
+	return
+}
+
 func (s *stubManager) AddRoute(route *Route) error {
 	return fmt.Errorf("route management not implemented for this platform")
 }
@@ -66,5 +70,13 @@ func (s *stubManager) GetDefaultGateway6() net.IP {
 }
 
 func (s *stubManager) FindBestRoute(dst net.IP) (*Route, error) {
+	return nil, fmt.Errorf("route management not implemented for this platform")
+}
+
+func newBackend() (platformBackend, error) {
+	return nil, fmt.Errorf("route management not implemented for this platform")
+}
+
+func routeFromNeighbor(target net.IP) (*Route, error) {
 	return nil, fmt.Errorf("route management not implemented for this platform")
 }

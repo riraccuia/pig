@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 
 	"github.com/riraccuia/pig/pkg/common"
@@ -33,16 +34,15 @@ var defaultBufferSize = 64 * 1024
 func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig) func(ctx context.Context) (transport.Conn, error) {
 	initUDP(logger)
 	return func(ctx context.Context) (transport.Conn, error) {
-		addr := fmt.Sprintf("%s:%d", config.Connect.Address, config.Connect.Port)
-		conn, err := net.ListenPacket("udp", fmt.Sprintf(":%d", config.Connect.SrcPort))
+		raddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(config.Connect.Address, strconv.Itoa(config.Connect.Port)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to create UDP socket: %w", err)
+			return nil, fmt.Errorf("failed to resolve UDP address: %w", err)
 		}
 
-		raddr, err := net.ResolveUDPAddr("udp", addr)
+		networkStr := transport.GetUDPNetworkString(raddr.IP)
+		conn, err := net.ListenPacket(networkStr, net.JoinHostPort("", strconv.Itoa(config.Connect.SrcPort)))
 		if err != nil {
-			conn.Close()
-			return nil, fmt.Errorf("failed to resolve UDP address: %w", err)
+			return nil, fmt.Errorf("failed to create UDP socket: %w", err)
 		}
 
 		// Create a new connection with a read buffer and context
@@ -88,7 +88,7 @@ func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig) func(c
 func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig) func(ctx context.Context) (transport.Listener, error) {
 	initUDP(logger)
 	return func(ctx context.Context) (transport.Listener, error) {
-		addr := fmt.Sprintf("%s:%d", config.Listen.Address, config.Listen.Port)
+		addr := net.JoinHostPort(config.Listen.Address, strconv.Itoa(config.Listen.Port))
 		conn, err := net.ListenPacket("udp", addr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to listen on UDP: %w", err)

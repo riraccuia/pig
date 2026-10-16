@@ -16,8 +16,8 @@ package ice
 
 import (
 	"context"
-	"errors"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/riraccuia/pig/pkg/ice/message"
@@ -30,32 +30,18 @@ type OfferPaths struct {
 	ConnectPaths []*ConnectPath
 }
 
-func (pc *PathConnector) GetListenPaths(ctx context.Context, listenPort uint16) (chan *OfferPaths, error) {
-	var (
-		err error
-	)
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-			pc.signaler, err = signaling.NewSignaler(ctx, pc.opts)
-		}
-		if errors.Is(err, signaling.ErrMQTTFailure) {
-			if pc.opts.Logger != nil {
-				pc.opts.Logger.Errorf("ICE: MQTT connection failed (will retry in 5 seconds): %v", err)
-			}
-			time.Sleep(time.Second * 5)
-			continue
-		}
-		break
+func (pc *PathFinder) GetListenPaths(ctx context.Context, listenPort uint16, excludedAdapters *sync.Map) (chan *OfferPaths, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 	listenPaths := make(chan *OfferPaths, 10)
-	go pc.receiveOffers(ctx, listenPort, listenPaths)
+	go pc.receiveOffers(ctx, listenPort, listenPaths, excludedAdapters)
 	return listenPaths, nil
 }
 
-func (pc *PathConnector) receiveOffers(ctx context.Context, listenPort uint16, listenPaths chan *OfferPaths) {
+func (pc *PathFinder) receiveOffers(ctx context.Context, listenPort uint16, listenPaths chan *OfferPaths, excludedAdapters *sync.Map) {
 	var (
 		err        error
 		offersChan <-chan *signaling.ReceivedOffer
@@ -66,6 +52,7 @@ func (pc *PathConnector) receiveOffers(ctx context.Context, listenPort uint16, l
 			offersChan, topicBase, err = pc.signaler.ReceiveICEOffers(ctx)
 		}
 		if err != nil {
+			pc.opts.Logger.Errorf("ICE: failed to receive ICE offers: %v", err)
 			time.Sleep(time.Second * 5)
 			continue
 		}
@@ -81,14 +68,14 @@ func (pc *PathConnector) receiveOffers(ctx context.Context, listenPort uint16, l
 					break
 				}
 				pc.opts.Logger.Tracef("ICE: received ICE offer. SessionID: %s", offer.Offer.SessionID)
-				pc.processOffer(topicBase, offer, listenPort, listenPaths)
+				pc.processOffer(ctx, topicBase, offer, listenPort, listenPaths, excludedAdapters)
 			}
 		}
 	}
 }
 
-func (pc *PathConnector) processOffer(topicBase string, offer *signaling.ReceivedOffer, listenPort uint16, listenPaths chan *OfferPaths) {
-	localEndpoints, err := GetLocalEndpoints("", pc.excludedAdapters)
+func (pc *PathFinder) processOffer(ctx context.Context, topicBase string, offer *signaling.ReceivedOffer, listenPort uint16, listenPaths chan *OfferPaths, excludedAdapters *sync.Map) {
+	localEndpoints, err := GetLocalEndpoints("", excludedAdapters)
 	if err != nil {
 		return
 	}
@@ -102,8 +89,8 @@ func (pc *PathConnector) processOffer(topicBase string, offer *signaling.Receive
 		connectPaths     []*ConnectPath
 	)
 
-	answerCandidates, localInfo = buildLocalCandidates(pc.pigProtos, localEndpoints, listenPort)
-	answerCandidates = append(answerCandidates, buildReflexiveCandidates(pc.pigProtos, localEndpoints, localInfo, pc.opts)...)
+	answerCandidates, localInfo = pc.buildLocalCandidates(localEndpoints, listenPort, pc.protos)
+	answerCandidates = append(answerCandidates, pc.buildReflexiveCandidates(ctx, localEndpoints, localInfo, pc.protos)...)
 	answerCandidates = dedupCandidates(answerCandidates)
 
 	pc.opts.Logger.Tracef("ICE: preparing to send ICE answer to client. SessionID: %s", offer.Offer.SessionID)
@@ -142,7 +129,7 @@ func (pc *PathConnector) processOffer(topicBase string, offer *signaling.Receive
 
 	for _, candidate := range offer.Offer.Candidates {
 		targetIP := net.ParseIP(candidate.Address)
-		for _, tr := range pc.pigProtos {
+		for _, tr := range pc.protos {
 			if tr.Network != candidate.Protocol {
 				continue
 			}

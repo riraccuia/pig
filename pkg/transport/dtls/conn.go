@@ -19,7 +19,8 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/pion/dtls/v3"
+	"github.com/pion/dtls/v4"
+	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -38,6 +39,9 @@ func (c *DTLSConn) IsStreamed() bool {
 	return false
 }
 
+// AtomicPacketWrites reports that each Write must carry one IP packet.
+func (c *DTLSConn) AtomicPacketWrites() bool { return true }
+
 func (c *DTLSConn) AcceptStream(ctx context.Context) (transport.Stream, error) {
 	return nil, transport.ErrNotImplemented
 }
@@ -51,28 +55,21 @@ func (c *DTLSConn) Flush() {
 }
 
 // Dial establishes a DTLS connection to the given address.
-func Dial(ctx context.Context, address string, dtlsConfig *dtls.Config) (transport.Conn, error) {
-	// Parse the address
-	raddr, err := net.ResolveUDPAddr("udp", address)
+func Dial(ctx context.Context, networkStr string, laddr *net.UDPAddr, address *net.UDPAddr, dtlsOpts ...dtls.ClientOption) (*dtls.Conn, error) {
+	udpConn, err := network.DialUDPContext(ctx, networkStr, laddr, address)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve address: %w", err)
+		return nil, fmt.Errorf("failed to dial UDP: %w", err)
 	}
-
-	conn, err := dtls.Dial("udp", raddr, dtlsConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to establish DTLS connection: %w", err)
-	}
-
-	return NewDTLSConn(conn), nil
+	conn := network.ConnectedUdpToPacketConn(udpConn)
+	return DialConn(ctx, conn, dtlsOpts...)
 }
 
 // DialConn establishes a DTLS connection using an existing UDP connection.
-func DialConn(ctx context.Context, conn net.Conn, address string, dtlsConfig *dtls.Config) (transport.Conn, error) {
+func DialConn(ctx context.Context, conn net.Conn, dtlsOpts ...dtls.ClientOption) (*dtls.Conn, error) {
 	// Use the existing connection to establish DTLS
-	dtlsConn, err := dtls.Client(conn.(net.PacketConn), conn.RemoteAddr(), dtlsConfig)
+	dtlsConn, err := dtls.Client(conn.(net.PacketConn), conn.RemoteAddr(), dtlsOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to establish DTLS connection: %w", err)
 	}
-
-	return NewDTLSConn(dtlsConn), nil
+	return dtlsConn, nil
 }

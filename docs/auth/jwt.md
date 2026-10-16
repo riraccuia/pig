@@ -23,7 +23,7 @@ Give the connect node a token generated with the corresponding private key.
 Point `-jwk` at the public key, then start the listen node.
 
 ```bash
-pig -l -s -a 0.0.0.0:443 -A jwt -jwk ./public.pem
+sudo ./pig -l -s -a :443 -A jwt -jwk ./public.pem
 ```
 
 ## Connector
@@ -31,8 +31,9 @@ pig -l -s -a 0.0.0.0:443 -A jwt -jwk ./public.pem
 Set `PIG_TOKEN` to the token string, then start the connect node.
 
 ```bash
-export PIG_TOKEN=$(./signtool -key private.pem -alg EdDSA -exp 1d -iss <issuer-name> -sub <subject-name> -u)
-pig -c -s -a listen.example:443 -A jwt
+sudo su -
+export PIG_TOKEN=$(./signtool -key private.pem -alg EdDSA -exp 1d -iss admin@pig -sub user@pig -u)
+./pig -c -s -a x.x.x.x:443 -k -A jwt -R full
 ```
 
 Prefer `PIG_TOKEN` over `-T`. If the token lives in a `.env` file, source that file in your shell first. Pig does not load `.env` on its own.
@@ -42,8 +43,8 @@ Prefer `PIG_TOKEN` over `-T`. If the token lives in a `.env` file, source that f
 Use `-to-cfg json` to generate a config file.
 
 ```bash
-pig -l -s -a 0.0.0.0:443 -A jwt -jwk ./public.pem -to-cfg json > listen.json
-pig -config listen.json
+./pig -l -s -a :443 -A jwt -jwk ./public.pem -to-cfg json > listen.json
+sudo ./pig -config listen.json
 ```
 
 JWT settings are in the tunnel `auth` block.

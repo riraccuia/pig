@@ -52,6 +52,7 @@ const (
 	TransportICMP    TransportType = "icmp"
 	TransportTLSICMP TransportType = "tls-in-icmp"
 	TransportDTLS    TransportType = "dtls"
+	TransportWG      TransportType = "wg"
 )
 
 func (t TransportType) Description() string {
@@ -70,6 +71,8 @@ func (t TransportType) Description() string {
 		return "TLS over ICMP (ICMP tunneling), Experimental"
 	case TransportDTLS:
 		return "DTLS (Datagram Transport Layer Security)"
+	case TransportWG:
+		return "WireGuard (userspace)"
 	}
 	return "Unknown transport protocol"
 }
@@ -82,6 +85,7 @@ var SupportedTransports = map[TransportType]bool{
 	TransportICMP:    false,
 	TransportTLSICMP: true,
 	TransportDTLS:    true,
+	TransportWG:      true,
 }
 
 type AuthType string
@@ -122,7 +126,7 @@ func (t TransportType) IsValid() bool {
 }
 
 func (t TransportType) IsICEProtocol() bool {
-	return t == TransportWS || t == TransportQUIC || t == TransportDTLS || t == TransportTLS || t == TransportTLSICMP
+	return t == TransportWS || t == TransportQUIC || t == TransportDTLS || t == TransportTLS || t == TransportWG || t == TransportTLSICMP
 }
 
 // IsValid checks if the ICMP mode is supported.
@@ -144,8 +148,8 @@ type Config struct {
 	Tunnels []TunnelConfig `toml:"tunnels" json:"tunnels"`
 	// default=DefaultICESTUNServer
 	// optional=true
-	// desc=Default STUN server address for NAT traversal in the form of host:port.
-	STUNAddress string `toml:"stun_global" json:"stun_global"`
+	// desc=Default STUN server addresses for NAT traversal in the form of host:port.
+	STUNAddress []string `toml:"stun_global,omitempty" json:"stun_global,omitzero"`
 	// optional=true
 	// desc=Default MQTT broker configuration for NAT traversal.
 	MQTTBroker MQTTBrokerConfig `toml:"mqtt_global" json:"mqtt_global"`
@@ -194,6 +198,10 @@ type TunnelConfig struct {
 	// optional=true
 	// desc=Transport protocol to use for the tunnel.
 	Proto TransportType `toml:"proto,omitempty" json:"proto,omitzero"`
+	// default=DefaultIdleTimeout
+	// optional=true
+	// desc=Inactivity timeout in seconds.
+	IdleTimeout int `toml:"idle_timeout,omitzero" json:"idle_timeout,omitzero"`
 	// default=DefaultRetryInterval
 	// optional=true
 	// desc=Reconnect interval in seconds.
@@ -201,6 +209,9 @@ type TunnelConfig struct {
 	// optional=true
 	// desc=WRED settings.
 	Wred WredConfig `toml:"wred" json:"wred"`
+	// optional=true
+	// desc=Trust configuration.
+	Trust *TrustConfig `toml:"trust" json:"trust"`
 	// optional=true
 	// desc=Authentication configuration.
 	Auth *AuthConfig `toml:"auth" json:"auth"`
@@ -210,6 +221,30 @@ type TunnelConfig struct {
 	// optional=true
 	// desc=Routes to enforce once the tunnel is established.
 	Routes []Route `toml:"routes" json:"routes"`
+}
+
+// WireGuardConfig holds userspace WireGuard settings for proto "wg".
+type WireGuardConfig struct {
+	// desc=Local WireGuard private key (standard base64 encoding of 32 bytes).
+	PrivateKey string `toml:"private_key" json:"private_key"`
+	// optional=true
+	// desc=WireGuard peers. On connect, peers[0] is the remote peer. On listen, every entry is an authorized client.
+	Peers []WireGuardPeer `toml:"peers" json:"peers"`
+}
+
+// WireGuardPeer is a WireGuard peer configuration.
+type WireGuardPeer struct {
+	// desc=Peer WireGuard public key (standard base64 encoding of 32 bytes).
+	PublicKey string `toml:"public_key" json:"public_key"`
+	// optional=true
+	// desc=Optional WireGuard preshared key for this peer (standard base64 encoding of 32 bytes).
+	PresharedKey string `toml:"preshared_key" json:"preshared_key"`
+	// optional=true
+	// desc=AllowedIPs for this peer as CIDR prefixes. Empty falls back to wireguard.allowed_ips.
+	AllowedIPs []string `toml:"allowed_ips" json:"allowed_ips"`
+	// optional=true
+	// desc=Persistent keepalive interval in seconds for this peer. Negative means unset; falls back to wireguard.keepalive.
+	Keepalive int `toml:"keepalive" json:"keepalive"`
 }
 
 type LogConfig struct {
@@ -236,7 +271,7 @@ type ICEConfig struct {
 	Protos []string `toml:"protos" json:"protos"`
 	// optional=true
 	// desc=Optional custom STUN server to use instead of the global config.STUNAddress.
-	STUNAddress string `toml:"stun_address,omitempty" json:"stun_address,omitzero"`
+	STUNAddress []string `toml:"stun_address,omitempty" json:"stun_address,omitzero"`
 	// optional=true
 	// desc=Signaling configuration.
 	Signaling *ICESignalingOpts `toml:"signaling" json:"signaling"`
@@ -256,6 +291,8 @@ func (c *ICEConfig) UseProtos() (protos []transport.ICEProtocolDefinition) {
 			protos = append(protos, transport.ICEProtocolDTLS)
 		case TransportTLS:
 			protos = append(protos, transport.ICEProtocolTLS)
+		case TransportWG:
+			protos = append(protos, transport.ICEProtocolWireGuard)
 		case TransportTLSICMP:
 			protos = append(protos, transport.ICEProtocolTLSInICMP)
 		}
@@ -354,9 +391,15 @@ type AuthConfig struct {
 	// optional=true
 	// desc=OAuth authentication configuration.
 	OAuth *OAuthAuth `toml:"oauth" json:"oauth"`
+}
+
+type TrustConfig struct {
 	// optional=true
 	// desc=MTLS authentication configuration.
 	MTLS *MTLSConfig `toml:"mtls" json:"mtls"`
+	// optional=true
+	// desc=WireGuard configuration. Required when proto is "wg".
+	WireGuard *WireGuardConfig `toml:"wireguard" json:"wireguard"`
 }
 
 type MTLSConfig struct {
@@ -399,29 +442,29 @@ type OAuthAuth struct {
 	Scopes []string `toml:"scopes" json:"scopes"`
 	// optional=true
 	// desc=RedirectURL is the full OAuth redirect URI registered at the IdP (optional; loopback ephemeral port if empty).
-	RedirectURL string `toml:"redirect_url" json:"redirect_url"`
+	RedirectURL string `toml:"redirect_url,omitempty" json:"redirect_url,omitzero"`
 	// optional=true
 	// desc=RedirectPath is used only when RedirectURL is empty (default in oauth is /oauth2/callback).
-	RedirectPath string `toml:"redirect_path" json:"redirect_path"`
+	RedirectPath string `toml:"redirect_path,omitempty" json:"redirect_path,omitzero"`
 	// default=false
 	// optional=true
 	// desc=Skip opening the browser for the authorization code flow.
-	SkipOpenBrowser bool `toml:"skip_open_browser" json:"skip_open_browser"`
+	SkipOpenBrowser bool `toml:"skip_open_browser,omitempty" json:"skip_open_browser,omitzero"`
 	// default=60
 	// optional=true
 	// desc=CallbackTimeoutSeconds bounds browser redirect wait (zero = oauth default).
-	CallbackTimeoutSeconds int `toml:"callback_timeout_seconds" json:"callback_timeout_seconds"`
+	CallbackTimeoutSeconds int `toml:"callback_timeout_seconds,omitzero" json:"callback_timeout_seconds,omitzero"`
 	// default=false
 	// optional=true
 	// desc=Disable Proof Key for Code Exchange (PKCE).
-	DisablePKCE bool `toml:"disable_pkce" json:"disable_pkce"`
+	DisablePKCE bool `toml:"disable_pkce,omitempty" json:"disable_pkce,omitzero"`
 	// optional=true
 	// desc=ExpectedAudience overrides ClientID when validating JWT aud on the server (optional).
-	ExpectedAudience string `toml:"expected_audience" json:"expected_audience"`
+	ExpectedAudience string `toml:"expected_audience,omitempty" json:"expected_audience,omitzero"`
 	// default=30
 	// optional=true
 	// desc=ClockSkewSeconds is leeway for JWT exp/iat/nbf (zero = package default).
-	ClockSkewSeconds int `toml:"clock_skew_seconds" json:"clock_skew_seconds"`
+	ClockSkewSeconds int `toml:"clock_skew_seconds,omitzero" json:"clock_skew_seconds,omitzero"`
 	// optional=true
 	// desc=ClaimMatchers see pkg/auth/oauth.Config.ClaimMatchers.
 	ClaimMatchers map[string]any `toml:"claim_matchers" json:"claim_matchers"`
@@ -548,10 +591,14 @@ func (c *Config) AdapterForTunnel(tunnel *TunnelConfig) *AdapterConfig {
 	if tunnel.Direction == TunnelDirectionListen {
 		return tunnel.Adapter
 	}
-	if tunnel.Direction == TunnelDirectionConnect {
+	/*if tunnel.Direction == TunnelDirectionConnect {
+		return &c.Adapter
+	}*/
+	if tunnel.Adapter == nil {
 		return &c.Adapter
 	}
-	return nil
+	// adapter config is specified for the tunnel
+	return tunnel.Adapter
 }
 
 func (c *TunnelConfig) EndpointAddress() string {

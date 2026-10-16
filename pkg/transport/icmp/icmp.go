@@ -31,7 +31,7 @@ const (
 	protocolICMP = 1
 
 	// Default buffer sizes.
-	defaultBufferSize = (64 * 1024) << 6 //64KB buffer
+	defaultBufferSize = 1 << 18 //256KB buffer
 
 	// Header sizes.
 	ipHeaderSize   = 20
@@ -48,8 +48,19 @@ var (
 	MSS uint32 = 1460
 
 	globalListener       *sharedListener
-	globalListenerDoOnce sync.Once
+	globalListenerDoOnce = &sync.Once{}
 )
+
+func validateAddress(address string) (*net.IPAddr, error) {
+	targetAddr, err := net.ResolveIPAddr("ip", address)
+	if err != nil {
+		return nil, err
+	}
+	if targetAddr.IP.To4() == nil {
+		return nil, fmt.Errorf("icmp address must be an IPv4 address")
+	}
+	return targetAddr, nil
+}
 
 // GetClientDialFunc returns a function that creates client connections based on config.
 func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, bindAdapter string) func(ctx context.Context) (transport.Conn, error) {
@@ -59,10 +70,15 @@ func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, bindAd
 			return nil, fmt.Errorf("failed to setup icmp listener: %w", err)
 		}
 
+		targetAddr, err := validateAddress(config.Connect.Address)
+		if err != nil {
+			return nil, err
+		}
+
 		// Create new connection
 		conn := newConnection(
 			globalListener,
-			&net.IPAddr{IP: net.ParseIP(config.Connect.Address)},
+			targetAddr,
 			uint16(os.Getpid()&0xffff),
 		)
 

@@ -72,13 +72,9 @@ func (client *ClientTunnel) handleOutboundConn(ctx context.Context) {
 
 	// Helper function to write and reset batch
 	writeBatch := func() error {
-		for len(batch) > 0 {
-			n, err := client.conn.Write(batch)
-			batch = batch[n:]
-			if err != nil && err != io.ErrShortWrite {
-				client.logger.Errorf("failed to write outbound data to connection: %v", err)
-				return err
-			}
+		if err := flushOutboundBatch(client.conn, batch); err != nil {
+			client.logger.Errorf("failed to write outbound data to connection: %v", err)
+			return err
 		}
 		batch = buffer[:0]
 		return nil
@@ -192,4 +188,51 @@ func (client *ClientTunnel) handleOutboundStream(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// flushOutboundBatch writes outbound batches to conn.
+// When conn is AtomicPacketConn (e.g. WireGuard), datagrams are flushed one at a time.
+func flushOutboundBatch(conn transport.Conn, batch []byte) error {
+	if ap, ok := conn.(transport.AtomicPacketConn); ok && ap.AtomicPacketWrites() {
+		return flushBatchAsPackets(conn, batch)
+	}
+	for len(batch) > 0 {
+		n, err := conn.Write(batch)
+		batch = batch[n:]
+		if err != nil && err != io.ErrShortWrite {
+			return err
+		}
+	}
+	return nil
+}
+
+// flushBatchAsPackets walks the datagrams in the batch and
+// writes one at a time using the conn's Write method.
+func flushBatchAsPackets(conn transport.Conn, batch []byte) error {
+	for len(batch) > 0 {
+		if len(batch) < 20 {
+			return io.ErrUnexpectedEOF
+		}
+		var totalLen int
+		switch network.IPv4Packet(batch).Version() {
+		case 4:
+			totalLen = network.IPv4Packet(batch).TotalLength()
+		case 6:
+			totalLen = network.IPv6Packet(batch).TotalLength()
+		default:
+			return io.ErrUnexpectedEOF
+		}
+		if totalLen < 20 || totalLen > len(batch) {
+			return io.ErrUnexpectedEOF
+		}
+		n, err := conn.Write(batch[:totalLen])
+		if err != nil && err != io.ErrShortWrite {
+			return err
+		}
+		if n < totalLen {
+			return io.ErrShortWrite
+		}
+		batch = batch[totalLen:]
+	}
+	return nil
 }

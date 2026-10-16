@@ -67,6 +67,7 @@ type Conn struct {
 	flightSize       *FlightCounter
 	dupCnt           uint8
 	ackBytesCount    uint32
+	closeOnce        *sync.Once
 }
 
 func Dial(ctx context.Context, logger common.Logger, bindAdapter, targetAddr string, icmpID uint16, isServer bool) (transport.Conn, error) {
@@ -142,13 +143,14 @@ func newConnection(listener *sharedListener, remoteAddr *net.IPAddr, icmpID uint
 		listener:   listener,
 		localAddr:  listener.localAddr,
 		remoteAddr: remoteAddr,
-		readBuf:    newBuffer((64 * 1024) << 2),
-		writeBuf:   newBuffer((64 * 1024) << 2),
+		readBuf:    newBuffer(defaultBufferSize),
+		writeBuf:   newBuffer(defaultBufferSize),
 		ctx:        connCtx,
 		cancel:     cancel,
 		icmpID:     icmpID,
 		ackTimer:   time.NewTimer(time.Millisecond * 300),
 		rto:        time.NewTimer(time.Second),
+		closeOnce:  &sync.Once{},
 	}
 
 	// Initialize atomic values
@@ -186,16 +188,18 @@ func (c *Conn) RemoteAddr() net.Addr {
 }
 
 func (c *Conn) Close() error {
-	c.sendCloseMessage()
+	c.closeOnce.Do(func() {
+		c.sendCloseMessage()
 
-	c.cancel()
-	c.readBuf.Close()
-	c.writeBuf.Close()
+		c.cancel()
+		c.readBuf.Close()
+		c.writeBuf.Close()
 
-	// Remove from listener's client map
-	key := getClientKey(c.remoteAddr.IP, uint16(c.icmpID))
-	c.listener.clients.Delete(key)
-	c.listener.logger.Infof("connection closed, ip: %s, icmp id: %d", c.remoteAddr.IP.String(), c.icmpID)
+		// Remove from listener's client map
+		key := getClientKey(c.remoteAddr.IP, uint16(c.icmpID))
+		c.listener.clients.Delete(key)
+		c.listener.logger.Infof("connection closed, ip: %s, icmp id: %d", c.remoteAddr.IP.String(), c.icmpID)
+	})
 	return nil
 }
 

@@ -63,7 +63,9 @@ func startPig(cfg *config.Config, logger common.Logger) {
 
 	logger.Infof("Shutting down: %v", context.Cause(ctx))
 
-	logger.Flush()
+	ctrl.Wait()
+
+	ctrl.Close()
 }
 
 func getOSignalCtx() (context.Context, context.CancelFunc) {

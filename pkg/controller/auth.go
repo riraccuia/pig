@@ -27,7 +27,7 @@ import (
 	"github.com/riraccuia/pig/pkg/config"
 )
 
-func (c *Controller) configureMTLS(direction config.TunnelDirection, cfg *config.AuthConfig, tlsConfig *tls.Config) error {
+func (c *Controller) configureMTLS(direction config.TunnelDirection, cfg *config.TrustConfig, tlsConfig *tls.Config) error {
 	if cfg == nil || cfg.MTLS == nil {
 		return nil
 	}
@@ -136,7 +136,7 @@ func (c *Controller) createClientAuthenticator(cfg *config.AuthConfig) (authenti
 }
 
 func (c *Controller) createServerAuthenticator(cfg *config.AuthConfig) (common.Authenticator, error) {
-	if cfg == nil {
+	if cfg == nil || cfg.Type == config.AuthTypeNone {
 		return nil, nil
 	}
 

@@ -46,6 +46,11 @@ var (
 		Protocol:    "tls-in-icmp",
 		ComponentID: 7,
 	}
+	ICEProtocolWireGuard = ICEProtocolDefinition{
+		Network:     "udp",
+		Protocol:    "wg",
+		ComponentID: 8,
+	}
 )
 
 // a map of protocol definitions keyed by pig protocol name, e.g. "ws", "tls", "quic", etc.
@@ -54,6 +59,7 @@ var ICEProtocolDefinitionsByProtocol = map[string]ICEProtocolDefinition{
 	ICEProtocolWS.Protocol:        ICEProtocolWS,
 	ICEProtocolTLS.Protocol:       ICEProtocolTLS,
 	ICEProtocolDTLS.Protocol:      ICEProtocolDTLS,
+	ICEProtocolWireGuard.Protocol: ICEProtocolWireGuard,
 	ICEProtocolTLSInICMP.Protocol: ICEProtocolTLSInICMP,
 }
 
@@ -63,5 +69,6 @@ var ICEProtocolDefinitionsByComponentID = map[int]ICEProtocolDefinition{
 	ICEProtocolWS.ComponentID:        ICEProtocolWS,
 	ICEProtocolTLS.ComponentID:       ICEProtocolTLS,
 	ICEProtocolDTLS.ComponentID:      ICEProtocolDTLS,
+	ICEProtocolWireGuard.ComponentID: ICEProtocolWireGuard,
 	ICEProtocolTLSInICMP.ComponentID: ICEProtocolTLSInICMP,
 }

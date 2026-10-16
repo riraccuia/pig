@@ -26,6 +26,7 @@ type TunnelAdapter interface {
 	Read([]byte) (int, error)
 	Write([]byte) (int, error)
 	Close() error
+	MTU() int
 	IP() net.IP
 	IPNet() *net.IPNet
 	IP6() net.IP

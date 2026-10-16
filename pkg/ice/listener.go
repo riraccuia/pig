@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net"
 	"sync/atomic"
+	"time"
 
 	"github.com/riraccuia/pig/pkg/transport"
 )
@@ -72,17 +73,40 @@ func (l *Listener) Accept() (net.Conn, error) {
 }
 
 func (l *Listener) processChildListener(listener transport.Listener) {
-	for {
+	ch := make(chan net.Conn, 1)
+	go func() {
 		co, err := listener.Accept()
-		if err != nil {
-			return
+		if err == nil {
+			ch <- co
 		}
+		close(ch)
+	}()
 
-		select {
-		case <-l.ctx.Done():
-			return
-		case l.acceptChan <- co:
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	defer listener.Close()
+
+	select {
+	case <-timer.C:
+	case <-l.ctx.Done():
+	case co, ok := <-ch:
+		if ok {
+			select {
+			case l.acceptChan <- co:
+				return
+			case <-l.ctx.Done():
+				co.Close()
+			}
 		}
+	}
+
+	// drain the channel
+	select {
+	case co, ok := <-ch:
+		if ok {
+			co.Close()
+		}
+	default:
 	}
 }
 

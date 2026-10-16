@@ -55,7 +55,7 @@ func TestServerUDPBindingRequest(t *testing.T) {
 
 	local := clientConn.LocalAddr().(*net.UDPAddr)
 
-	result, err := QueryServerUDP(bound.String(), clientConn)
+	result, err := QueryServerUDP(context.Background(), bound.String(), clientConn)
 	if err != nil {
 		t.Fatalf("QueryServerUDP failed: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestServerTCPBindingRequest(t *testing.T) {
 
 	local := conn.LocalAddr().(*net.TCPAddr)
 
-	result, err := QueryServerTCP(tcpBound.String(), conn)
+	result, err := QueryServerTCP(context.Background(), tcpBound.String(), conn)
 	if err != nil {
 		t.Fatalf("QueryServerTCP failed: %v", err)
 	}

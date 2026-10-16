@@ -122,15 +122,18 @@ func doStunQuery(flags *stunFlags) {
 		}
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
 	tlsConfig := &tls.Config{ServerName: strings.Split(flags.stunServerAddr, ":")[0]}
 
-	stunClient := stun.NewClient(
-		flags.stunServerAddr,
-	).WithDialer(
-		network.NewDialer(time.Second * 5),
-	)
+	stunClient := &stun.Client{
+		Dialer:  network.NewDialer(time.Second * 5),
+		Servers: []string{flags.stunServerAddr},
+	}
 
 	result, err := stunClient.QueryServer(
+		ctx,
 		flags.stunServerAddr,
 		srcPort,
 		flags.stunProto,

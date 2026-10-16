@@ -36,7 +36,7 @@ func (c *Controller) createTLSConfig(direction config.TunnelDirection, cfg *conf
 		},
 	}
 
-	err := c.configureMTLS(direction, cfg.Auth, tlsCfg)
+	err := c.configureMTLS(direction, cfg.Trust, tlsCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure MTLS: %w", err)
 	}

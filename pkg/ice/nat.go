@@ -24,8 +24,8 @@ import (
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-func (pc *PathConnector) discoverNATType() int {
-	result, err := stun.DiscoverNATBehavior(pc.opts.STUNServer, &stun.NATDiscoveryOptions{Scope: stun.DiscoveryFull})
+func (pc *PathFinder) discoverNATType() int {
+	result, err := stun.DiscoverNATBehavior(pc.opts.STUNServer[0], &stun.NATDiscoveryOptions{Scope: stun.DiscoveryFull})
 	if err != nil {
 		pc.opts.Logger.Errorf("failed to discover NAT behavior: %v", err)
 	}
@@ -43,7 +43,7 @@ func getNATType(result *stun.NATDiscoveryResult) int {
 }
 
 // appendNATConnectPaths takes a list of connection paths and appends NAT-TRAVERSAL paths to it, if applicable.
-func (pc *PathConnector) appendNATConnectPaths(paths []*ConnectPath, ourNatType, theirNatType int) []*ConnectPath {
+func (pc *PathFinder) appendNATConnectPaths(paths []*ConnectPath, ourNatType, theirNatType int) []*ConnectPath {
 	var natCp []*ConnectPath
 
 	paths = slices.DeleteFunc(paths, func(c *ConnectPath) bool {
@@ -99,7 +99,7 @@ func (pc *PathConnector) appendNATConnectPaths(paths []*ConnectPath, ourNatType,
 //
 // Early testing shows that with each side attempting 150 ports (currently hardcoded), success drops from 50% to 30%.
 // Still better than having to resort to a TURN server.
-func (pc *PathConnector) generateNATConnectPathsFromPublicPath(cp *ConnectPath, ourNatType, theirNatType int) (paths []*ConnectPath) {
+func (pc *PathFinder) generateNATConnectPathsFromPublicPath(cp *ConnectPath, ourNatType, theirNatType int) (paths []*ConnectPath) {
 	if ourNatType < int(stun.MappingAddressDependent) && theirNatType < int(stun.MappingAddressDependent) {
 		// no need to generate NAT connect paths
 		return nil
