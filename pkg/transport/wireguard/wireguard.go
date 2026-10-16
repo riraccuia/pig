@@ -272,11 +272,6 @@ func newConnWithBindWaitHandshake(ctx context.Context, opts *setupOpts, bind wco
 		localAddr.Port = port
 	}
 
-	err := dev.IpcSet(fmt.Sprintf("public_key=%s\npersistent_keepalive_interval=%d\n", opts.peers[0].publicKeyHex, 1))
-	if err != nil {
-		return nil, fmt.Errorf("failed to set keepalive: %w", err)
-	}
-
 	loopTimer := time.NewTimer(0)
 	defer loopTimer.Stop()
 
@@ -302,11 +297,6 @@ outer:
 			break
 		}
 		loopTimer.Reset(time.Millisecond * 500)
-	}
-
-	err = dev.IpcSet(fmt.Sprintf("public_key=%s\npersistent_keepalive_interval=%d\n", opts.peers[0].publicKeyHex, opts.peers[0].keepalive))
-	if err != nil {
-		return nil, fmt.Errorf("failed to set keepalive: %w", err)
 	}
 
 	return &Conn{
