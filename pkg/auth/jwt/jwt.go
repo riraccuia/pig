@@ -127,21 +127,10 @@ func validateSigningMethod(token *jwt.Token) error {
 
 // Authenticate performs JWT token authentication.
 func (a *ServerAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter) error {
-	// Read token length (2 bytes)
-	lenBuf := make([]byte, 2)
-	if _, err := io.ReadFull(rw, lenBuf); err != nil {
-		return fmt.Errorf("failed to read token length: %w", err)
+	tokenStr, err := ReadToken(rw)
+	if err != nil {
+		return err
 	}
-	tokenLen := int(lenBuf[0])<<8 | int(lenBuf[1])
-
-	// Read token
-	tokenBuf := make([]byte, tokenLen)
-	if _, err := io.ReadFull(rw, tokenBuf); err != nil {
-		return fmt.Errorf("failed to read token: %w", err)
-	}
-
-	// Decode base64url token
-	tokenStr := string(tokenBuf)
 
 	// Parse and validate token with standard validation
 	var claims jwt.MapClaims
@@ -166,6 +155,23 @@ func (a *ServerAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter
 	}
 
 	return nil
+}
+
+// ReadToken reads a framed JWT token from r.
+func ReadToken(r io.Reader) (string, error) {
+	buf := make([]byte, 1<<11)
+	n, err := r.Read(buf)
+	if err != nil {
+		return "", fmt.Errorf("failed to read token length: %w", err)
+	}
+	if n < 2 {
+		return "", fmt.Errorf("failed to read token length: short read %d", n)
+	}
+	tokenLen := int(buf[0])<<8 | int(buf[1])
+	if tokenLen > n {
+		return "", fmt.Errorf("failed to read token: short read %d", n)
+	}
+	return string(buf[2:n]), nil
 }
 
 // SendToken sends a JWT token over the connection.

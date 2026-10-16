@@ -32,7 +32,7 @@ import (
 )
 
 func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func(ctx context.Context) (transport.Conn, error) {
-	return dialFuncWithSrcPort(config.Connect.Address, config.Connect.SrcPort, config.Connect.Port, tlsConfig)
+	return dialFuncWithSrcPort(config.Connect.Address, config.Connect.SrcPort, config.Connect.Port, config.IdleTimeout, tlsConfig)
 }
 
 func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, tlsConfig *tls.Config) func(ctx context.Context) (transport.Listener, error) {
@@ -54,19 +54,12 @@ func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, tlsC
 			return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
 		}
 
-		maxStreams := int64(config.StreamCount)
-		if maxStreams <= 0 {
-			maxStreams = int64(runtime.NumCPU())
-		}
-		idleTimeout, _ := getTimeoutAndKeepalivePeriod(config.IdleTimeout)
-		quicConfig := &quic.Config{
-			MaxIncomingStreams: maxStreams,
-			EnableDatagrams:    true,
-			MaxIdleTimeout:     idleTimeout,
-		}
 		tr := &quic.Transport{
 			Conn: udpConn,
 		}
+
+		quicConfig := getServerQuicConfig(config.StreamCount, config.IdleTimeout)
+
 		listener, err := tr.Listen(tlsConfig.Clone(), quicConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to listen on endpoint: %w", err)
@@ -85,17 +78,13 @@ func GetClientFromConn(ctx context.Context, conn net.Conn, config *config.Tunnel
 		Conn: packetConn,
 	}
 
-	idleTimeout, keepalivePeriod := getTimeoutAndKeepalivePeriod(config.IdleTimeout)
+	quicConfig := getClientQuicConfig(config.IdleTimeout)
 
 	qConn, err := tr.Dial(
 		ctx,
 		conn.RemoteAddr(),
 		tlsConfig.Clone(),
-		&quic.Config{
-			EnableDatagrams: true,
-			MaxIdleTimeout:  idleTimeout,
-			KeepAlivePeriod: keepalivePeriod,
-		},
+		quicConfig,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to establish QUIC connection: %w", err)
@@ -107,20 +96,11 @@ func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Tunnel
 	if tlsConfig == nil {
 		return nil, errors.New("quic: tls.Config not set")
 	}
-	maxStreams := int64(config.StreamCount)
-	if maxStreams <= 0 {
-		maxStreams = int64(runtime.NumCPU())
-	}
-	idleTimeout, _ := getTimeoutAndKeepalivePeriod(config.IdleTimeout)
-	quicConfig := &quic.Config{
-		MaxIncomingStreams: maxStreams,
-		EnableDatagrams:    true,
-		MaxIdleTimeout:     idleTimeout,
-	}
 	packetConn := network.ConnectedUdpToPacketConn(co.(*net.UDPConn))
 	tr := &quic.Transport{
 		Conn: packetConn,
 	}
+	quicConfig := getServerQuicConfig(config.StreamCount, config.IdleTimeout)
 	listener, err := tr.Listen(tlsConfig.Clone(), quicConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen using QUIC on endpoint: %w", err)
@@ -128,7 +108,7 @@ func GetListenerFromConn(ctx context.Context, co net.Conn, config *config.Tunnel
 	return NewQuicTransport(listener), nil
 }
 
-func dialFuncWithSrcPort(address string, srcPort, dstPort int, tlsConfig *tls.Config) func(ctx context.Context) (transport.Conn, error) {
+func dialFuncWithSrcPort(address string, srcPort, dstPort int, idleTimeoutSec int, tlsConfig *tls.Config) func(ctx context.Context) (transport.Conn, error) {
 	return func(ctx context.Context) (transport.Conn, error) {
 		var (
 			udpConn    *net.UDPConn
@@ -159,13 +139,12 @@ func dialFuncWithSrcPort(address string, srcPort, dstPort int, tlsConfig *tls.Co
 		tr := &quic.Transport{
 			Conn: udpConn,
 		}
+		quicConfig := getClientQuicConfig(idleTimeoutSec)
 		conn, err := tr.Dial(
 			ctx,
 			targetAddr,
-			tlsConfig,
-			&quic.Config{
-				EnableDatagrams: true,
-			},
+			tlsConfig.Clone(),
+			quicConfig,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to establish QUIC connection: %w", err)
@@ -181,4 +160,26 @@ func getTimeoutAndKeepalivePeriod(idleTimeoutSec int) (time.Duration, time.Durat
 		keepalivePeriod = 0
 	}
 	return idleTimeout, keepalivePeriod
+}
+
+func getClientQuicConfig(idleTimeoutSec int) *quic.Config {
+	idleTimeout, keepalivePeriod := getTimeoutAndKeepalivePeriod(idleTimeoutSec)
+	return &quic.Config{
+		EnableDatagrams: true,
+		MaxIdleTimeout:  idleTimeout,
+		KeepAlivePeriod: keepalivePeriod,
+	}
+}
+
+func getServerQuicConfig(streamCount, idleTimeoutSec int) *quic.Config {
+	maxStreams := int64(streamCount)
+	if maxStreams <= 0 {
+		maxStreams = int64(runtime.NumCPU())
+	}
+	idleTimeout, _ := getTimeoutAndKeepalivePeriod(idleTimeoutSec)
+	return &quic.Config{
+		MaxIncomingStreams: maxStreams,
+		EnableDatagrams:    true,
+		MaxIdleTimeout:     idleTimeout,
+	}
 }

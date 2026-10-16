@@ -51,7 +51,6 @@ var (
 	DefaultConnectOffset = time.Millisecond * 500
 
 	DefaultWGKeepaliveConnect = 25
-	DefaultWGAllowedIPs       = []string{"0.0.0.0/0", "::/0"}
 )
 
 func (b *MQTTBrokerConfig) Initialize() error {

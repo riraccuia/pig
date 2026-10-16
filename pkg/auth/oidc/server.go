@@ -71,7 +71,7 @@ func NewServerAuthenticator(cfg Config) (common.Authenticator, error) {
 
 // Authenticate reads a framed id_token and verifies it against the configured issuer and audience.
 func (a *ServerAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter) error {
-	raw, err := oauth.ReadFramedToken(rw)
+	raw, err := oauth.ReadToken(rw)
 	if err != nil {
 		return err
 	}
