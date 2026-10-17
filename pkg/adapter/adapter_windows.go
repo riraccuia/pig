@@ -37,7 +37,19 @@ func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
 		ifName = fmt.Sprintf("%s%d", tunName, i)
 	}
 
-	nativeTun, err := CreateTUNWithRequestedGUID(ifName, WintunStaticRequestedGUID)
+	guid := WintunStaticRequestedGUID
+	g, status, found, err := lookupAdapterGUIDByFriendlyName(ifName)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		if status == windows.IfOperStatusUp {
+			return nil, fmt.Errorf("adapter %q already connected", ifName)
+		}
+		guid = g
+	}
+
+	nativeTun, err := CreateTUNWithRequestedGUID(ifName, guid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create wintun adapter: %v", err)
 	}

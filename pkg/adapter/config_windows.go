@@ -388,9 +388,13 @@ func getIfAddrs(ifName string, family int) ([]ifAddr, error) {
 }
 
 func adapterAddresses(family uint32) ([]*windows.IpAdapterAddresses, error) {
+	flags := uint32(windows.GAA_FLAG_INCLUDE_PREFIX | windows.GAA_FLAG_SKIP_ANYCAST | windows.GAA_FLAG_SKIP_MULTICAST | windows.GAA_FLAG_SKIP_DNS_SERVER)
+	return adapterAddressesWithFlags(family, flags)
+}
+
+func adapterAddressesWithFlags(family uint32, flags uint32) ([]*windows.IpAdapterAddresses, error) {
 	var b []byte
 	l := uint32(15000) // recommended initial size
-	flags := uint32(windows.GAA_FLAG_INCLUDE_PREFIX | windows.GAA_FLAG_SKIP_ANYCAST | windows.GAA_FLAG_SKIP_MULTICAST | windows.GAA_FLAG_SKIP_DNS_SERVER)
 	for {
 		b = make([]byte, l)
 		err := windows.GetAdaptersAddresses(family, flags, 0, (*windows.IpAdapterAddresses)(unsafe.Pointer(&b[0])), &l)
@@ -412,4 +416,28 @@ func adapterAddresses(family uint32) ([]*windows.IpAdapterAddresses, error) {
 		aas = append(aas, aa)
 	}
 	return aas, nil
+}
+
+// lookupAdapterGUIDByFriendlyName finds an adapter by FriendlyName, including disconnected interfaces.
+// On match it returns the hardware GUID parsed from AdapterName and the current OperStatus.
+// Not found returns found == false.
+func lookupAdapterGUIDByFriendlyName(name string) (guid *windows.GUID, operStatus uint32, found bool, err error) {
+	aas, err := adapterAddressesWithFlags(windows.AF_UNSPEC, windows.GAA_FLAG_INCLUDE_ALL_INTERFACES)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	for _, aa := range aas {
+		if windows.UTF16PtrToString(aa.FriendlyName) != name {
+			continue
+		}
+		if aa.AdapterName == nil {
+			return nil, 0, false, fmt.Errorf("adapter %q: missing AdapterName", name)
+		}
+		g, err := windows.GUIDFromString(windows.BytePtrToString(aa.AdapterName))
+		if err != nil {
+			return nil, 0, false, fmt.Errorf("adapter %q: parse GUID: %w", name, err)
+		}
+		return &g, aa.OperStatus, true, nil
+	}
+	return nil, 0, false, nil
 }
