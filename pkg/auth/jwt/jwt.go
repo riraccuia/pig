@@ -23,6 +23,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/riraccuia/pig/pkg/auth"
 	"github.com/riraccuia/pig/pkg/common"
 )
 
@@ -78,6 +79,8 @@ func NewClientAuthenticator(token string) (common.Authenticator, error) {
 
 // Authenticate sends the JWT token to the server.
 func (a *ClientAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter) error {
+	_, cancel := auth.BindAuthTimeout(ctx, 0, rw)
+	defer cancel()
 	return SendToken(rw, a.token)
 }
 
@@ -127,6 +130,9 @@ func validateSigningMethod(token *jwt.Token) error {
 
 // Authenticate performs JWT token authentication.
 func (a *ServerAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter) error {
+	_, cancel := auth.BindAuthTimeout(ctx, 0, rw)
+	defer cancel()
+
 	tokenStr, err := ReadToken(rw)
 	if err != nil {
 		return err

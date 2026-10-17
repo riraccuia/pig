@@ -20,11 +20,12 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/riraccuia/pig/pkg/auth"
 )
 
 const (
 	defaultRedirectPath = "/oauth2/callback"
-	defaultCallbackWait = time.Minute
 	defaultClockSkew    = 30 * time.Second
 )
 
@@ -130,10 +131,10 @@ func (c *Config) redirectPath() string {
 }
 
 func (c *Config) callbackTimeout() time.Duration {
-	if c.CallbackTimeout > 0 {
+	if c != nil && c.CallbackTimeout > 0 {
 		return c.CallbackTimeout
 	}
-	return defaultCallbackWait
+	return auth.DefaultAuthTimeout
 }
 
 func (c *Config) scopeString() []string {

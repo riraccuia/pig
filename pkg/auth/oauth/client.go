@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/riraccuia/pig/pkg/auth"
 	"github.com/riraccuia/pig/pkg/auth/jwt"
 	"github.com/riraccuia/pig/pkg/common"
 	"golang.org/x/oauth2"
@@ -156,8 +157,11 @@ func (a *ClientAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter
 	if err != nil {
 		return err
 	}
-	if s := strings.TrimSpace(tok.AccessToken); s != "" {
-		return jwt.SendToken(rw, s)
+	s := strings.TrimSpace(tok.AccessToken)
+	if s == "" {
+		return fmt.Errorf("oauth: empty access_token")
 	}
-	return fmt.Errorf("oauth: empty access_token")
+	_, cancel := auth.BindAuthTimeout(ctx, 0, rw)
+	defer cancel()
+	return jwt.SendToken(rw, s)
 }
