@@ -154,6 +154,9 @@ func dialFuncWithSrcPort(address string, srcPort, dstPort int, idleTimeoutSec in
 }
 
 func getTimeoutAndKeepalivePeriod(idleTimeoutSec int) (time.Duration, time.Duration) {
+	if idleTimeoutSec <= 0 {
+		return 0, 0
+	}
 	idleTimeout := time.Duration(idleTimeoutSec) * time.Second
 	keepalivePeriod := idleTimeout / 2
 	if keepalivePeriod < time.Second {

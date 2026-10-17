@@ -95,7 +95,7 @@ func (a *ServerAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter
 	ctx, cancel := auth.BindAuthTimeout(ctx, 0, rw)
 	defer cancel()
 
-	raw, err := jwt.ReadToken(rw)
+	raw, err := jwt.ReadTokenContext(ctx, rw)
 	if err != nil {
 		return err
 	}
