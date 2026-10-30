@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/riraccuia/pig/pkg/auth"
 	"github.com/riraccuia/pig/pkg/auth/jwt"
 	"github.com/riraccuia/pig/pkg/auth/oauth"
 	"github.com/riraccuia/pig/pkg/common"
@@ -72,7 +73,10 @@ func NewServerAuthenticator(cfg Config) (common.Authenticator, error) {
 
 // Authenticate reads a framed id_token and verifies it against the configured issuer and audience.
 func (a *ServerAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter) error {
-	raw, err := jwt.ReadToken(rw)
+	ctx, cancel := auth.BindAuthTimeout(ctx, 0, rw)
+	defer cancel()
+
+	raw, err := jwt.ReadTokenContext(ctx, rw)
 	if err != nil {
 		return err
 	}

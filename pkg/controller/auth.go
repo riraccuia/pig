@@ -140,32 +140,42 @@ func (c *Controller) createServerAuthenticator(cfg *config.AuthConfig) (common.A
 		return nil, nil
 	}
 
-	if cfg.OIDC != nil {
+	if !cfg.Type.IsValid() {
+		return nil, fmt.Errorf("invalid authentication type: %s", cfg.Type)
+	}
+
+	switch cfg.Type {
+	case config.AuthTypeOIDC:
+		if cfg.OIDC == nil {
+			return nil, fmt.Errorf("invalid oidc authentication config")
+		}
 		authenticator, err := oidc.NewServerAuthenticator(cfg.OIDC.ToConfig())
 		if err != nil {
 			return nil, fmt.Errorf("failed to create OIDC authenticator: %w", err)
 		}
 		c.logger.Infof("OIDC authentication enabled")
 		return authenticator, nil
-	}
-
-	if cfg.OAuth != nil {
+	case config.AuthTypeOAuth:
+		if cfg.OAuth == nil {
+			return nil, fmt.Errorf("invalid oauth authentication config")
+		}
 		authenticator, err := oauth.NewServerAuthenticator(cfg.OAuth.ToConfig())
 		if err != nil {
 			return nil, fmt.Errorf("failed to create OAuth authenticator: %w", err)
 		}
 		c.logger.Infof("OAuth authentication enabled")
 		return authenticator, nil
+	case config.AuthTypeJWT:
+		if cfg.JWT == nil || cfg.JWT.PublicKeySource == "" {
+			return nil, fmt.Errorf("invalid jwt authentication config")
+		}
+		authenticator, err := jwt.NewServerAuthenticator(cfg.JWT.PublicKeySource)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create JWT authenticator: %w", err)
+		}
+		c.logger.Infof("JWT authentication enabled")
+		return authenticator, nil
+	default:
+		return nil, fmt.Errorf("authentication type not implemented: %s", cfg.Type)
 	}
-
-	if cfg.JWT == nil || cfg.JWT.PublicKeySource == "" {
-		return nil, nil
-	}
-
-	authenticator, err := jwt.NewServerAuthenticator(cfg.JWT.PublicKeySource)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create JWT authenticator: %w", err)
-	}
-	c.logger.Infof("JWT authentication enabled")
-	return authenticator, nil
 }

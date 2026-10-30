@@ -23,6 +23,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/riraccuia/pig/pkg/auth"
 	"github.com/riraccuia/pig/pkg/common"
 )
 
@@ -78,6 +79,8 @@ func NewClientAuthenticator(token string) (common.Authenticator, error) {
 
 // Authenticate sends the JWT token to the server.
 func (a *ClientAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter) error {
+	_, cancel := auth.BindAuthTimeout(ctx, 0, rw)
+	defer cancel()
 	return SendToken(rw, a.token)
 }
 
@@ -127,7 +130,10 @@ func validateSigningMethod(token *jwt.Token) error {
 
 // Authenticate performs JWT token authentication.
 func (a *ServerAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter) error {
-	tokenStr, err := ReadToken(rw)
+	ctx, cancel := auth.BindAuthTimeout(ctx, 0, rw)
+	defer cancel()
+
+	tokenStr, err := ReadTokenContext(ctx, rw)
 	if err != nil {
 		return err
 	}
@@ -172,6 +178,27 @@ func ReadToken(r io.Reader) (string, error) {
 		return "", fmt.Errorf("failed to read token: short read %d", n)
 	}
 	return string(buf[2 : 2+tokenLen]), nil
+}
+
+// ReadTokenContext is like ReadToken but returns when ctx is done.
+// If the context ends first, the underlying Read may still be blocked until
+// the caller closes r.
+func ReadTokenContext(ctx context.Context, r io.Reader) (string, error) {
+	type result struct {
+		tok string
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		tok, err := ReadToken(r)
+		ch <- result{tok, err}
+	}()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case res := <-ch:
+		return res.tok, res.err
+	}
 }
 
 // SendToken sends a JWT token over the connection.

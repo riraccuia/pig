@@ -25,6 +25,7 @@ import (
 	"time"
 
 	jwtgo "github.com/golang-jwt/jwt/v5"
+	"github.com/riraccuia/pig/pkg/auth"
 	"github.com/riraccuia/pig/pkg/auth/jwt"
 	"github.com/riraccuia/pig/pkg/auth/oauth"
 	"github.com/riraccuia/pig/pkg/common"
@@ -122,31 +123,32 @@ func (a *ClientAuthenticator) Authenticate(ctx context.Context, rw io.ReadWriter
 	defer a.mu.Unlock()
 
 	leeway := a.cfg.ClockSkewOrDefault()
-	if idTokenStillValid(a.idTok, leeway) {
-		return jwt.SendToken(rw, a.idTok)
-	}
-
-	// Prefer refresh so a still-valid access_token does not skip a new id_token.
-	// Refresh responses are not bound to the authorization-request nonce.
-	if tok, err := a.oauthCA.Refresh(ctx); err == nil {
-		if id := idTokenFromToken(tok); id != "" {
-			a.idTok = id
-			return jwt.SendToken(rw, a.idTok)
+	if !idTokenStillValid(a.idTok, leeway) {
+		// Prefer refresh so a still-valid access_token does not skip a new id_token.
+		// Refresh responses are not bound to the authorization-request nonce.
+		if tok, err := a.oauthCA.Refresh(ctx); err == nil {
+			if id := idTokenFromToken(tok); id != "" {
+				a.idTok = id
+			}
 		}
 	}
+	if !idTokenStillValid(a.idTok, leeway) {
+		nonce := randomNonce()
+		tok, err := a.oauthCA.Authorize(ctx, oauth2.SetAuthURLParam("nonce", nonce))
+		if err != nil {
+			return err
+		}
+		id := idTokenFromToken(tok)
+		if id == "" {
+			return ErrMissingIDToken
+		}
+		if err := requireIDTokenNonce(id, nonce); err != nil {
+			return err
+		}
+		a.idTok = id
+	}
 
-	nonce := randomNonce()
-	tok, err := a.oauthCA.Authorize(ctx, oauth2.SetAuthURLParam("nonce", nonce))
-	if err != nil {
-		return err
-	}
-	id := idTokenFromToken(tok)
-	if id == "" {
-		return ErrMissingIDToken
-	}
-	if err := requireIDTokenNonce(id, nonce); err != nil {
-		return err
-	}
-	a.idTok = id
+	_, cancel := auth.BindAuthTimeout(ctx, 0, rw)
+	defer cancel()
 	return jwt.SendToken(rw, a.idTok)
 }
