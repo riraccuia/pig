@@ -43,6 +43,8 @@ type sharedListener struct {
 	packetChan chan *Packet
 	bufPool    sync.Pool
 	logger     common.Logger
+	// writeHook, if set, replaces the raw-socket write (tests only).
+	writeHook func(dst net.IP, msg *icmp.Message) error
 }
 
 var h maphash.Hash
@@ -245,6 +247,9 @@ func (l *sharedListener) getClientConn(ip net.IP, icmpID uint16, echoCode uint8)
 
 // writePacket writes an ICMP packet to the raw socket.
 func (l *sharedListener) writePacket(dst net.IP, msg *icmp.Message) error {
+	if l.writeHook != nil {
+		return l.writeHook(dst, msg)
+	}
 	msgBytes, err := msg.Marshal(nil)
 	if err != nil {
 		return fmt.Errorf("error marshaling ICMP message: %w", err)

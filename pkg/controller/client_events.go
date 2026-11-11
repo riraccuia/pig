@@ -22,60 +22,57 @@ import (
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/demux"
+	"github.com/riraccuia/pig/pkg/route"
 )
 
-func (c *Controller) onTunnelConnected(tunnel *client.Client) error {
+func (c *Controller) onTunnelConnected(tunnelInfo *TunnelInfo) error {
+	tunnel := tunnelInfo.Tunnel
 	tunnelAdapter := tunnel.GetAdapter()
 	tunnelCfg := tunnel.Config()
-	switch ta := tunnel.GetAdapter().(type) {
+	switch ta := tunnelAdapter.(type) {
 	case *demux.Adapter:
-		/*if tunnelCfg == nil || len(tunnelCfg.Routes) == 0 {
-			c.demux.SetDefault(tunnelAdapter)
-			return nil
-		}*/
-		c.demux.AddRoutes(ta, tunnelCfg.Routes)
+		c.setupTunnelDemux(ta, tunnelCfg.Routes)
 	case common.TunnelAdapter:
 	default:
 		return fmt.Errorf("unexpected tunnel adapter type %T", tunnel.GetAdapter())
 	}
 	var addRoutes []config.Route
 	addRoutes = append(addRoutes, tunnelCfg.Routes...)
-	select {
-	case c.routeRequests <- routeRequest{op: routeOpAdd, routes: addRoutes, tunIfName: tunnelAdapter.Name()}:
-	default:
-		c.logger.Errorf("failed to send route add request: channel is full")
+	activeRoutes := c.RouteAddBulk(tunnelInfo.Logger, addRoutes, tunnelAdapter)
+	for _, activeRoute := range activeRoutes {
+		tunnelInfo.NewActiveRoute(activeRoute)
 	}
 	return nil
 }
 
-func (c *Controller) onTunnelDisconnected(tunnel *client.Client) error {
-	ta, ok := tunnel.GetAdapter().(*demux.Adapter)
-	if ok {
-		c.demux.RemoveRoutes(ta)
+func (c *Controller) onTunnelDisconnected(tunnelInfo *TunnelInfo) error {
+	tunnel := tunnelInfo.Tunnel
+	tunnelAdapter := tunnel.GetAdapter()
+	if demuxAdapter, ok := tunnelAdapter.(*demux.Adapter); ok {
+		c.cleanupTunnelDemux(demuxAdapter)
 	}
 
-	tunnelCfg := tunnel.Config()
-	if tunnelCfg == nil || len(tunnelCfg.Routes) == 0 {
-		return nil
+	activeRoutes := make([]*route.Route, 0)
+	tunnelInfo.ActiveRoutes.Range(func(key, value any) bool {
+		activeRoutes = append(activeRoutes, value.(*route.Route))
+		return true
+	})
+
+	for _, activeRoute := range activeRoutes {
+		if c.RouteRemove(tunnelInfo.Logger, activeRoute, tunnelAdapter) {
+			tunnelInfo.DeleteActiveRoute(activeRoute)
+		}
 	}
-	removeRoutes := tunnelCfg.Routes
-	if pb, err := peerBypassRoute(tunnel.LastPeerAddr()); err == nil {
-		removeRoutes = append(removeRoutes, pb)
-	}
-	if len(removeRoutes) == 0 {
-		return nil
-	}
-	select {
-	case c.routeRequests <- routeRequest{op: routeOpRemove, routes: removeRoutes, tunIfName: tunnel.GetAdapter().Name()}:
-	default:
-		c.logger.Errorf("failed to send route remove request: channel is full")
-	}
+
 	return nil
 }
 
-func (c *Controller) handleClientEvents(ctx context.Context, tunnel *client.Client) {
+func (c *Controller) handleClientEvents(ctx context.Context, tunnelInfo *TunnelInfo) {
 	// tunnelCfg is assumed never nil for controller-managed tunnels (AddClientTunnel path).
 	// HandleClientEvents may pass nil for externally-created clients; route/demux ops are skipped in that case.
+
+	tunnel := tunnelInfo.Tunnel.(*client.Client)
+	logger := tunnelInfo.Logger
 
 	for {
 		var event *client.EventContext
@@ -84,7 +81,7 @@ func (c *Controller) handleClientEvents(ctx context.Context, tunnel *client.Clie
 		case <-ctx.Done():
 			tunnel.Wait()
 			if len(tunnel.Events()) == 0 {
-				c.logger.Debugf("Stopped monitoring client events")
+				logger.Debugf("Stopped monitoring client events")
 				return
 			}
 			continue
@@ -92,27 +89,21 @@ func (c *Controller) handleClientEvents(ctx context.Context, tunnel *client.Clie
 
 		c.logger.Debugf("Client event received: %s", event.State)
 
-		tunnelCfg := tunnel.Config()
-
 		switch event.State {
 		case client.StateConnected:
-			err := c.onTunnelConnected(tunnel)
+			err := c.onTunnelConnected(tunnelInfo)
 			if err != nil {
-				c.logger.Errorf("failed to handle tunnel connected event: %v", err)
+				logger.Errorf("failed to handle tunnel connected event: %v", err)
 				continue
 			}
 		case client.StateDisconnected, client.StateStopped:
-			err := c.onTunnelDisconnected(tunnel)
+			err := c.onTunnelDisconnected(tunnelInfo)
 			if err != nil {
-				c.logger.Errorf("failed to handle tunnel disconnected event: %v", err)
+				logger.Errorf("failed to handle tunnel disconnected event: %v", err)
 				continue
 			}
 		}
 
-		var proto config.TransportType
-		if tunnelCfg != nil {
-			proto = tunnelCfg.Proto
-		}
-		c.executeClientScript(proto, tunnel, event)
+		c.executeClientScript(tunnel, event)
 	}
 }

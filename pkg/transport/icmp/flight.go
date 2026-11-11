@@ -25,6 +25,7 @@ type FlightCounter struct {
 	cwnd           *atomic.Uint32
 	sendWindowSize uint32
 	bc             uint32
+	closed         bool
 }
 
 func NewFlightCounter(cwnd *atomic.Uint32, sendWindowSize uint32) *FlightCounter {
@@ -65,9 +66,17 @@ func (fc *FlightCounter) Sub(num uint32) {
 	fc.Unlock()
 }
 
+func (fc *FlightCounter) Close() {
+	fc.Lock()
+	fc.closed = true
+	fc.cond.Broadcast()
+	fc.Unlock()
+}
+
 func (fc *FlightCounter) WaitCwnd(emss uint32) {
 	fc.Lock()
-	for fc.bc > 0 && (fc.bc >= (fc.cwnd.Load()-emss) || (fc.bc >= (fc.sendWindowSize - emss))) {
+	for !fc.closed && fc.bc > 0 &&
+		(fc.bc >= (fc.cwnd.Load()-emss) || (fc.bc >= (fc.sendWindowSize - emss))) {
 		fc.cond.Wait()
 	}
 	fc.Unlock()

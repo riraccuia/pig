@@ -65,7 +65,6 @@ func (pc *PathFinder) GetConnectPaths(ctx context.Context, target config.Connect
 
 	offerCandidates, localInfo = pc.buildLocalCandidates(localEndpoints, uint16(target.SrcPort), protos)
 	offerCandidates = append(offerCandidates, pc.buildReflexiveCandidates(ctx, localEndpoints, localInfo, protos)...)
-	offerCandidates = dedupCandidates(offerCandidates)
 
 	var offer, answer *message.ICEMessage
 

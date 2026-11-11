@@ -81,10 +81,6 @@ func (cp *ConnectPath) ConnectICMP(ctx context.Context, logger common.Logger, bi
 	if cp.Protocol.Network != "icmp" {
 		return nil, fmt.Errorf("protocol is not icmp: %s", cp.Protocol.Network)
 	}
-	err = icmp.SetupGlobalListener(context.Background(), logger, bindAdapter, isServer)
-	if err != nil {
-		return nil, fmt.Errorf("failed to setup icmp listener: %w", err)
-	}
 	remoteAddr := cp.RemoteAddr.(*net.IPAddr)
 	// convert the ice id to an int16
 	icmpID := binary.BigEndian.Uint16([]byte(cp.ICEID))

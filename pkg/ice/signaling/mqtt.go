@@ -34,6 +34,7 @@ func getMQTTClientOptions(opts *Options) *mqtt.ClientOptions {
 	mqttOpts := mqtt.NewClientOptions().
 		AddBroker(opts.BrokerURL).
 		SetAutoReconnect(true).
+		SetResumeSubs(true).
 		SetCleanSession(true).
 		SetTLSConfig(&tls.Config{
 			InsecureSkipVerify: true,

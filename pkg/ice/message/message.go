@@ -19,6 +19,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"math/rand"
+	"strings"
 	"time"
 )
 
@@ -146,9 +147,10 @@ func (msg *ICEMessage) String() string {
 
 // Helper functions
 
-// GenerateFoundation creates a unique foundation string for the candidate.
-func GenerateFoundation(addr string) string {
-	hash := sha256.Sum256([]byte(addr))
+// GenerateFoundation creates the foundation string for the candidate.
+func GenerateFoundation(sType ICECandidateType, transportProto, baseIP string) string {
+	foundationStr := strings.Join([]string{string(sType), transportProto, baseIP}, "|")
+	hash := sha256.Sum256([]byte(foundationStr))
 	return base64.StdEncoding.EncodeToString(hash[:8])[:8] // First 8 chars of hash
 }
 

@@ -92,7 +92,7 @@ func (a *Adapter) Write(b []byte) (int, error) {
 		return 0, ErrAdapterClosed
 	default:
 	}
-	pkt := network.IPv4Packet(a.parent.bufferPool.GetBuffer(a.parent.mtu))
+	pkt := network.IPv4Packet(a.parent.bufferPool.GetBuffer(a.parent.adapter.BlockSize()))
 	copy(pkt[:], b)
 	select {
 	case a.inqueue <- pkt:
@@ -111,6 +111,7 @@ func (a *Adapter) Close() error {
 	return nil
 }
 func (a *Adapter) MTU() int           { return a.parent.adapter.MTU() }
+func (a *Adapter) BlockSize() int     { return a.parent.adapter.BlockSize() }
 func (a *Adapter) IP() net.IP         { return a.parent.adapter.IP() }
 func (a *Adapter) IP6() net.IP        { return a.parent.adapter.IP6() }
 func (a *Adapter) IPNet() *net.IPNet  { return a.parent.adapter.IPNet() }

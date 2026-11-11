@@ -45,6 +45,10 @@ func (t *TUNAdapter) MTU() int {
 	return t.mtu
 }
 
+func (t *TUNAdapter) BlockSize() int {
+	return t.mtu
+}
+
 func (t *TUNAdapter) IP() net.IP {
 	return t.ip
 }

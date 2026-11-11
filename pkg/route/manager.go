@@ -36,7 +36,7 @@ type Manager interface {
 	// AddRoute adds a static route.
 	// Throws a 'file exists' error if the route already exists,
 	// use os.IsExist to check for this case.
-	AddRoute(route *Route) error
+	AddRoute(route *Route) (*Route, error)
 
 	// RemoveRoute removes a static route.
 	RemoveRoute(route *Route) error
@@ -52,9 +52,6 @@ type Manager interface {
 
 	// GetDefaultGateway6 returns the IPv6 default gateway (nil if not set).
 	GetDefaultGateway6() net.IP
-
-	// WaitDefaultGateway waits for the default gateway to be set.
-	WaitDefaultGateway(v4, v6 bool) <-chan struct{}
 }
 
 type platformBackend interface {
@@ -66,17 +63,12 @@ type platformBackend interface {
 }
 
 type baseManager struct {
-	ctx             context.Context
 	cancel          context.CancelFunc
 	routeTableV4    *Table
 	routeTableV6    *Table
 	trackedRoutesV4 sync.Map
 	trackedRoutesV6 sync.Map
-	defGwCond       *sync.Cond
 	backend         platformBackend
-
-	//findBestRouteFn func(dst net.IP) (*Route, error)
-	waitDefaultGwFn func(v4, v6 bool) <-chan struct{}
 }
 
 func wrapError(prev error, err error, label string) error {
@@ -98,17 +90,11 @@ func NewManager(ctx context.Context) (Manager, error) {
 }
 
 func newBaseManager(ctx context.Context) (*baseManager, error) {
-	mCtx := context.Background()
-	if ctx != nil {
-		mCtx = ctx
-	}
-	mCtx, cancel := context.WithCancel(mCtx)
+	ctx, cancel := context.WithCancel(ctx)
 	bm := &baseManager{
 		routeTableV4: NewTable(syscall.AF_INET),
 		routeTableV6: NewTable(syscall.AF_INET6),
-		ctx:          mCtx,
 		cancel:       cancel,
-		defGwCond:    sync.NewCond(&sync.Mutex{}),
 	}
 
 	backend, err := newBackend()
@@ -126,14 +112,14 @@ func newBaseManager(ctx context.Context) (*baseManager, error) {
 
 	bm.backend = backend
 
-	if err := bm.initFromOS(); err != nil {
+	if err := bm.initFromOS(ctx); err != nil {
 		bm.Close()
 		return nil, err
 	}
 	return bm, nil
 }
 
-func (m *baseManager) initFromOS() error {
+func (m *baseManager) initFromOS(ctx context.Context) error {
 	routes, err := m.backend.loadRoutes()
 	if err != nil {
 		return err
@@ -145,11 +131,11 @@ func (m *baseManager) initFromOS() error {
 		}
 		table.Insert(rt)
 	}
-	return m.backend.startWatch(m.ctx, m.onRouteChange, m.routeTableV4, m.routeTableV6)
+	return m.backend.startWatch(ctx, m.onRouteChange, m.routeTableV4, m.routeTableV6)
 }
 
 func (m *baseManager) onRouteChange() {
-	m.defGwCond.Broadcast()
+	// onRouteChange is a no-op at the moment
 }
 
 func (m *baseManager) trackedRoutesForRoute(rt *Route) *sync.Map {
@@ -182,31 +168,31 @@ func (m *baseManager) AddRouteToBestRoute(destination *net.IPNet) error {
 		return fmt.Errorf("cannot route %s: no suitable gateway found", destination.IP.String())
 	}
 	route.Destination = destination
-	err = m.AddRoute(route)
+	_, err = m.AddRoute(route)
 	if err != nil {
 		return fmt.Errorf("failed to add route for %s: %w", destination.String(), err)
 	}
 	return nil
 }
 
-func (m *baseManager) AddRoute(rt *Route) error {
+func (m *baseManager) AddRoute(rt *Route) (*Route, error) {
 	if rt.Gateway == nil {
 		bestRoute, err := m.FindBestRoute(rt.Destination.IP)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if bestRoute.IsDirectlyConnected() {
-			return fmt.Errorf("%w: %s via %s (%s)", ErrDirectlyConnected, rt.Destination.IP.String(), bestRoute.LinkAddr.String(), bestRoute.Interface)
+			return nil, fmt.Errorf("%w: %s via %s (%s)", ErrDirectlyConnected, rt.Destination.IP.String(), bestRoute.LinkAddr.String(), bestRoute.Interface)
 		}
 		rt.Gateway = bestRoute.Gateway
 		rt.Interface = bestRoute.Interface
 	}
 	if err := m.backend.applyRoute(rt); err != nil {
-		return err
+		return nil, err
 	}
 	trackedRoutes := m.trackedRoutesForRoute(rt)
 	trackedRoutes.Store(rt.String(), rt)
-	return nil
+	return rt, nil
 }
 
 func (m *baseManager) RemoveRoute(rt *Route) error {
@@ -309,39 +295,6 @@ func (m *baseManager) GetDefaultGateway6() net.IP {
 	return defaultRoute.Gateway
 }
 
-func (m *baseManager) WaitDefaultGateway(v4, v6 bool) <-chan struct{} {
-	if m.waitDefaultGwFn != nil {
-		return m.waitDefaultGwFn(v4, v6)
-	}
-	ch := make(chan struct{})
-	go func() {
-		m.waitDefaultGateway(v4, v6)
-		close(ch)
-	}()
-	return ch
-}
-
-func (m *baseManager) waitDefaultGateway(v4, v6 bool) {
-	m.defGwCond.L.Lock()
-	for {
-		select {
-		case <-m.ctx.Done():
-			return
-		default:
-		}
-		if v4 && m.GetDefaultGateway4() == nil {
-			m.defGwCond.Wait()
-			continue
-		}
-		if v6 && m.GetDefaultGateway6() == nil {
-			m.defGwCond.Wait()
-			continue
-		}
-		break
-	}
-	m.defGwCond.L.Unlock()
-}
-
 func (m *baseManager) ExcludeAdapterForLookup(adapterName string) {
 	m.routeTableV4.ExcludeAdapter(adapterName)
 	m.routeTableV6.ExcludeAdapter(adapterName)
@@ -356,6 +309,5 @@ func (m *baseManager) Close() error {
 		m.cancel()
 	}
 	err := m.backend.close()
-	m.defGwCond.Broadcast()
 	return err
 }

@@ -25,20 +25,15 @@ import (
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
-func CandidateFrom(network string, componentID int, ip net.IP, srcPort int, isReflexive bool) message.ICECandidate {
-	cType := message.ICECandidateTypeHost
+func CandidateFrom(foundation, network string, cType message.ICECandidateType, componentID int, candidateIP net.IP, candidatePort int) message.ICECandidate {
 	cPriority := candidatePriority(network, cType, componentID, 0)
-	if isReflexive {
-		cType = message.ICECandidateTypeSrflx
-		cPriority = candidatePriority(network, cType, componentID, 0)
-	}
 	return message.ICECandidate{
-		Foundation:  message.GenerateFoundation(ip.String()),
+		Foundation:  foundation,
 		ComponentID: componentID,
 		Priority:    cPriority,
 		Protocol:    network,
-		Address:     ip.String(),
-		Port:        srcPort,
+		Address:     candidateIP.String(),
+		Port:        candidatePort,
 		Type:        cType,
 	}
 }
@@ -96,16 +91,17 @@ func (pc *PathFinder) buildLocalCandidates(localEndpoints []LocalEndpoint, liste
 	localInfo := make(map[localCandidateKey]localCandidateInfo)
 
 	for _, tr := range protos {
+		port := int(listenPort)
+		if port == 0 {
+			port = randomPort()
+		}
 		for _, localEndpoint := range localEndpoints {
 			if tr.Network == transport.ICEProtocolTLSInICMP.Network && localEndpoint.IP.To4() == nil {
 				// skip IPv6 addresses for TLS-in-ICMP
 				continue
 			}
-			port := int(listenPort)
-			if port == 0 {
-				port = randomPort()
-			}
-			candidate := CandidateFrom(tr.Network, tr.ComponentID, localEndpoint.IP, port, false)
+			foundation := message.GenerateFoundation(message.ICECandidateTypeHost, tr.Network, localEndpoint.IP.String())
+			candidate := CandidateFrom(foundation, tr.Network, message.ICECandidateTypeHost, tr.ComponentID, localEndpoint.IP, port)
 			key := makeLocalCandidateKey(tr, localEndpoint.IP)
 			localInfo[key] = localCandidateInfo{
 				port:     port,
@@ -142,10 +138,9 @@ func (pc *PathFinder) buildReflexiveCandidates(ctx context.Context, localEndpoin
 			}
 			family := getFamilyForIP(localEndpoint.IP)
 			mappingKey := fmt.Sprintf("%d:%s:%d", family, tr.Network, info.port)
-			ma, ok := mappedAddrs[mappingKey]
+			_, ok = mappedAddrs[mappingKey]
 			if ok {
-				candidates = append(candidates, CandidateFrom(tr.Network, tr.ComponentID, ma.ip, ma.port, true))
-				continue
+				continue // already emitted a srflx for this mapping
 			}
 			pc.opts.Logger.Tracef("ICE: performing STUN query for %d:%s:%s:%d", family, tr.Network, localEndpoint.IP.String(), info.port)
 			result, err := pc.stunClient.QueryFromLocalAddr(ctx, AddressFrom(tr.Network, localEndpoint.IP, info.port))
@@ -155,7 +150,8 @@ func (pc *PathFinder) buildReflexiveCandidates(ctx context.Context, localEndpoin
 			}
 			pc.opts.Logger.Tracef("ICE: STUN query successful | %d:%s:%s:%d -> %s:%d", family, tr.Network, localEndpoint.IP.String(), info.port, result.IP.String(), result.Port)
 			mappedAddrs[mappingKey] = ipPort{ip: result.IP, port: result.Port}
-			candidates = append(candidates, CandidateFrom(tr.Network, tr.ComponentID, result.IP, result.Port, true))
+			foundation := message.GenerateFoundation(message.ICECandidateTypeSrflx, tr.Network, localEndpoint.IP.String())
+			candidates = append(candidates, CandidateFrom(foundation, tr.Network, message.ICECandidateTypeSrflx, tr.ComponentID, result.IP, result.Port))
 		}
 	}
 

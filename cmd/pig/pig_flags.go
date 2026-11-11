@@ -69,6 +69,8 @@ const (
 	FLAG_WRED_WF      = "wf"
 	FLAG_WRED_DP      = "wd"
 	FLAG_WRED_TH      = "wt"
+	FLAG_NETCAT       = "nc"
+	FLAG_ACCEPT_ONCE  = "o"
 
 	FLAG_DOCS_CONFIG = FLAG_MAIN_CONFIG
 	FLAG_DOCS_ENV    = "env"
@@ -92,6 +94,8 @@ var pigFlags = map[string][3]string{
 	FLAG_RETRY:        {FLAG_RETRY, "c", "Reconnect interval in seconds. Defaults to " + strconv.Itoa(config.DefaultRetryInterval) + "."},
 	FLAG_IDLE_TIMEOUT: {FLAG_IDLE_TIMEOUT, "a", "Idle timeout in seconds for tunnels. Defaults to " + strconv.Itoa(config.DefaultIdleTimeout) + "."},
 	FLAG_ROUTE:        {FLAG_ROUTE, "c", "Route subnets through the tunnel. Use 'full4', 'full6', 'full' (as shortcuts for full tunnel routing) or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'."},
+	FLAG_NETCAT:       {FLAG_NETCAT, "a", "Enables netcat mode: stdin is redirected to the stdout of the connected peer (and vice versa) over the encrypted tunnel."},
+	FLAG_ACCEPT_ONCE:  {FLAG_ACCEPT_ONCE, "l", "Accept one client, then exit after it disconnects."},
 	// scripting settings
 	FLAG_SCRIPT: {FLAG_SCRIPT, "c", "Takes the path to an executable file that will be called on tunnel events. See '" + binaryName + " -docs env' for the list of environment variables that are passed to the script."},
 	// logging settings
@@ -150,10 +154,11 @@ type Flags struct {
 	iceSignalingID string
 	route          string
 	toConfig       string
+	netcat         bool
+	acceptOnce     bool
 }
 
-func parsePigFlags(mode Mode) *Flags {
-	flagSet := flag.NewFlagSet("pig", flag.ExitOnError)
+func parsePigFlags(mode Mode, flagSet *flag.FlagSet) *Flags {
 	flags := defineFlags(flagSet)
 	if !strings.HasPrefix(os.Args[1], "-") {
 		os.Args[1] = "-" + os.Args[1]
@@ -199,12 +204,13 @@ func setConfigField[T comparable](f *T, v T) (changed bool) {
 
 func initPig(mode Mode) (*config.Config, common.Logger) {
 	var (
-		logger common.Logger
-		cfg    *config.Config
-		flags  *Flags
-		err    error
+		logger  common.Logger
+		cfg     *config.Config
+		flags   *Flags
+		err     error
+		flagSet = flag.NewFlagSet("pig", flag.ExitOnError)
 	)
-	flags = parsePigFlags(mode)
+	flags = parsePigFlags(mode, flagSet)
 	cfg = &config.Config{}
 	applyCommandLineFlags(cfg, flags, mode, log.NewBlockingLogger())
 	switch cfg.LogConfig.File {
@@ -220,6 +226,7 @@ func initPig(mode Mode) (*config.Config, common.Logger) {
 	}
 
 	applyICESettings(cfg, flags, logger)
+	setupNetcatMode(cfg, flags, flagSet, logger)
 	outputConfig(cfg, flags.toConfig)
 
 	err = cfg.Initialize()
@@ -313,10 +320,12 @@ func defineFlags(flagSet *flag.FlagSet) *Flags {
 	flagSet.IntVar(&flags.retryInterval, pigFlags[FLAG_RETRY][0], config.DefaultRetryInterval, pigFlags[FLAG_RETRY][2])
 	flagSet.IntVar(&flags.idleTimeout, pigFlags[FLAG_IDLE_TIMEOUT][0], config.DefaultIdleTimeout, pigFlags[FLAG_IDLE_TIMEOUT][2])
 	flagSet.StringVar(&flags.route, pigFlags[FLAG_ROUTE][0], "", pigFlags[FLAG_ROUTE][2])
+	flagSet.BoolVar(&flags.netcat, pigFlags[FLAG_NETCAT][0], false, pigFlags[FLAG_NETCAT][2])
+	flagSet.BoolVar(&flags.acceptOnce, pigFlags[FLAG_ACCEPT_ONCE][0], false, pigFlags[FLAG_ACCEPT_ONCE][2])
 	// scripting settings
 	flagSet.StringVar(&flags.scriptPath, pigFlags[FLAG_SCRIPT][0], "", pigFlags[FLAG_SCRIPT][2])
 	// logging settings
-	flagSet.IntVar(&flags.verbose, pigFlags[FLAG_VERBOSE][0], 0, pigFlags[FLAG_VERBOSE][2])
+	flagSet.IntVar(&flags.verbose, pigFlags[FLAG_VERBOSE][0], 1, pigFlags[FLAG_VERBOSE][2])
 	// certificate settings
 	flagSet.StringVar(&flags.certFile, pigFlags[FLAG_CERT][0], "", pigFlags[FLAG_CERT][2])
 	flagSet.StringVar(&flags.keyFile, pigFlags[FLAG_KEY][0], "", pigFlags[FLAG_KEY][2])
@@ -346,11 +355,11 @@ func applyCommandLineFlags(cfg *config.Config, flags *Flags, mode Mode, logger c
 	cfg.Tunnels = []config.TunnelConfig{{}}
 	tc := &cfg.Tunnels[0]
 	tc.Direction = directionFromMode(mode)
-	adapterCfg := &cfg.Adapter
-	if tc.Direction == config.TunnelDirectionListen {
-		tc.Adapter = &config.AdapterConfig{}
-		adapterCfg = tc.Adapter
-	}
+	// adapterCfg := &cfg.Adapter
+	//if tc.Direction == config.TunnelDirectionListen {
+	tc.Adapter = &config.AdapterConfig{}
+	adapterCfg := tc.Adapter
+	//}
 
 	switch flags.iceDisabled {
 	case true:
@@ -389,6 +398,7 @@ func applyCommandLineFlags(cfg *config.Config, flags *Flags, mode Mode, logger c
 	}
 
 	setConfigField(&tc.StreamCount, flags.streamCount)
+	setConfigField(&tc.AcceptOnce, flags.acceptOnce)
 	setConfigField(&tc.ReconnectInterval, flags.retryInterval)
 	setConfigField(&tc.IdleTimeout, flags.idleTimeout)
 
@@ -410,10 +420,12 @@ func applyCommandLineFlags(cfg *config.Config, flags *Flags, mode Mode, logger c
 
 	switch flags.verbose {
 	case 0:
-		cfg.LogConfig.Level = "info"
+		cfg.LogConfig.Level = "disabled"
 	case 1:
-		cfg.LogConfig.Level = "debug"
+		cfg.LogConfig.Level = "info"
 	case 2:
+		cfg.LogConfig.Level = "debug"
+	case 3:
 		cfg.LogConfig.Level = "trace"
 	default:
 		cfg.LogConfig.Level = "info"
@@ -608,5 +620,30 @@ func tunnelRoutesFromKeyWord(k string) ([]config.Route, error) {
 		return append(fullV4, fullV6...), nil
 	default:
 		return nil, fmt.Errorf("invalid route keyword: %s", k)
+	}
+}
+
+func setupNetcatMode(cfg *config.Config, flags *Flags, flagSet *flag.FlagSet, logger common.Logger) {
+	if !flags.netcat {
+		return
+	}
+	var tc *config.TunnelConfig
+
+	if len(cfg.Tunnels) == 0 {
+		logger.Fatalf("Netcat mode requires a tunnel")
+		return
+	}
+
+	tc = &cfg.Tunnels[0]
+
+	tc.Adapter.SetStdIOAdapter()
+	tc.ReconnectInterval = -1
+	tc.Wred.MaxDropProbability = -1
+
+	cfg.RouteConfig.Enabled = false
+
+	if !isFlagPassed(flagSet, FLAG_VERBOSE) {
+		cfg.LogConfig.Level = "disabled"
+		logger.SetLevel("disabled")
 	}
 }

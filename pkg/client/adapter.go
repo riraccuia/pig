@@ -29,14 +29,16 @@ func (c *Client) readFromAdapter(ctx context.Context) {
 		c.readFromAdapterOutQueue(ctx)
 		return
 	}
+	bufferSize := c.adapter.BlockSize()
+
 	for {
 		if common.IsContextDone(ctx) {
 			return
 		}
 
-		buf := c.bufferPool.GetBuffer(c.adapter.MTU())
-		_, err := c.adapter.Read(buf[:])
-		if err != nil {
+		buf := c.bufferPool.GetBuffer(bufferSize)
+		nr, err := c.adapter.Read(buf[:])
+		if nr == 0 && err != nil {
 			c.bufferPool.PutBuffer(buf)
 			c.logger.Errorf("failed to read from adapter: %v", err)
 			select {
@@ -70,31 +72,23 @@ func (c *Client) readFromAdapter(ctx context.Context) {
 	}
 }
 
-func (c *Client) writeToAdapter(ctx context.Context) {
+func (c *Client) writeToAdapter() {
 	_, isInQueuer := c.adapter.(InQueuer)
 	if isInQueuer {
-		c.writeToAdapterInQueue(ctx)
+		c.writeToAdapterInQueue()
 		return
 	}
-	for {
-		select {
-		case <-ctx.Done():
+	for pkt := range c.inbound {
+		totalLen := pkt.TotalLength()
+		_, err := c.adapter.Write(pkt.Bytes()[:totalLen])
+		c.bufferPool.PutBuffer(pkt.Bytes())
+		if err != nil {
+			c.logger.Errorf("failed to write to adapter: %v", err)
+			select {
+			case c.connError <- fmt.Errorf("failed to write to adapter: %w", err):
+			default:
+			}
 			return
-		case pkt, ok := <-c.inbound:
-			if !ok {
-				return
-			}
-			totalLen := pkt.TotalLength()
-			_, err := c.adapter.Write(pkt.Bytes()[:totalLen])
-			c.bufferPool.PutBuffer(pkt.Bytes())
-			if err != nil {
-				c.logger.Errorf("failed to write to adapter: %v", err)
-				select {
-				case c.connError <- fmt.Errorf("failed to write to adapter: %w", err):
-				default:
-				}
-				return
-			}
 		}
 	}
 }
@@ -134,25 +128,17 @@ type InQueuer interface {
 	InQueue() (common.PacketQueue, error)
 }
 
-func (c *Client) writeToAdapterInQueue(ctx context.Context) {
+func (c *Client) writeToAdapterInQueue() {
 	inQueue, err := c.adapter.(InQueuer).InQueue()
 	if err != nil {
 		return
 	}
-	for {
+	for pkt := range c.inbound {
 		select {
-		case <-ctx.Done():
-			return
-		case pkt, ok := <-c.inbound:
-			if !ok {
-				return
-			}
-			select {
-			case inQueue <- pkt:
-			default:
-				c.logger.Errorf("adapter inbound channel full, dropping packet")
-				c.bufferPool.PutBuffer(pkt.Bytes())
-			}
+		case inQueue <- pkt:
+		default:
+			c.logger.Errorf("adapter inbound queue full, dropping packet")
+			c.bufferPool.PutBuffer(pkt.Bytes())
 		}
 	}
 }

@@ -26,14 +26,16 @@ import (
 )
 
 func (s *Server) readFromAdapter(ctx context.Context) {
+	bufferSize := s.adapter.BlockSize()
+
 	for {
 		if common.IsContextDone(ctx) {
 			return
 		}
-		buffer := s.bufferPool.Get().([]byte)
+		buffer := s.bufferPool.GetBuffer(bufferSize)
 		n, err := s.adapter.Read(buffer)
 		if err != nil {
-			s.bufferPool.Put(buffer)
+			s.bufferPool.PutBuffer(buffer)
 			return
 		}
 
@@ -43,14 +45,14 @@ func (s *Server) readFromAdapter(ctx context.Context) {
 			pkt = network.IPv4Packet(buffer[:n])
 		case 6:
 			pkt = network.IPv6Packet(buffer[:n])
-			s.bufferPool.Put(buffer)
+			s.bufferPool.PutBuffer(buffer)
 			continue
 		}
 
 		select {
 		case s.outbound <- pkt:
 		default:
-			s.bufferPool.Put(buffer)
+			s.bufferPool.PutBuffer(buffer)
 		}
 	}
 }
@@ -74,12 +76,12 @@ func (s *Server) processInboundQueue(ctx context.Context, q io.Writer, pq common
 			totalLen := pkt.TotalLength()
 			if totalLen > 0 && totalLen <= len(pkt.Bytes()[:totalLen]) {
 				_, err := q.Write(pkt.Bytes()[:totalLen])
-				s.bufferPool.Put(pkt.Bytes())
+				s.bufferPool.PutBuffer(pkt.Bytes())
 				if err != nil {
 					continue
 				}
 			} else {
-				s.bufferPool.Put(pkt.Bytes())
+				s.bufferPool.PutBuffer(pkt.Bytes())
 			}
 		}
 	}
@@ -96,7 +98,7 @@ func (s *Server) processOutbound(ctx context.Context) {
 			}
 			_client, ok := s.clients.Load(pkt.DestinationIP().String())
 			if !ok {
-				s.bufferPool.Put(pkt.Bytes())
+				s.bufferPool.PutBuffer(pkt.Bytes())
 				continue
 			}
 			client := _client.(*ClientTunnel)
@@ -104,11 +106,11 @@ func (s *Server) processOutbound(ctx context.Context) {
 			err := client.outbound.Push(pkt)
 			if err == queue.ErrWREDDropped || err == queue.ErrDropped {
 				client.dropLogger.Incr(1, uint64(pkt.TotalLength()))
-				s.bufferPool.Put(pkt.Bytes())
+				s.bufferPool.PutBuffer(pkt.Bytes())
 				continue
 			}
 			if err != nil {
-				s.bufferPool.Put(pkt.Bytes())
+				s.bufferPool.PutBuffer(pkt.Bytes())
 				continue
 			}
 		}

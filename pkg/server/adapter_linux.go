@@ -18,6 +18,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 
 	"github.com/riraccuia/pig/pkg/adapter"
@@ -27,7 +29,14 @@ import (
 )
 
 func (s *Server) processInbound(ctx context.Context) {
-	for _, q := range s.adapter.(*adapter.TUNAdapter).Queues() {
+	var queues []io.ReadWriteCloser
+	switch a := s.adapter.(type) {
+	case *adapter.TUNAdapter:
+		queues = a.Queues()
+	default:
+		queues = append(queues, s.adapter)
+	}
+	for _, q := range queues {
 		pq := make(common.PacketQueue, s.adapterCfg.QueueSize)
 		go s.processInboundQueue(ctx, q, pq)
 		s.inbound = append(s.inbound, pq)
@@ -40,21 +49,37 @@ func (s *Server) getInboundPktQueue() common.PacketQueue {
 }
 
 func (s *Server) readFromAdapter(ctx context.Context) {
-	for _, q := range s.adapter.(*adapter.TUNAdapter).Queues() {
+	var queues []io.ReadWriteCloser
+	switch a := s.adapter.(type) {
+	case *adapter.TUNAdapter:
+		queues = a.Queues()
+	default:
+		queues = append(queues, s.adapter)
+	}
+	for _, q := range queues {
 		s.wg.Go(func() { s.readFromTunQueue(ctx, q) })
 	}
 }
 
 func (s *Server) readFromTunQueue(ctx context.Context, q io.Reader) {
+	bufferSize := s.adapter.MTU()
+
 	for {
 		if common.IsContextDone(ctx) {
 			return
 		}
 
-		buffer := s.bufferPool.Get().([]byte)
+		buffer := s.bufferPool.GetBuffer(bufferSize)
 		n, err := q.Read(buffer)
 		if err != nil {
-			s.bufferPool.Put(buffer)
+			if errors.Is(err, io.EOF) {
+				err = fmt.Errorf("adapter %s closed (%w)", s.adapter.Name(), err)
+			}
+			select {
+			case s.sigError <- err:
+			default:
+			}
+			s.bufferPool.PutBuffer(buffer)
 			return
 		}
 
@@ -68,7 +93,7 @@ func (s *Server) readFromTunQueue(ctx context.Context, q io.Reader) {
 
 		_client, ok := s.clients.Load(pkt.DestinationIP().String())
 		if !ok {
-			s.bufferPool.Put(buffer)
+			s.bufferPool.PutBuffer(buffer)
 			continue
 		}
 		client := _client.(*ClientTunnel)
@@ -76,11 +101,11 @@ func (s *Server) readFromTunQueue(ctx context.Context, q io.Reader) {
 		err = client.outbound.Push(pkt)
 		if err == queue.ErrWREDDropped || err == queue.ErrDropped {
 			client.dropLogger.Incr(1, uint64(pkt.TotalLength()))
-			s.bufferPool.Put(buffer)
+			s.bufferPool.PutBuffer(buffer)
 			continue
 		}
 		if err != nil {
-			s.bufferPool.Put(buffer)
+			s.bufferPool.PutBuffer(buffer)
 			continue
 		}
 	}
@@ -96,7 +121,7 @@ func (s *Server) processInboundQueue(ctx context.Context, q io.Writer, pq common
 			if totalLen > 0 && totalLen <= len(pkt.Bytes()) {
 				q.Write(pkt.Bytes()[:totalLen])
 			}
-			s.bufferPool.Put(pkt.Bytes())
+			s.bufferPool.PutBuffer(pkt.Bytes())
 		}
 	}
 }

@@ -14,6 +14,11 @@ Table of contents for pig user documentation. New guides are added here by topic
 - [macOS](installation/macos.md)
 - [Linux](installation/linux.md)
 
+## Deploy
+
+- [systemd (Linux)](deploy/systemd.md)
+- [Docker](deploy/docker.md)
+
 ## Quick reference
 
 - [CLI](reference/cli/pig.md)
@@ -28,10 +33,6 @@ Table of contents for pig user documentation. New guides are added here by topic
 ## WireGuard
 
 - [WireGuard](wireguard/wireguard.md)
-
-## Docker
-
-- [Docker](docker/docker.md)
 
 ## NAT
 

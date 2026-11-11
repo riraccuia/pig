@@ -23,6 +23,26 @@ import (
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
+func (c *Client) acceptStreams(ctx context.Context, conn transport.Conn) {
+	for {
+		if common.IsContextDone(ctx) {
+			return
+		}
+
+		stream, err := conn.AcceptStream(ctx)
+		if err != nil {
+			return
+		}
+
+		c.logger.Debugf("accepted stream from server %s", c.conn.RemoteAddr())
+
+		stream.Flush()
+		c.streams.Add(stream)
+
+		c.mgrWg.Go(func() { c.doStream(ctx, stream) })
+	}
+}
+
 // openStreams handles incoming stream connections from the QUIC transport.
 func (c *Client) openStreams(ctx context.Context, conn transport.Conn) {
 	streamCount := c.config.StreamCount
@@ -52,8 +72,8 @@ func (c *Client) openStreams(ctx context.Context, conn transport.Conn) {
 
 func (c *Client) doStream(ctx context.Context, stream transport.Stream) {
 	c.processInbound(ctx, stream)
-	//defer func() {
 	c.streams.Remove(stream)
+
 	if c.streams.Count() == 0 {
 		select {
 		case c.connError <- fmt.Errorf("all streams closed"):
@@ -67,8 +87,6 @@ func (c *Client) doStream(ctx context.Context, stream transport.Stream) {
 	}
 
 	c.mgrWg.Go(func() { c.reconnectStream(ctx, c.conn) })
-	// // stream.Close()
-	//}()
 }
 
 func (c *Client) reconnectStream(ctx context.Context, conn transport.Conn) {

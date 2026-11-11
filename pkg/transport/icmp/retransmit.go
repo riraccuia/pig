@@ -111,9 +111,7 @@ func (q *RetransmitQueue) DeleteUntil(seq uint32) uint32 {
 	}
 
 	if foundIdx == -1 {
-		// If we didn't find the sequence, we should keep all packets
-		q.Unlock()
-		return deletedBytes
+		foundIdx = len(q.packets)
 	}
 
 	// transport.Logger.Infof("Deleting packets up to seq %d, packets left in queue: %d", seq, len(q.packets))
@@ -132,6 +130,13 @@ func (q *RetransmitQueue) DeleteUntil(seq uint32) uint32 {
 
 	q.Unlock()
 	return deletedBytes
+}
+
+func (q *RetransmitQueue) IsEmpty() bool {
+	q.Lock()
+	isEmpty := len(q.packets) == 0
+	q.Unlock()
+	return isEmpty
 }
 
 func (q *RetransmitQueue) Len() uint32 {

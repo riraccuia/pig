@@ -24,6 +24,12 @@ const (
 	BufferSize65536 = 65536 // 2^16
 )
 
+// DefaultBufferPool is the package-level BufferPool for convenience.
+var DefaultBufferPool BufferPool = NewBufferPool()
+
+func GetBuffer(minCap int) any { return DefaultBufferPool.GetBuffer(minCap) }
+func PutBuffer(b []byte)       { DefaultBufferPool.PutBuffer(b) }
+
 // BufferPool provides Get and Put for []byte with size-tiered pooling.
 type BufferPool interface {
 	GetBuffer(minCap int) []byte
@@ -38,15 +44,31 @@ type bufferPool struct {
 func NewBufferPool() BufferPool {
 	return &bufferPool{
 		pools: []*sync.Pool{
-			{New: func() any { return make([]byte, BufferSize512) }},
-			{New: func() any { return make([]byte, BufferSize1024) }},
-			{New: func() any { return make([]byte, BufferSize2048) }},
-			{New: func() any { return make([]byte, BufferSize4096) }},
-			{New: func() any { return make([]byte, BufferSize65536) }},
+			{New: func() any {
+				buf := make([]byte, BufferSize512)
+				return &buf
+			}},
+			{New: func() any {
+				buf := make([]byte, BufferSize1024)
+				return &buf
+			}},
+			{New: func() any {
+				buf := make([]byte, BufferSize2048)
+				return &buf
+			}},
+			{New: func() any {
+				buf := make([]byte, BufferSize4096)
+				return &buf
+			}},
+			{New: func() any {
+				buf := make([]byte, BufferSize65536)
+				return &buf
+			}},
 		},
 	}
 }
 
+// GetBuffer returns a []byte with at least minCap capacity.
 func (p *bufferPool) GetBuffer(minCap int) []byte {
 	var pool *sync.Pool
 	switch {
@@ -63,30 +85,28 @@ func (p *bufferPool) GetBuffer(minCap int) []byte {
 	default:
 		return make([]byte, minCap)
 	}
-	return pool.Get().([]byte)
+	return *pool.Get().(*[]byte)
 }
 
+// PutBuffer returns a []byte to the appropriate pool tier.
 func (p *bufferPool) PutBuffer(b []byte) {
 	if b == nil {
 		return
 	}
+
 	bCap := cap(b)
+	buf := b[:bCap]
+
 	switch {
-	case bCap <= BufferSize512:
-		p.pools[0].Put(b)
-	case bCap <= BufferSize1024:
-		p.pools[1].Put(b)
-	case bCap <= BufferSize2048:
-		p.pools[2].Put(b)
-	case bCap <= BufferSize4096:
-		p.pools[3].Put(b)
-	case bCap <= BufferSize65536:
-		p.pools[4].Put(b)
+	case bCap >= BufferSize65536:
+		p.pools[4].Put(&buf)
+	case bCap >= BufferSize4096:
+		p.pools[3].Put(&buf)
+	case bCap >= BufferSize2048:
+		p.pools[2].Put(&buf)
+	case bCap >= BufferSize1024:
+		p.pools[1].Put(&buf)
+	case bCap >= BufferSize512:
+		p.pools[0].Put(&buf)
 	}
 }
-
-// DefaultBufferPool is the package-level BufferPool for convenience.
-var DefaultBufferPool BufferPool = NewBufferPool()
-
-func GetBuffer(minCap int) any { return DefaultBufferPool.GetBuffer(minCap) }
-func PutBuffer(b []byte)       { DefaultBufferPool.PutBuffer(b) }

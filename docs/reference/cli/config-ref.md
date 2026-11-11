@@ -22,7 +22,7 @@ LogConfig
 +-------------+---------+----------+---------+---------------------------------------------------------------+
 | file        | string? | true     | -       | Path to the log file to write to. Otherwise logs to stdout.   |
 | level       | string? | true     | info    | Log level. Use one of "trace", "debug", "info", "warn",       |
-|             |         |          |         | "error".                                                      |
+|             |         |          |         | "error", "disabled".                                          |
 | rotate_size | any?    | true     | -       | Size of the log file to rotate at. e.g. 100k, 1m, 1g, or      |
 |             |         |          |         | actual size in bytes.                                         |
 +-------------+---------+----------+---------+---------------------------------------------------------------+
@@ -64,6 +64,8 @@ TunnelConfig
 |                    |                |          |         | number of CPU cores.                            |
 | proto              | string?        | true     | ws      | Transport protocol to use for the tunnel.       |
 | idle_timeout       | int?           | true     | 0       | Inactivity timeout in seconds.                  |
+| accept_once        | bool?          | true     | false   | Accept one client, then exit after it           |
+|                    |                |          |         | disconnects.                                    |
 | reconnect_interval | int?           | true     | 5       | Reconnect interval in seconds.                  |
 | wred               | WredConfig?    | true     | -       | WRED settings.                                  |
 | trust              | TrustConfig?   | true     | -       | Trust configuration.                            |

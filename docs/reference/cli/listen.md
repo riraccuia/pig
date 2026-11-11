@@ -21,6 +21,9 @@ General options:
      values. Defaults to random generated /30 within 100.64.0.0/11 for connect nodes and /16 within
      100.96.0.0/11 for listening nodes.
  -t  Idle timeout in seconds for tunnels. Defaults to 0.
+ -nc Enables netcat mode: stdin is redirected to the stdout of the connected peer (and vice versa) over
+     the encrypted tunnel.
+ -o  Accept one client, then exit after it disconnects.
 
 Scripting options:
 

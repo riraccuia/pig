@@ -15,10 +15,20 @@
 package adapter
 
 import (
+	"fmt"
+
 	"github.com/riraccuia/pig/pkg/common"
 )
 
+type AdapterType string
+
+const (
+	AdapterTypeTun   AdapterType = "tun"
+	AdapterTypeStdio AdapterType = "stdio"
+)
+
 type AdapterConfig struct {
+	Type    AdapterType
 	Address []string
 	MTU     int
 	// MultiQueue enables tun multi-queue support
@@ -27,5 +37,12 @@ type AdapterConfig struct {
 }
 
 func NewAdapter(cfg AdapterConfig) (common.TunnelAdapter, error) {
-	return newAdapter(cfg)
+	switch cfg.Type {
+	case AdapterTypeTun:
+		return newAdapter(cfg)
+	case AdapterTypeStdio:
+		return NewStdioAdapter(cfg)
+	default:
+		return nil, fmt.Errorf("invalid adapter type: %s", cfg.Type)
+	}
 }

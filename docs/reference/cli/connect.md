@@ -25,6 +25,8 @@ General options:
  -t  Idle timeout in seconds for tunnels. Defaults to 0.
  -R  Route subnets through the tunnel. Use 'full4', 'full6', 'full' (as shortcuts for full tunnel
      routing) or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'.
+ -nc Enables netcat mode: stdin is redirected to the stdout of the connected peer (and vice versa) over
+     the encrypted tunnel.
 
 Scripting options:
  -S Takes the path to an executable file that will be called on tunnel events. See 'pig -docs env' for

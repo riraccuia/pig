@@ -34,6 +34,7 @@ type MockTunnelAdapter struct {
 	cloneChan chan []byte
 	writeChan chan []byte
 	ip        *net.IPNet
+	mtu       int
 	closed    bool
 	mu        sync.Mutex
 }
@@ -43,11 +44,16 @@ func NewMockTunnelAdapter(ip net.IP) *MockTunnelAdapter {
 		cloneChan: make(chan []byte, 100),
 		writeChan: make(chan []byte, 100),
 		ip:        &net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)},
+		mtu:       config.DefaultMTU,
 	}
 }
 
 func (m *MockTunnelAdapter) MTU() int {
-	return 1300
+	return m.mtu
+}
+
+func (m *MockTunnelAdapter) BlockSize() int {
+	return m.mtu
 }
 
 func (m *MockTunnelAdapter) Read(b []byte) (int, error) {

@@ -29,7 +29,8 @@ var (
 
 type FIFO[T any] struct {
 	sync.Mutex
-	cond    *sync.Cond
+	rcond   *sync.Cond
+	wcond   *sync.Cond
 	queue   []T
 	length  int
 	elems   int
@@ -46,7 +47,8 @@ func NewFIFO[T any](length int) *FIFO[T] {
 		rCursor: 0,
 		wCursor: 0,
 	}
-	f.cond = sync.NewCond(&f.Mutex)
+	f.rcond = sync.NewCond(&f.Mutex)
+	f.wcond = sync.NewCond(&f.Mutex)
 	return f
 }
 
@@ -70,9 +72,13 @@ func (f *FIFO[T]) push(item T) error {
 	if f.closed {
 		return ErrClosed
 	}
-	if f.elems == f.length {
+	for f.elems == f.length {
+		f.wcond.Wait()
+		if f.closed {
+			return ErrClosed
+		}
 		// tail drop
-		return ErrDropped
+		//return ErrDropped
 	}
 	if f.wred != nil {
 		f.wred.Update(float64(f.elems))
@@ -87,7 +93,7 @@ func (f *FIFO[T]) push(item T) error {
 	if prevElems > 0 {
 		return nil
 	}
-	f.cond.Signal()
+	f.rcond.Signal()
 	return nil
 }
 
@@ -135,11 +141,14 @@ func (f *FIFO[T]) pop() T {
 		if f.closed {
 			return zero[T]()
 		}
-		f.cond.Wait()
+		f.rcond.Wait()
 	}
 	item := f.queue[f.rCursor]
 	f.queue[f.rCursor] = zero[T]()
 	f.rCursor = (f.rCursor + 1) % f.length
+	if f.elems == f.length {
+		f.wcond.Signal()
+	}
 	f.elems--
 	return item
 }
@@ -149,7 +158,7 @@ func (f *FIFO[T]) popAll() []T {
 		if f.closed {
 			return nil
 		}
-		f.cond.Wait()
+		f.rcond.Wait()
 	}
 	n := f.elems
 	items := make([]T, n)
@@ -157,6 +166,9 @@ func (f *FIFO[T]) popAll() []T {
 		items[i] = f.queue[f.rCursor]
 		f.queue[f.rCursor] = zero[T]()
 		f.rCursor = (f.rCursor + 1) % f.length
+	}
+	if f.elems == f.length {
+		f.wcond.Signal()
 	}
 	f.elems = 0
 	return items
@@ -166,5 +178,6 @@ func (f *FIFO[T]) Close() {
 	f.Lock()
 	f.closed = true
 	f.Unlock()
-	f.cond.Broadcast()
+	f.rcond.Broadcast()
+	f.wcond.Broadcast()
 }

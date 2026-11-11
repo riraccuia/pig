@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"net"
 	"runtime"
 	"sync"
 
@@ -30,23 +31,21 @@ import (
 )
 
 type Controller struct {
-	sync.WaitGroup
 	cfg                 *config.Config
 	logger              common.Logger
 	routeManager        route.Manager
 	scriptExecutor      *script.Executor
 	sharedClientAdapter common.TunnelAdapter
 	demux               *demux.Demux
-	routeRequests       chan routeRequest
-	tunnels             *sync.Map
-	adapters            *sync.Map
+	tunnels             sync.Map
+	adapters            sync.Map
+	routesWg, tunnelsWg sync.WaitGroup
 	bufferPool          common.BufferPool
+	bypassDialer        *net.Dialer
 }
 
 func New() *Controller {
 	return &Controller{
-		tunnels:    &sync.Map{},
-		adapters:   &sync.Map{},
 		bufferPool: common.DefaultBufferPool,
 	}
 }
@@ -55,7 +54,7 @@ func (c *Controller) Start(ctx context.Context) {
 	if c.cfg == nil {
 		c.logger.Fatal("no config loaded")
 	}
-	c.manageRoutes(ctx)
+	c.setupRouteManager(ctx)
 	c.startClient(ctx)
 	c.startServer(ctx)
 }
@@ -128,6 +127,7 @@ func (c *Controller) setupLogger() error {
 
 func (c *Controller) createAdapter(cfg *config.AdapterConfig, multiQueue bool) (common.TunnelAdapter, error) {
 	adapterCfg := adapter.AdapterConfig{
+		Type:       adapter.AdapterType(cfg.AdapterType()),
 		Address:    cfg.TunnelAddress,
 		MTU:        cfg.MTU,
 		MultiQueue: multiQueue && runtime.GOOS == "linux",
@@ -141,6 +141,28 @@ func (c *Controller) createAdapter(cfg *config.AdapterConfig, multiQueue bool) (
 	return a, nil
 }
 
+func (c *Controller) StoreTunnelInfo(tunnelInfo *TunnelInfo) error {
+	_, ok := c.tunnels.LoadOrStore(tunnelInfo.Tunnel.Name(), tunnelInfo)
+	if ok {
+		return fmt.Errorf("tunnel %s already exists", tunnelInfo.Tunnel.Name())
+	}
+	return nil
+}
+
+func (c *Controller) Wait() {
+	c.tunnelsWg.Wait()
+	c.routesWg.Wait()
+}
+
+func (c *Controller) TunnelsDone() <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		c.tunnelsWg.Wait()
+		close(done)
+	}()
+	return done
+}
+
 func (c *Controller) Close() {
 	c.logger.Infof("Route manager shutting down, cleaning up all routes")
 	if err := c.routeManager.Cleanup(); err != nil {
@@ -152,7 +174,8 @@ func (c *Controller) Close() {
 		a.Close()
 		return true
 	})
-	c.adapters = &sync.Map{}
+	c.adapters.Clear()
+	c.tunnels.Clear()
 
 	c.logger.Flush()
 }

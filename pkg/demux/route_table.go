@@ -19,8 +19,6 @@ import (
 	"net"
 	"slices"
 	"sync"
-
-	"github.com/riraccuia/pig/pkg/config"
 )
 
 type tunnelRoute struct {
@@ -38,11 +36,11 @@ func newRouteTable() *routeTable {
 	return &routeTable{}
 }
 
-func (rt *routeTable) addRoutes(ta *Adapter, routes []config.Route) {
+func (rt *routeTable) addRoutes(ta *Adapter, dest []string) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	for _, r := range routes {
-		_, ipNet, err := net.ParseCIDR(r.Destination)
+	for _, d := range dest {
+		_, ipNet, err := net.ParseCIDR(d)
 		if err != nil {
 			continue
 		}

@@ -83,6 +83,6 @@ Check out the [config reference](../reference/config/config.md) for the full lis
 - [CLI reference](../reference/cli/pig.md)
 - [Connect](../reference/cli/connect.md) / [Listen](../reference/cli/listen.md)
 - [NAT traversal](../nat/nat.md)
-- [Docker](../docker/docker.md)
+- [Docker](../deploy/docker.md)
 - [Examples](../../examples/)
 

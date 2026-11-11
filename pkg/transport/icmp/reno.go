@@ -41,20 +41,6 @@ func (c *Conn) initNewReno() {
 	c.ooq = NewRetransmitQueue(c.listener.clearMemory)
 }
 
-func min(a, b uint32) uint32 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b uint32) uint32 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func (c *Conn) updateCongestionWindow(peerAck uint32) {
 	if c.retransmit.Load() {
 		return
@@ -109,7 +95,7 @@ func (c *Conn) handleDuplicateAck(ourSeq uint32, packet *Packet) (isDuplicateAck
 	if !isDuplicateAck {
 		return
 	}
-	c.listener.logger.Tracef("Duplicate ACK, %s, OUR_SEQ: %d, OUR_ACK: %d, FLIGHT: %d", packet.PigPacket(), ourSeq, c.ack.Load(), uint16SeqDiff(ourSeq, packet.PacketAck))
+	c.listener.logger.Tracef("Duplicate ACK, %s, OUR_SEQ: %d, OUR_ACK: %d, FLIGHT: %d", packet.PigPacket(), ourSeq, c.ack.Load(), uint32SeqDiff(ourSeq, packet.PacketAck))
 	if c.retransmit.Load() {
 		c.cwnd.Add(c.emss)
 		return
@@ -156,9 +142,7 @@ func (c *Conn) doFastRetransmit(peerAck uint32) bool {
 	if isUint32SeqHigher(c.recover.Load(), peerAck) {
 		c.retransmitMissingSegment(peerAck)
 		ackedBytes := uint32SeqDiff(peerAck, c.peerAck)
-		if ackedBytes < c.emss {
-			ackedBytes = c.emss
-		}
+		ackedBytes = max(ackedBytes, c.emss)
 		cwnd := c.ssthresh
 		if ackedBytes < cwnd {
 			c.cwnd.Store(cwnd + c.emss)
@@ -187,7 +171,7 @@ func (c *Conn) doFastRetransmit(peerAck uint32) bool {
 
 func (c *Conn) recoverFromLoss(startSeq uint32) bool {
 	numRecovered := 0
-	c.listener.logger.Tracef("Recovering from loss, startSeq: %d", startSeq)
+	c.listener.logger.Tracef("Recovering from loss (ooq len %v), startSeq: %d", c.ooq.Len(), startSeq)
 	c.ooq.RangeFrom(startSeq, func(packet *Packet, nextSeq uint32) bool {
 		c.listener.logger.Tracef("Found packet in out of order queue: %s", packet.PigPacket())
 		if packet.PacketAck > c.peerAck {
@@ -208,7 +192,7 @@ func (c *Conn) recoverFromLoss(startSeq uint32) bool {
 	// send an ack to let the peer know we recovered
 	c.ack.Store(c.peerSeq)
 	c.serializeAck(c.peerSeq)
-	return numRecovered > 0
+	return c.ooq.IsEmpty() //numRecovered > 0
 }
 
 func (c *Conn) retransmitMissingSegment(peerAck uint32) {

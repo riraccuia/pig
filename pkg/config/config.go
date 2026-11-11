@@ -23,6 +23,7 @@ import (
 	"reflect"
 
 	"github.com/BurntSushi/toml"
+	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -159,6 +160,9 @@ type Config struct {
 }
 
 type AdapterConfig struct {
+	// default=tun
+	// desc=Adapter type.
+	adapterType string
 	// desc=CIDR format.
 	TunnelAddress []string `toml:"tunnel_address,omitempty" json:"tunnel_address,omitzero"`
 	// default=DefaultMTU
@@ -171,6 +175,17 @@ type AdapterConfig struct {
 	// optional=true
 	// desc=Size of the network queues for the tunnel.
 	QueueSize int `toml:"queue_size,omitzero" json:"queue_size,omitzero"`
+}
+
+func (a *AdapterConfig) AdapterType() string {
+	if a.adapterType == "" {
+		return string(adapter.AdapterTypeTun)
+	}
+	return a.adapterType
+}
+
+func (a *AdapterConfig) SetStdIOAdapter() {
+	a.adapterType = string(adapter.AdapterTypeStdio)
 }
 
 type TunnelConfig struct {
@@ -202,6 +217,10 @@ type TunnelConfig struct {
 	// optional=true
 	// desc=Inactivity timeout in seconds.
 	IdleTimeout int `toml:"idle_timeout,omitzero" json:"idle_timeout,omitzero"`
+	// default=false
+	// optional=true
+	// desc=Accept one client, then exit after it disconnects.
+	AcceptOnce bool `toml:"accept_once,omitempty" json:"accept_once,omitzero"`
 	// default=DefaultRetryInterval
 	// optional=true
 	// desc=Reconnect interval in seconds.
@@ -248,9 +267,9 @@ type LogConfig struct {
 	// optional=true
 	// desc=Path to the log file to write to. Otherwise logs to stdout.
 	File string `toml:"file,omitempty" json:"file,omitzero"`
-	// default="info"
+	// default=DefaultLogLevel
 	// optional=true
-	// desc=Log level. Use one of "trace", "debug", "info", "warn", "error".
+	// desc=Log level. Use one of "trace", "debug", "info", "warn", "error", "disabled".
 	Level string `toml:"level" json:"level"`
 	// optional=true
 	// desc=Size of the log file to rotate at. e.g. 100k, 1m, 1g, or actual size in bytes.

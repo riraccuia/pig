@@ -45,7 +45,7 @@ cd build/docker
 PIG_MASQUERADE=1 PIG_NAT_OIF=eth0 docker compose up --build
 ```
 
-Or on a Linux host with forwarding and nftables already set up:
+Or on a Linux host with forwarding and nftables already set up (see [systemd (Linux)](../../docs/deploy/systemd.md) to do this on boot):
 
 ```bash
 sudo pig -config examples/exit-node/pig.A.toml

@@ -35,14 +35,14 @@ func TestCalculateUsed(t *testing.T) {
 		{"overfull buffer", 100, 2100, 1000, 1000},
 
 		// Wraparound cases
-		{"buffer wraparound", 800, 200, 1000, 400},
-		{"minimal wraparound", 999, 1, 1000, 2},
+		{"buffer wraparound", 200, 800, 1000, 600},
+		{"minimal wraparound", ^uint64(0), 1, 1000, 2},
 		{"same modulo empty", 12345, 12345, 1000, 0},
 		{"same modulo full", 1000, 2000, 1000, 1000},
 
 		// uint64 overflow cases
-		{"uint64 wraparound", math.MaxUint64 - 199, 100, 1000, 684},
-		{"max uint64 edge", math.MaxUint64 - 1, 1, 1000, 387},
+		{"uint64 wraparound", math.MaxUint64 - 199, 100, 1000, 300},
+		{"max uint64 edge", math.MaxUint64 - 1, 1, 1000, 3},
 		{"large counters", math.MaxUint64 / 2, math.MaxUint64/2 + 500, 1000, 500},
 
 		// Small buffer edge cases

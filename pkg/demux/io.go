@@ -30,7 +30,7 @@ func (d *Demux) readFromAdapter(ctx context.Context) {
 		default:
 		}
 
-		buf := d.bufferPool.GetBuffer(d.mtu)
+		buf := d.bufferPool.GetBuffer(d.adapter.BlockSize())
 		_, err := d.adapter.Read(buf[:])
 		if err != nil {
 			d.bufferPool.PutBuffer(buf)
