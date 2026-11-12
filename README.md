@@ -1,6 +1,6 @@
 ![pig gopher](assets/pig-gopher-shovel.png)
 
-![Docs](https://img.shields.io/badge/Docs-008CFF?logo=github&style=for-the-badge) ![CLI Reference](https://img.shields.io/badge/CLI%20Reference-008CFF?logo=github&style=for-the-badge)
+[![Docs](https://img.shields.io/badge/Docs-008CFF?logo=github&style=for-the-badge)](docs/index.md) [![CLI Reference](https://img.shields.io/badge/CLI%20Reference-008CFF?logo=github&style=for-the-badge)](docs/reference/cli/pig.md)
 
 # Packet Insertion Gear (pig)
 
@@ -31,7 +31,7 @@ Pig can be used as:
 home or VPS pig (`-R full` or specific subnet/s).
 Authenticate with [JWT / OAuth / OIDC](docs/index.md#authentication);
 - a **netcat over encrypted tunnel**: chat, copy files, or attach a shell with `-nc`,
-without or without opening a listen port on the far side;
+with or without opening a listen port on the far side;
 - a **site-to-site / mesh hop**: chain pigs, or mix pig tunnels with
 WireGuard VPNs in one process;
 - a **transport lab**: pick [QUIC, TLS, WebSocket, WireGuard, DTLS,
@@ -59,7 +59,7 @@ Two ways to connect the peers (shown in each snippet):
 #### 1. Exit node
 
 Bob sends **all** traffic through Alice (`-R full`).  
-Alice must IP-forward and masquerade (see [start.sh](build/docker/start.sh), or the [exit-node](examples/exit-node/) Docker setup). Pick **one** pair.
+Alice must IP-forward and masquerade (see [systemd](build/deploy/systemd.md), or the [exit-node](examples/exit-node/) Docker setup). Pick **one** pair.
 
 ```bash
 # --- Alice (exit node) ---
@@ -79,20 +79,21 @@ When the tunnel is up, Bob’s outbound traffic exits via Alice.
 
 #### 2. Interactive chat
 
-Run both sides in a terminal and start typing. Whatever you enter is sent, whatever arrives is printed. Pick **one** pair (NAT or simple).
+Run both sides in a terminal and start typing. Whatever you enter is sent, whatever arrives is printed.
+Pick **one** pair (NAT or simple).
 
 ```bash
 # --- Alice (listen) ---
 # NAT traversal
-./pig -l -id pig-demo -P . -k -sk passphrase -nc
+sudo ./pig -l -id pig-demo -P . -k -sk passphrase -nc
 # Simple mode
-./pig -l -s -P ws -a :443 -k -nc
+sudo ./pig -l -s -P ws -a :443 -k -nc
 
 # --- Bob (connect) ---
 # NAT traversal
-./pig -c -id pig-demo -k -sk passphrase -nc
+sudo ./pig -c -id pig-demo -k -sk passphrase -nc
 # Simple mode
-./pig -c -s -P ws -a alice.example.com:443 -k -nc
+sudo ./pig -c -s -P ws -a alice.example.com:443 -k -nc
 ```
 
 Ctrl+C to quit.  
@@ -101,34 +102,36 @@ For a one-shot message instead of a chat:
 ```bash
 # --- Alice (send one line, then exit) ---
 # NAT traversal
-echo "Hello from Alice" | ./pig -l -id pig-demo -P . -k -sk passphrase -nc
+echo "Hello from Alice" | sudo ./pig -l -id pig-demo -P . -k -sk passphrase -nc
 # Simple mode
-echo "Hello from Alice" | ./pig -l -s -P ws -a :443 -k -nc
+echo "Hello from Alice" | sudo ./pig -l -s -P ws -a :443 -k -nc
 
 # --- Bob (print it, then exit) ---
 # NAT traversal
-./pig -c -id pig-demo -k -sk passphrase -nc
+sudo ./pig -c -id pig-demo -k -sk passphrase -nc
 # Simple mode
-./pig -c -s -P ws -a alice.example.com:443 -k -nc
+sudo ./pig -c -s -P ws -a alice.example.com:443 -k -nc
 ```
 
 #### 3. File transfer
 
-Same `-nc` bridge: `<` feeds bytes into the tunnel, `>` writes what arrives.  
-Alice listens and sends, Bob connects and saves. Start Alice first. Pick **one** pair.
+Same `-nc` bridge: `<` feeds bytes into the tunnel, `>` writes what arrives.\ 
+Bob sends, Alice saves. Start Alice first.\
+The `-o` (once) flag causes the listener to accept only one connection and exits after the peer disconnects.
+Pick **one** pair.
 
 ```bash
 # --- Alice (listen + send) ---
 # NAT traversal
-./pig -l -id pig-demo -P . -k -sk passphrase -nc < original.bin
+sudo ./pig -l -id pig-demo -P . -k -sk passphrase -nc -o > received.bin
 # Simple mode
-./pig -l -s -P ws -a :443 -k -nc < original.bin
+sudo ./pig -l -s -P ws -a :443 -k -nc -o > received.bin
 
 # --- Bob (connect + receive) ---
 # NAT traversal
-./pig -c -id pig-demo -k -sk passphrase -nc > received.bin
+sudo ./pig -c -id pig-demo -k -sk passphrase -nc < original.bin
 # Simple mode
-./pig -c -s -P ws -a alice.example.com:443 -k -nc > received.bin
+sudo ./pig -c -s -P ws -a alice.example.com:443 -k -nc < original.bin
 ```
 
 #### 4. Remote shell (using FIFO)
@@ -149,9 +152,9 @@ pigs -l -id pig-demo -P . -k -sk passphrase -nc
 
 # --- Bob (connect) ---
 # NAT traversal
-./pig -c -id pig-demo -k -sk passphrase -nc
+sudo ./pig -c -id pig-demo -k -sk passphrase -nc
 # Simple mode
-./pig -c -s -P ws -a alice.example.com:443 -k -nc
+sudo ./pig -c -s -P ws -a alice.example.com:443 -k -nc
 ```
 
 Make it an authenticated shell by using `-A` and a provisioned JWT token.\
@@ -163,7 +166,7 @@ Turn a CLI line into a config baseline:
 
 ```bash
 ./pig -l -id pig-demo -P . -k -sk passphrase -to-cfg json > alice.json
-./pig -config alice.json
+sudo ./pig -config alice.json
 ```
 
 More in the [user guide](docs/index.md), [examples](examples/), and [config reference](docs/reference/config/config.md).
