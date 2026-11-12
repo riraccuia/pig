@@ -21,29 +21,31 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/network"
 )
 
 // newBypassDialer returns a net.Dialer that installs an underlay bypass route for
 // each remote address the dialer is about to connect to (via ControlContext),
 // then applies the usual socket options from network.NewDialer.
-func (c *Controller) newBypassDialer(timeout time.Duration) *net.Dialer {
+func (c *Controller) newBypassDialer(logger common.Logger, timeout time.Duration) *net.Dialer {
 	dialer := network.NewDialer(timeout)
-	sockopts := dialer.Control
-	dialer.Control = nil
+	controlFunc := dialer.Control
 	dialer.ControlContext = func(ctx context.Context, network, address string, rawConn syscall.RawConn) error {
-		if err := c.bypassDialAddress(address); err != nil {
-			return err
+		if bypassIP := getDialIPFromAddress(address); bypassIP != nil {
+			c.bypassTarget(logger, bypassIP)
 		}
-		if sockopts != nil {
-			return sockopts(network, address, rawConn)
+		if controlFunc != nil {
+			// needed because network.NewDialer sets a Control method that would
+			// be ignored if ControlContext is set
+			return controlFunc(network, address, rawConn)
 		}
 		return nil
 	}
 	return dialer
 }
 
-func (c *Controller) bypassDialAddress(address string) error {
+func getDialIPFromAddress(address string) net.IP {
 	addrPort, err := netip.ParseAddrPort(address)
 	if err != nil {
 		// Not a host:port remote (e.g. unix path); nothing to bypass.
@@ -53,6 +55,5 @@ func (c *Controller) bypassDialAddress(address string) error {
 	if !addr.IsValid() || addr.IsUnspecified() {
 		return nil
 	}
-	_, err = c.bypassTarget(net.IP(addr.AsSlice()))
-	return err
+	return addr.AsSlice()
 }

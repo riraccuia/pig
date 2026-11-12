@@ -20,6 +20,8 @@ import (
 	"time"
 )
 
+var errBufferClosed = fmt.Errorf("buffer closed")
+
 // buffer provides a thread-safe fixed-size circular buffer.
 type buffer struct {
 	mu            sync.Mutex
@@ -48,169 +50,96 @@ func newBuffer(size int) *buffer {
 	return b
 }
 
-// calculateUsed returns the number of bytes currently used in the buffer.
 func (b *buffer) calculateUsed() int {
-	// Check if buffer is empty first
-	if b.writePos == b.readPos {
-		return 0
-	}
-
-	// Handle the simple case first to avoid modulo when possible
-	if b.writePos > b.readPos {
-		diff := b.writePos - b.readPos
-		if diff <= uint64(b.size) {
-			return int(diff)
-		}
-		// If diff > size, buffer is full
+	used := b.writePos - b.readPos
+	if used > uint64(b.size) {
 		return b.size
 	}
-
-	// Wraparound case: writePos < readPos due to uint64 overflow
-	// Calculate how much data spans the wraparound
-	readIdx := int(b.readPos % uint64(b.size))
-	writeIdx := int(b.writePos % uint64(b.size))
-
-	// In wraparound case, buffer contains data from readIdx to end + start to writeIdx
-	used := writeIdx + (b.size - readIdx)
-	// Ensure result doesn't exceed buffer size
-	if used > b.size {
-		return b.size
-	}
-	return used
+	return int(used)
 }
 
-// calculateAvailable returns the number of bytes available for writing.
-func (b *buffer) calculateAvailable() int {
-	return b.size - b.calculateUsed()
+func (b *buffer) copyIn(pos uint64, src []byte) int {
+	idx := int(pos % uint64(b.size))
+	n := copy(b.data[idx:], src)
+	if n < len(src) {
+		n += copy(b.data, src[n:])
+	}
+	return n
+}
+
+func (b *buffer) copyOut(pos uint64, dst []byte) {
+	idx := int(pos % uint64(b.size))
+	n := copy(dst, b.data[idx:])
+	if n < len(dst) {
+		copy(dst[n:], b.data)
+	}
 }
 
 // Write copies data into the buffer.
-func (b *buffer) Write(data []byte) (n int, err error) {
+func (b *buffer) Write(data []byte) (int, error) {
 	if len(data) == 0 {
 		return 0, nil
 	}
-
 	b.mu.Lock()
+	defer b.mu.Unlock()
 
-	if b.closed {
-		b.mu.Unlock()
-		return 0, fmt.Errorf("buffer closed")
-	}
-
-	// Calculate available space with correct wraparound handling
-	used := b.calculateUsed()
-	available := b.size - used
-	/*if used >= b.size || available < len(data) {
-		b.mu.Unlock()
-		// dropping silently
-		return len(data), nil
-	}*/
-	for used >= b.size || available < len(data) {
-		b.wcond.Wait()
+	copied := 0
+	for copied < len(data) {
 		if b.closed {
-			b.mu.Unlock()
-			return 0, fmt.Errorf("buffer closed")
+			return copied, errBufferClosed
 		}
-		used = b.calculateUsed()
-		available = b.size - used
+		if b.size == b.calculateUsed() {
+			b.wcond.Wait()
+			continue
+		}
+		avail := b.size - b.calculateUsed()
+		wasEmpty := avail == b.size
+		chunk := data[copied:]
+		if len(chunk) > avail {
+			chunk = chunk[:avail]
+		}
+		n := b.copyIn(b.writePos, chunk)
+		b.writePos += uint64(n)
+		copied += n
+		if wasEmpty {
+			b.rcond.Signal()
+		}
 	}
-
-	isEmpty := b.writePos == b.readPos
-
-	writeLen := len(data)
-	if writeLen > available {
-		writeLen = available
-	}
-
-	// Calculate write position and handle wraparound
-	idx := int(b.writePos % uint64(b.size))
-	remaining := b.size - idx // Space until end of buffer
-
-	if remaining >= writeLen {
-		// Simple case - no wraparound needed
-		copy(b.data[idx:idx+writeLen], data[:writeLen])
-	} else {
-		// Wraparound case - split the copy
-		copy(b.data[idx:], data[:remaining])
-		copy(b.data[0:writeLen-remaining], data[remaining:writeLen])
-	}
-
-	b.writePos += uint64(writeLen)
-
-	if isEmpty {
-		b.rcond.Signal()
-	}
-
-	b.mu.Unlock()
-	return writeLen, nil
+	return copied, nil
 }
 
 // Read copies data from the buffer.
-func (b *buffer) Read(p []byte) (n int, err error) {
+func (b *buffer) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-
 	b.mu.Lock()
-
-	if b.closed {
-		b.mu.Unlock()
-		return 0, fmt.Errorf("buffer closed")
-	}
-
-	if isDeadlineExceeded(b.readDeadline) {
-		b.mu.Unlock()
-		return 0, fmt.Errorf("read deadline exceeded")
-	}
-
-	// Wait for data
-	for b.writePos == b.readPos {
+	defer b.mu.Unlock()
+	for b.calculateUsed() == 0 {
+		if b.closed {
+			return 0, errBufferClosed
+		}
 		if isDeadlineExceeded(b.readDeadline) {
-			b.mu.Unlock()
 			return 0, fmt.Errorf("read deadline exceeded")
 		}
 		b.rcond.Wait()
-		if b.closed {
-			b.mu.Unlock()
-			return 0, fmt.Errorf("buffer closed")
-		}
 	}
-
-	// Calculate available data with correct wraparound handling
-	available := b.calculateUsed()
-	if available > len(p) {
-		available = len(p)
+	n := b.calculateUsed()
+	if n > len(p) {
+		n = len(p)
 	}
-
-	// Calculate read position and handle wraparound
-	idx := int(b.readPos % uint64(b.size))
-	remaining := b.size - idx // Space until end of buffer
-
-	if remaining >= available {
-		// Simple case - no wraparound needed
-		copy(p[:available], b.data[idx:idx+available])
-	} else {
-		// Wraparound case - split the copy
-		copy(p[:remaining], b.data[idx:])
-		wrapLen := available - remaining
-		if wrapLen > 0 {
-			copy(p[remaining:remaining+wrapLen], b.data[0:wrapLen])
-		}
-	}
-
-	b.readPos += uint64(available)
-
+	b.copyOut(b.readPos, p[:n])
+	b.readPos += uint64(n)
 	b.wcond.Signal()
-	b.mu.Unlock()
-	return available, nil
+	return n, nil
 }
 
 // Close closes the buffer.
 func (b *buffer) Close() {
 	b.mu.Lock()
 	b.closed = true
-	b.readPos = 0
-	b.writePos = 0
+	//b.readPos = 0
+	//b.writePos = 0
 	b.rcond.Broadcast()
 	b.wcond.Broadcast()
 	b.mu.Unlock()

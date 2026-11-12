@@ -18,8 +18,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
-	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -31,6 +29,7 @@ import (
 	"github.com/riraccuia/pig/pkg/route"
 	"github.com/riraccuia/pig/pkg/transport"
 	"github.com/riraccuia/pig/pkg/transport/dtls"
+	icmp "github.com/riraccuia/pig/pkg/transport/icmp"
 	qt "github.com/riraccuia/pig/pkg/transport/quic-go"
 	trtls "github.com/riraccuia/pig/pkg/transport/tls"
 	"github.com/riraccuia/pig/pkg/transport/tlsicmp"
@@ -38,13 +37,16 @@ import (
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
 
-func (c *Controller) getICEDialFunc(cfg *config.TunnelConfig, mtu int) (func(ctx context.Context) (transport.Conn, error), error) {
+func (c *Controller) getICEDialFunc(tunnelInfo *TunnelInfo, mtu int) (func(ctx context.Context) (transport.Conn, error), error) {
+	cfg := tunnelInfo.Tunnel.Config()
+	logger := tunnelInfo.Logger
+
 	tlsConfig, err := c.createTLSConfig(config.TunnelDirectionConnect, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create TLS config: %w", err)
 	}
-	signalingOpts := signaling.GetOptions(c.logger, cfg.ICE)
-	signalingOpts.Dialer = c.newBypassDialer(time.Second * 5)
+	signalingOpts := signaling.GetOptions(logger, cfg.ICE)
+	signalingOpts.Dialer = c.bypassDialer
 
 	pc, err := ice.NewPathFinder(signalingOpts, cfg.ICE.UseProtos())
 	if err != nil {
@@ -52,8 +54,8 @@ func (c *Controller) getICEDialFunc(cfg *config.TunnelConfig, mtu int) (func(ctx
 	}
 
 	return func(ctx context.Context) (transport.Conn, error) {
-		c.logger.Infof("Starting ICE | Candidate protocols: %v", strings.Join(cfg.ICE.Protos, ", "))
-		connectPaths, scheduledAt, err := pc.GetConnectPaths(ctx, cfg.Connect, c.adapters)
+		logger.Infof("Starting ICE | Candidate protocols: %v", strings.Join(cfg.ICE.Protos, ", "))
+		connectPaths, scheduledAt, err := pc.GetConnectPaths(ctx, cfg.Connect, &c.adapters)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get ICE connect paths: %w", err)
 		}
@@ -61,7 +63,7 @@ func (c *Controller) getICEDialFunc(cfg *config.TunnelConfig, mtu int) (func(ctx
 			return nil, fmt.Errorf("no ICE candidates found")
 		}
 
-		selectedPath, err := c.processICEClientConnectPaths(ctx, connectPaths, scheduledAt)
+		selectedPath, err := c.processICEClientConnectPaths(ctx, tunnelInfo, connectPaths, scheduledAt)
 		if err != nil || selectedPath == nil {
 			return nil, fmt.Errorf("failed to process ICE client connect paths: %w", err)
 		}
@@ -71,11 +73,11 @@ func (c *Controller) getICEDialFunc(cfg *config.TunnelConfig, mtu int) (func(ctx
 			return nil, fmt.Errorf("failed to nominate ICE candidate: %w", err)
 		}
 
-		c.logger.Debugf("ICE candidate nominated: %s", selectedPath.String())
+		logger.Debugf("ICE candidate nominated: %s", selectedPath.String())
 
 		selectedPath.BindAgent.StopReceive()
 
-		c.logger.Infof("ICE completed | %s", selectedPath.String())
+		logger.Infof("ICE completed | %s", selectedPath.String())
 
 		// Allow the server to set up the listening side of the connection
 		time.Sleep(time.Millisecond * 100)
@@ -98,7 +100,7 @@ func (c *Controller) getICEDialFunc(cfg *config.TunnelConfig, mtu int) (func(ctx
 	}, nil
 }
 
-func (c *Controller) processICEClientConnectPaths(ctx context.Context, connectPaths []*ice.ConnectPath, scheduledAt time.Time) (selectedPath *ice.ConnectPath, err error) {
+func (c *Controller) processICEClientConnectPaths(ctx context.Context, tunnelInfo *TunnelInfo, connectPaths []*ice.ConnectPath, scheduledAt time.Time) (selectedPath *ice.ConnectPath, err error) {
 	// wait for the scheduled time
 	waitScheduled := time.After(time.Until(scheduledAt))
 	select {
@@ -111,25 +113,24 @@ func (c *Controller) processICEClientConnectPaths(ctx context.Context, connectPa
 
 	selectedPtr := atomic.Pointer[ice.ConnectPath]{}
 
-	wg := &sync.WaitGroup{}
+	wg := sync.WaitGroup{}
 	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
 	defer cancel()
 
 	// build the bypass routes for the remote IPs
-	remoteIPs := map[string]*route.Route{}
+	bypassRoutes := map[string]*route.Route{}
 	for _, cp := range connectPaths {
-		if _, ok := remoteIPs[cp.RemoteIP.String()]; ok {
+		if _, ok := bypassRoutes[cp.RemoteIP.String()]; ok {
 			continue
 		}
-		rt, _ := c.bypassTarget(cp.RemoteIP)
-		remoteIPs[cp.RemoteIP.String()] = rt
+		bypassRoutes[cp.RemoteIP.String()] = c.bypassTarget(tunnelInfo.Logger, cp.RemoteIP)
 	}
 
 	for _, cp := range connectPaths {
 		// attempt to connect all paths in parallel
 		path := cp
 		wg.Go(func() {
-			if c.connectICEDialPath(ctx, path, &selectedPtr) {
+			if c.connectICEDialPath(ctx, tunnelInfo, path, &selectedPtr) {
 				// we have a winner, cancel everything else
 				cancel()
 			}
@@ -140,38 +141,55 @@ func (c *Controller) processICEClientConnectPaths(ctx context.Context, connectPa
 
 	selectedPath = selectedPtr.Load()
 
-	keepRoute := ""
 	switch selectedPath {
 	case nil:
 		err = errors.New("all ICE candidates failed")
 	default:
-		keepRoute = selectedPath.RemoteIP.String()
+		// set the route from the selected path as tunnel active route
+		activeBypassRoute := bypassRoutes[selectedPath.RemoteIP.String()]
+		tunnelInfo.NewActiveRoute(activeBypassRoute)
+		delete(bypassRoutes, selectedPath.RemoteIP.String())
 	}
 
-	for target, rt := range remoteIPs {
-		if keepRoute == target {
+	// cleanup unused bypass routes
+	for _, rt := range bypassRoutes {
+		if rt == nil {
 			continue
 		}
-		e := c.routeManager.RemoveRoute(rt)
-		if e != nil {
-			c.logger.Errorf("Failed to remove bypass route for %s: %v", rt.Destination.String(), e)
-		}
+		c.RouteRemove(tunnelInfo.Logger, rt, nil)
 	}
 
 	return
 }
 
-func (c *Controller) connectICEDialPath(ctx context.Context, cp *ice.ConnectPath, selectedPath *atomic.Pointer[ice.ConnectPath]) (selected bool) {
-	c.logger.Debugf("Connecting ICE path | %s", cp.String())
-	_, err := cp.Connect(ctx)
-	if err == ice.ErrConnectICMP {
-		_, err = cp.ConnectICMP(ctx, c.logger, c.cfg.Adapter.BindAdapter, false)
+func (c *Controller) connectICEDialPath(ctx context.Context, tunnelInfo *TunnelInfo, cp *ice.ConnectPath, selectedPath *atomic.Pointer[ice.ConnectPath]) (selected bool) {
+	logger := tunnelInfo.Logger
+
+	logger.Debugf("Connecting ICE path | %s", cp.String())
+	var err error
+	switch cp.Protocol.Network {
+	case "icmp":
+		cfg := tunnelInfo.Tunnel.Config()
+		bindAdapter := ""
+		if cfg.Adapter == nil || cfg.Adapter.BindAdapter == "" {
+			logger.Error("bind adapter not configured for icmp based paths")
+			return
+		}
+		bindAdapter = cfg.Adapter.BindAdapter
+		err = icmp.SetupGlobalListenerOnce(context.Background(), c.logger, bindAdapter, false)
+		if err != nil {
+			logger.Errorf("failed to setup icmp listener: %w", err)
+			return
+		}
+		_, err = cp.ConnectICMP(ctx, logger, bindAdapter, false)
+	default:
+		_, err = cp.Connect(ctx)
 	}
 	if errors.Is(err, context.Canceled) {
 		return
 	}
 	if err != nil {
-		c.logger.Tracef("Failed to connect ICE path %s: %v", cp.String(), err)
+		logger.Tracef("Failed to connect ICE path %s: %v", cp.String(), err)
 		return
 	}
 	_, err = cp.BindAgent.Bind(ctx)
@@ -180,7 +198,7 @@ func (c *Controller) connectICEDialPath(ctx context.Context, cp *ice.ConnectPath
 		return
 	}
 	if err != nil {
-		c.logger.Tracef("Failed to bind ICE path %s: %v", cp.String(), err)
+		logger.Tracef("Failed to bind ICE path %s: %v", cp.String(), err)
 		cp.CloseConn()
 		return
 	}
@@ -190,37 +208,7 @@ func (c *Controller) connectICEDialPath(ctx context.Context, cp *ice.ConnectPath
 		cp.CloseConn()
 		return
 	}
-	c.logger.Tracef("Bound ICE path %s", cp.String())
+	logger.Tracef("Bound ICE path %s", cp.String())
 	selected = true
-	return
-}
-
-func (c *Controller) bypassTarget(target net.IP) (rt *route.Route, err error) {
-	// bypass via the best route
-	bypassRoute := config.Route{
-		Destination: target.String(),
-		Type:        config.RouteTypeBypass,
-	}
-	rt, err = c.buildRoute(bypassRoute, "")
-	if err != nil {
-		c.logger.Errorf("Failed to build bypass route for %s: %v", target.String(), err)
-		return
-	}
-
-	c.logger.Debugf("Bypassing %s", rt.Destination.String())
-
-	err = c.routeManager.AddRoute(rt)
-	if errors.Is(err, fs.ErrExist) {
-		err = nil
-		c.logger.Debugf("Skipped bypass route for %s as it already exists", target.String())
-	}
-	if errors.Is(err, route.ErrDirectlyConnected) {
-		c.logger.Debugf("Skipped bypass route: %v", err)
-		err = nil
-	}
-	if err != nil {
-		c.logger.Errorf("Failed to add bypass route for %s: %v", target.String(), err)
-		return
-	}
 	return
 }

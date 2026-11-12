@@ -29,6 +29,8 @@ import (
 )
 
 var (
+	DefaultLogLevel = "info"
+
 	DefaultMTU           = 1420
 	DefaultQueueSize     = 256
 	DefaultStreamCount   = 0
@@ -47,6 +49,9 @@ var (
 	DefaultListenBasePrefixV4    = "100.96.0.0/11"
 	DefaultConnectPrefixLengthV4 = 30
 	DefaultListenPrefixLengthV4  = 16
+
+	DefaultStdioConnectPrefix = "100.64.0.1/32"
+	DefaultStdioListenPrefix  = "100.64.0.1/30"
 
 	DefaultConnectOffset = time.Millisecond * 500
 
@@ -153,7 +158,7 @@ func (c *Config) hasDefaultOrConnectTunnels() bool {
 
 func (c *LogConfig) Initialize() error {
 	if c.Level == "" {
-		c.Level = "info"
+		c.Level = DefaultLogLevel
 	}
 	return nil
 }
@@ -177,6 +182,12 @@ func (c *AdapterConfig) InitializeTunnelAdapter(direction TunnelDirection) error
 	if c.QueueSize == 0 {
 		c.QueueSize = DefaultQueueSize
 	}
+	if c.adapterType == "stdio" {
+		return c.InitializeStdio(direction)
+	}
+	if c.adapterType == "" {
+		c.adapterType = "tun"
+	}
 	if len(c.TunnelAddress) != 0 {
 		return nil
 	}
@@ -194,6 +205,16 @@ func (c *AdapterConfig) InitializeTunnelAdapter(direction TunnelDirection) error
 		return fmt.Errorf("failed to generate tunnel adapter address: %w", err)
 	}
 	c.TunnelAddress = []string{generatedNet.String()}
+	return nil
+}
+
+func (c *AdapterConfig) InitializeStdio(direction TunnelDirection) error {
+	switch direction {
+	case TunnelDirectionConnect:
+		c.TunnelAddress = []string{DefaultStdioConnectPrefix}
+	case TunnelDirectionListen:
+		c.TunnelAddress = []string{DefaultStdioListenPrefix}
+	}
 	return nil
 }
 
@@ -243,11 +264,17 @@ func (c *TunnelConfig) Initialize(bindAdapter string, globalStunServers []string
 	if c.ReconnectInterval == 0 {
 		c.ReconnectInterval = DefaultRetryInterval
 	}
+	if c.ReconnectInterval == -1 {
+		c.ReconnectInterval = 0
+	}
 	if c.Wred.WeightFactor == 0 {
 		c.Wred.WeightFactor = DefaultWredWF
 	}
 	if c.Wred.MaxDropProbability == 0 {
 		c.Wred.MaxDropProbability = DefaultWredDP
+	}
+	if c.Wred.MaxDropProbability == -1 {
+		c.Wred.MaxDropProbability = 0
 	}
 	if c.Wred.MaxThreshold == 0 {
 		c.Wred.MaxThreshold = DefaultWredThresh
@@ -357,7 +384,7 @@ func validateWGKey(key, field string) error {
 // dotExpandICEProtos resolves all the ICE protocols that are supported by the tunnel config.
 // It is used with the idiomatic proto = "." syntax meaning "all pig supported ICE-capable protocols".
 func (c *TunnelConfig) dotExpandICEProtos() []string {
-	c.ICE.Protos = []string{string(TransportWS), string(TransportQUIC), string(TransportTLS), string(TransportDTLS)}
+	c.ICE.Protos = []string{string(TransportWS), string(TransportTLS), string(TransportQUIC), string(TransportDTLS)}
 	hasWGConfig := c.Trust != nil && c.Trust.WireGuard != nil
 	hasWGEnv := EnvWGPrivateKey.Get() != "" && EnvWGPeerPublicKey.Get() != ""
 	if !hasWGConfig && !hasWGEnv {

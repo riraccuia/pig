@@ -39,13 +39,24 @@ func (client *ClientTunnel) acceptStreams(ctx context.Context) {
 			return
 		}
 
-		client.logger.Debugf("accepted stream from client %s", client.conn.RemoteAddr())
+		client.logger.Debug("accepted new stream")
 
 		stream.Flush()
 		client.streams.Add(stream)
 
-		go client.handleStream(ctx, stream)
+		client.wg.Go(func() { client.handleStream(ctx, stream) })
 	}
+}
+
+func (client *ClientTunnel) openStream(ctx context.Context, conn transport.Conn) (transport.Stream, error) {
+	stream, err := conn.NewStream(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stream.Flush()
+	client.streams.Add(stream)
+	client.wg.Go(func() { client.handleStream(ctx, stream) })
+	return stream, nil
 }
 
 func (client *ClientTunnel) handleStream(ctx context.Context, stream transport.Stream) {
@@ -56,15 +67,15 @@ func (client *ClientTunnel) handleStream(ctx context.Context, stream transport.S
 	client.handleInbound(ctx, stream)
 }
 
-func (client *ClientTunnel) handleOutbound(ctx context.Context) {
+func (client *ClientTunnel) handleOutbound() {
 	if client.conn.IsStreamed() {
-		client.handleOutboundStream(ctx)
+		client.handleOutboundStream()
 		return
 	}
-	client.handleOutboundConn(ctx)
+	client.handleOutboundConn()
 }
 
-func (client *ClientTunnel) handleOutboundConn(ctx context.Context) {
+func (client *ClientTunnel) handleOutboundConn() {
 	// Create a buffer to hold multiple packets
 	const maxBatchSize = 64 * 1024 // 64KB batch size
 	buffer := make([]byte, 0, maxBatchSize)
@@ -84,45 +95,41 @@ func (client *ClientTunnel) handleOutboundConn(ctx context.Context) {
 		totalLen := pkt.TotalLength()
 		if totalLen <= 0 || totalLen > len(pkt.Bytes()) {
 			client.logger.Debugf("outbound packet with invalid length: %d", totalLen)
-			client.parent.bufferPool.Put(pkt.Bytes())
+			client.parent.bufferPool.PutBuffer(pkt.Bytes())
 			return nil
 		}
 
 		// If adding this packet would exceed batch size, flush current batch first
 		if len(batch)+totalLen > maxBatchSize {
 			if err := writeBatch(); err != nil {
-				client.parent.bufferPool.Put(pkt.Bytes())
+				client.parent.bufferPool.PutBuffer(pkt.Bytes())
 				return err
 			}
 		}
 
 		// Append packet to batch
 		batch = append(batch, pkt.Bytes()[:totalLen]...)
-		client.parent.bufferPool.Put(pkt.Bytes())
+		client.parent.bufferPool.PutBuffer(pkt.Bytes())
 
 		// If batch is full, write immediately
 		if len(batch) >= maxBatchSize {
 			if err := writeBatch(); err != nil {
-				client.parent.bufferPool.Put(pkt.Bytes())
+				client.parent.bufferPool.PutBuffer(pkt.Bytes())
 				return err
 			}
 		}
 		return nil
 	}
 
-	for {
-		if common.IsContextDone(ctx) {
-			return
+	defer func() {
+		if err := writeBatch(); err != nil {
+			client.logger.Error(err)
 		}
+	}()
 
+	for {
 		pkts, empty, closed := client.outbound.TryPopAll()
-		if closed {
-			if empty {
-				return
-			}
-			for _, pkt := range pkts {
-				client.parent.bufferPool.Put(pkt.Bytes())
-			}
+		if empty && closed {
 			return
 		}
 		if empty {
@@ -137,27 +144,17 @@ func (client *ClientTunnel) handleOutboundConn(ctx context.Context) {
 		}
 		for _, pkt := range pkts {
 			if err := processPacket(pkt); err != nil {
-				client.logger.Debugf("failed to process packet: %v", err)
+				client.logger.Debugf("failed to process outbound packet: %v", err)
 				return
 			}
 		}
 	}
 }
 
-func (client *ClientTunnel) handleOutboundStream(ctx context.Context) {
+func (client *ClientTunnel) handleOutboundStream() {
 	for {
-		if common.IsContextDone(ctx) {
-			return
-		}
-
 		pkts, empty, closed := client.outbound.TryPopAll()
-		if closed {
-			if empty {
-				return
-			}
-			for _, pkt := range pkts {
-				client.parent.bufferPool.Put(pkt.Bytes())
-			}
+		if empty && closed {
 			return
 		}
 		if empty {
@@ -170,19 +167,19 @@ func (client *ClientTunnel) handleOutboundStream(ctx context.Context) {
 		for _, pkt := range pkts {
 			totalLen := pkt.TotalLength()
 			if totalLen <= 0 || totalLen > len(pkt.Bytes()) {
-				client.parent.bufferPool.Put(pkt.Bytes())
+				client.parent.bufferPool.PutBuffer(pkt.Bytes())
 				continue
 			}
 
 			stream := client.streams.SelectByIPAndPort(pkt.SourceIP(), pkt.SourcePort())
 			if stream == nil {
-				client.logger.Infof("no stream found for client %s", client.conn.RemoteAddr())
-				client.parent.bufferPool.Put(pkt.Bytes())
+				client.logger.Info("no stream found")
+				client.parent.bufferPool.PutBuffer(pkt.Bytes())
 				continue
 			}
 			_, err := stream.Write(pkt.Bytes()[:totalLen])
 			stream.Flush()
-			client.parent.bufferPool.Put(pkt.Bytes())
+			client.parent.bufferPool.PutBuffer(pkt.Bytes())
 			if err != nil {
 				return
 			}

@@ -31,18 +31,21 @@ import (
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
 
-func (c *Controller) getDialFunc(cfg *config.TunnelConfig, mtu int) (func(ctx context.Context) (transport.Conn, error), error) {
+func (c *Controller) getDialFunc(tunnelInfo *TunnelInfo, mtu int) (func(ctx context.Context) (transport.Conn, error), error) {
+	cfg := tunnelInfo.Tunnel.Config()
 	switch {
 	case cfg.ICE == nil || !cfg.ICE.Enabled:
-		return c.getClientDialFunc(cfg, mtu)
+		return c.getClientDialFunc(tunnelInfo, mtu)
 	case cfg.ICE != nil && cfg.ICE.Enabled:
-		return c.getICEDialFunc(cfg, mtu)
+		return c.getICEDialFunc(tunnelInfo, mtu)
 	}
 	return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 }
 
-func (c *Controller) getClientDialFunc(cfg *config.TunnelConfig, mtu int) (func(ctx context.Context) (transport.Conn, error), error) {
+func (c *Controller) getClientDialFunc(tunnelInfo *TunnelInfo, mtu int) (func(ctx context.Context) (transport.Conn, error), error) {
+	cfg := tunnelInfo.Tunnel.Config()
 	targetAddr := cfg.Connect.Address
+	logger := tunnelInfo.Logger
 
 	return func(ctx context.Context) (transport.Conn, error) {
 		tunnelAddr, err := net.ResolveIPAddr("ip", targetAddr)
@@ -52,7 +55,7 @@ func (c *Controller) getClientDialFunc(cfg *config.TunnelConfig, mtu int) (func(
 
 		cfg.Connect.Address = tunnelAddr.String()
 
-		c.bypassTarget(tunnelAddr.IP)
+		tunnelInfo.NewActiveRoute(c.bypassTarget(tunnelInfo.Logger, tunnelAddr.IP))
 
 		switch cfg.Proto {
 		case config.TransportQUIC:
@@ -60,37 +63,37 @@ func (c *Controller) getClientDialFunc(cfg *config.TunnelConfig, mtu int) (func(
 			if err != nil {
 				return nil, fmt.Errorf("failed to create TLS config: %w", err)
 			}
-			return qt.GetClientDialFunc(c.logger, cfg, tlsConfig)(ctx)
+			return qt.GetClientDialFunc(logger, cfg, tlsConfig)(ctx)
 		case config.TransportUDP:
-			return udp.GetClientDialFunc(c.logger, cfg)(ctx)
+			return udp.GetClientDialFunc(logger, cfg)(ctx)
 		case config.TransportTLS:
 			tlsConfig, err := c.createTLSConfig(config.TunnelDirectionConnect, cfg)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create TLS config: %w", err)
 			}
-			return trtls.GetClientDialFunc(c.logger, cfg, tlsConfig)(ctx)
+			return trtls.GetClientDialFunc(logger, cfg, tlsConfig)(ctx)
 		case config.TransportWS:
 			tlsConfig, err := c.createTLSConfig(config.TunnelDirectionConnect, cfg)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create TLS config: %w", err)
 			}
-			return ws.GetClientDialFunc(c.logger, cfg, tlsConfig)(ctx)
+			return ws.GetClientDialFunc(logger, cfg, tlsConfig)(ctx)
 		case config.TransportICMP:
-			return icmp.GetClientDialFunc(c.logger, cfg, c.cfg.Adapter.BindAdapter)(ctx)
+			return icmp.GetClientDialFunc(logger, cfg, cfg.Adapter.BindAdapter)(ctx)
 		case config.TransportTLSICMP:
 			tlsConfig, err := c.createTLSConfig(config.TunnelDirectionConnect, cfg)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create TLS config: %w", err)
 			}
-			return tlsicmp.GetClientDialFunc(c.logger, cfg, tlsConfig, c.cfg.Adapter.BindAdapter)(ctx)
+			return tlsicmp.GetClientDialFunc(logger, cfg, tlsConfig, cfg.Adapter.BindAdapter)(ctx)
 		case config.TransportDTLS:
 			tlsConfig, err := c.createTLSConfig(config.TunnelDirectionConnect, cfg)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create TLS config: %w", err)
 			}
-			return dtls.GetClientDialFunc(c.logger, cfg, tlsConfig, mtu)(ctx)
+			return dtls.GetClientDialFunc(logger, cfg, tlsConfig, mtu)(ctx)
 		case config.TransportWG:
-			return wireguard.GetClientDialFunc(c.logger, cfg, mtu)(ctx)
+			return wireguard.GetClientDialFunc(logger, cfg, mtu)(ctx)
 		default:
 			return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 		}

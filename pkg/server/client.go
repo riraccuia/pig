@@ -39,7 +39,7 @@ type ClientTunnel struct {
 	dropLogger          *common.DelayedCounterProcessor
 	connError           chan error
 	cancel              context.CancelFunc
-	wg                  *sync.WaitGroup
+	wg, outWg           sync.WaitGroup
 	closed              atomic.Bool
 }
 
@@ -57,22 +57,50 @@ func (s *Server) performAuthentication(ctx context.Context, conn transport.Conn)
 }
 
 // handleNewClient handles a new client connection.
-func (s *Server) handleNewClient(ctx context.Context, conn transport.Conn) {
+func (s *Server) handleNewClient(ctx context.Context, conn transport.Conn) (ok bool) {
+	logger := s.logger.WithFields([]common.LoggerField{
+		{
+			Key:   "client",
+			Value: conn.RemoteAddr().String(),
+		},
+	})
+
 	// Allocate IP for the client
 	sourceIP, err := s.AllocateIP()
 	if err != nil {
-		s.logger.Errorf("Failed to allocate IP for client %s: %v", conn.RemoteAddr(), err)
+		logger.Errorf("Failed to allocate IP for client %s: %v", conn.RemoteAddr(), err)
 		conn.Close()
 		return
 	}
 
 	sourceIP6, err := s.AllocateIP6()
 	if err != nil {
-		s.logger.Errorf("Failed to allocate IP6 for client %s: %v", conn.RemoteAddr(), err)
+		logger.Errorf("Failed to allocate IP6 for client %s: %v", conn.RemoteAddr(), err)
 	}
 
-	client := NewClientTunnel(ctx, s)
-	go client.Start(ctx, conn, sourceIP, sourceIP6)
+	client := NewClientTunnel(ctx, s).WithLogger(logger)
+	client.Start(ctx, conn, sourceIP, sourceIP6)
+
+	// Store client in sync.Map using sourceIP as key
+	client.parent.clients.Store(sourceIP.String(), client)
+	if sourceIP6 != nil {
+		client.parent.clients.Store(sourceIP6.String(), client)
+	}
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			client.logger.Info("disconnecting (context done)")
+		case err := <-client.connError:
+			client.logger.Errorf("connection error: %v", err)
+		}
+		client.Close()
+		if s.acceptOnce {
+			s.Close()
+		}
+	}()
+
+	return true
 }
 
 func NewClientTunnel(ctx context.Context, parent *Server) *ClientTunnel {
@@ -93,8 +121,12 @@ func NewClientTunnel(ctx context.Context, parent *Server) *ClientTunnel {
 		streams:   streams.New(),
 		outbound:  outbound,
 		connError: make(chan error, 1),
-		wg:        &sync.WaitGroup{},
 	}
+	return client
+}
+
+func (client *ClientTunnel) WithLogger(logger common.Logger) *ClientTunnel {
+	client.logger = logger
 	return client
 }
 
@@ -108,12 +140,12 @@ func (client *ClientTunnel) Start(ctx context.Context, conn transport.Conn, sour
 
 	if client.dropLogger == nil {
 		client.dropLogger = common.NewDelayedCounterProcessor(func(c1, c2 *atomic.Uint64) {
-			client.logger.Infof("Client %s dropped %d packets (%d bytes)", conn.RemoteAddr(), c1.Load(), c2.Load())
+			client.logger.Infof("Dropped %d packets (%d bytes)", c1.Load(), c2.Load())
 		}).WithBackoff(time.Second, time.Second*15)
 		client.dropLogger.Start(ctx)
 	}
 
-	client.logger.Infof("New client connected from %s, allocated IP: %s, allocated IP6: %s", conn.RemoteAddr(), sourceIP.String(), sourceIP6.String())
+	client.logger.Infof("allocated IP: %s, allocated IP6: %s", sourceIP.String(), sourceIP6.String())
 
 	switch conn.IsStreamed() {
 	case true:
@@ -122,21 +154,7 @@ func (client *ClientTunnel) Start(ctx context.Context, conn transport.Conn, sour
 		client.wg.Go(func() { client.handleInbound(ctx, conn) })
 	}
 
-	client.wg.Go(func() { client.handleOutbound(ctx) })
-
-	// Store client in sync.Map using sourceIP as key
-	client.parent.clients.Store(sourceIP.String(), client)
-	if sourceIP6 != nil {
-		client.parent.clients.Store(sourceIP6.String(), client)
-	}
-
-	select {
-	case <-ctx.Done():
-		client.logger.Infof("disconnecting client %s (context done)", conn.RemoteAddr())
-	case err := <-client.connError:
-		client.logger.Errorf("client %s connection error: %v", conn.RemoteAddr(), err)
-	}
-	client.Close()
+	client.outWg.Go(func() { client.handleOutbound() })
 }
 
 func (client *ClientTunnel) Close() {
@@ -153,13 +171,15 @@ func (client *ClientTunnel) Close() {
 		return
 	}
 
+	client.outbound.Close()
+	client.outWg.Wait()
+
 	client.cancel()
 	client.conn.Close()
-	client.outbound.Close()
 	client.streams.CloseAll()
 
 	queue.DrainQueue(client.outbound, func(pkt network.IPPacket) {
-		client.parent.bufferPool.Put(pkt.Bytes())
+		client.parent.bufferPool.PutBuffer(pkt.Bytes())
 	})
 
 	client.parent.ReleaseIP(client.sourceIP)
@@ -169,5 +189,5 @@ func (client *ClientTunnel) Close() {
 
 	client.wg.Wait()
 
-	client.logger.Infof("client %s closed", client.conn.RemoteAddr())
+	client.logger.Info("closed")
 }

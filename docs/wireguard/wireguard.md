@@ -236,7 +236,7 @@ The second tunnel (`home-pig`) is a pig-to-pig connection to a listener sitting 
 It uses NAT traversal (ICE section) so you don’t need a public home IP, and it only sends the home LAN (`192.168.1.0/24`) through the tunnel, everything else stays on `my-vpn`.
 The cherry picked protocols are `ws` (WebSocket, based on TCP) and `quic` (based on UDP), the fastest of the two protos to establish a connection will win.
 
-To stand up the home listener, see the [exit node](../../examples/exit-node/README.md) example and the [Docker documentation](../../docs/docker/docker.md). 
+To stand up the home listener, see the [exit node](../../examples/exit-node/README.md) example and the [Docker documentation](../deploy/docker.md). 
 Use the same `server_id` and `encryption_key` on both sides.
 
 As usual, take a look at the [config reference](../reference/config/config.md) for more options.

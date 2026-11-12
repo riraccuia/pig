@@ -35,6 +35,7 @@ func TestTwoDeviceExchange(t *testing.T) {
 		peers: []peerOpts{
 			{
 				publicKeyHex: pub2,
+				allowedIPs:   append([]string(nil), DefaultWGAllowedIPs...),
 			},
 		},
 		listenPort: 0,
@@ -52,6 +53,7 @@ func TestTwoDeviceExchange(t *testing.T) {
 		peers: []peerOpts{
 			{
 				publicKeyHex: pub1,
+				allowedIPs:   append([]string(nil), DefaultWGAllowedIPs...),
 			},
 		},
 		listenPort: 0,

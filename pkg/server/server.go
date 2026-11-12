@@ -20,6 +20,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/common"
@@ -34,16 +35,19 @@ type Server struct {
 	adapterCfg      *config.AdapterConfig
 	adapter         common.TunnelAdapter
 	listener        transport.Listener
-	clients         *sync.Map
+	clients         sync.Map
+	sigError        chan error
 	ipPool, ipPool6 *IPPool
-	bufferPool      *sync.Pool
+	bufferPool      common.BufferPool
 	inbound         []common.PacketQueue
 	outbound        common.PacketQueue
 	authenticator   common.Authenticator
 	_next_queue_id  atomic.Uint64
 	started, closed atomic.Bool
 	cancel          context.CancelFunc
-	wg              *sync.WaitGroup
+	wg              sync.WaitGroup
+	readerOnce      sync.Once // ensures that the adapter reader routine is started only once
+	acceptOnce      bool
 }
 
 // New creates a new Server instance with its own TUN adapter.
@@ -66,19 +70,15 @@ func NewWithAdapter(logger common.Logger, adapterCfg *config.AdapterConfig, tunn
 		queueSize = config.DefaultQueueSize
 	}
 	s := &Server{
-		logger:     logger,
-		config:     tunnelCfg,
-		adapterCfg: adapterCfg,
-		adapter:    adapter,
-		clients:    &sync.Map{},
-		outbound:   make(common.PacketQueue, queueSize),
-		bufferPool: &sync.Pool{
-			New: func() any {
-				return make([]byte, adapter.MTU())
-			},
-		},
+		logger:        logger,
+		config:        tunnelCfg,
+		adapterCfg:    adapterCfg,
+		adapter:       adapter,
+		sigError:      make(chan error),
+		outbound:      make(common.PacketQueue, queueSize),
+		bufferPool:    common.DefaultBufferPool,
 		authenticator: authenticator,
-		wg:            &sync.WaitGroup{},
+		acceptOnce:    tunnelCfg.AcceptOnce,
 	}
 	s.buildIPPool(adapter)
 	return s, nil
@@ -107,10 +107,20 @@ func (s *Server) Start(ctx context.Context, listenFunc func(ctx context.Context)
 
 	s.logger.Infof("Listening on %s", listenAddr)
 
+	// acceptClients will start the adapter reader routine as soon as the first client is accepted
 	s.wg.Go(func() { s.acceptClients(ctx) })
 	s.wg.Go(func() { s.processInbound(ctx) })
 	s.wg.Go(func() { s.processOutbound(ctx) })
-	s.wg.Go(func() { s.readFromAdapter(ctx) })
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			s.logger.Info("Server context done, closing")
+		case err := <-s.sigError:
+			s.logger.Errorf("Server error: %v", err)
+		}
+		s.Close()
+	}()
 
 	return nil
 }
@@ -138,8 +148,26 @@ func (s *Server) acceptClients(ctx context.Context) {
 			conn.Close()
 			continue
 		}
-		go s.handleNewClient(ctx, conn)
+		if !s.handleNewClient(ctx, conn) {
+			continue
+		}
+		s.readerOnce.Do(func() {
+			// start reading from the adapter as soon as the first client is accepted
+			s.wg.Go(func() { s.readFromAdapter(ctx) })
+		})
+		if s.acceptOnce {
+			// stop accepting new clients
+			return
+		}
 	}
+}
+
+func (s *Server) Name() string {
+	return s.config.Name
+}
+
+func (s *Server) Config() *config.TunnelConfig {
+	return s.config
 }
 
 // GetAdapter returns the adapter.
@@ -152,12 +180,24 @@ func (s *Server) Close() error {
 		return fmt.Errorf("server already closed")
 	}
 
+	// stop producing outbound packets
+	if dl, ok := s.adapter.(transport.DeadLiner); ok {
+		dl.SetDeadline(time.Now())
+	}
+
 	// Close all client connections
 	s.clients.Range(func(key any, value any) bool {
 		if client, ok := value.(*ClientTunnel); ok {
+			// close the outbound queue and wait for the last
+			// packets to be processed
+			client.outbound.Close()
+			client.outWg.Wait()
+			// close all streams (if any) and the connection
 			client.streams.CloseAll()
 			client.conn.Close()
-			s.ipPool.Release(client.sourceIP)
+			// release the IP addresses
+			s.ReleaseIP(client.sourceIP)
+			s.ReleaseIP6(client.sourceIP6)
 		}
 		return true
 	})
@@ -201,6 +241,9 @@ func (s *Server) AllocateIP() (net.IP, error) {
 }
 
 func (s *Server) AllocateIP6() (net.IP, error) {
+	if s.ipPool6 == nil {
+		return nil, nil
+	}
 	return s.ipPool6.Allocate()
 }
 
@@ -209,5 +252,8 @@ func (s *Server) ReleaseIP(ip net.IP) {
 }
 
 func (s *Server) ReleaseIP6(ip net.IP) {
+	if s.ipPool6 == nil {
+		return
+	}
 	s.ipPool6.Release(ip)
 }

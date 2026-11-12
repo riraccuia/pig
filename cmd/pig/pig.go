@@ -59,7 +59,12 @@ func startPig(cfg *config.Config, logger common.Logger) {
 
 	ctrl.Start(ctx)
 
-	<-ctx.Done()
+	select {
+	case <-ctrl.TunnelsDone():
+	case <-ctx.Done():
+	}
+
+	cancel()
 
 	logger.Infof("Shutting down: %v", context.Cause(ctx))
 

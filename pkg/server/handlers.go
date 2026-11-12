@@ -25,6 +25,8 @@ import (
 )
 
 func (client *ClientTunnel) handleInbound(ctx context.Context, connOrStream io.ReadWriteCloser) {
+	// buffer size is the MTU of the adapter
+	bufferSize := client.parent.adapter.BlockSize()
 	// assign a queue to the client
 	inbound := client.parent.getInboundPktQueue()
 	// load the idle timeout settings from the parent config
@@ -45,7 +47,7 @@ func (client *ClientTunnel) handleInbound(ctx context.Context, connOrStream io.R
 		// Read more data
 		n, err := connOrStream.Read(buffer[len(unprocessed):])
 		if err != nil {
-			client.logger.Errorf("error reading from client (%s) conn or stream: %v", client.conn.RemoteAddr(), err)
+			client.logger.Errorf("error reading from conn or stream: %v", err)
 			if client.conn.IsStreamed() {
 				// streams are reconnected by the client
 				return
@@ -74,7 +76,7 @@ func (client *ClientTunnel) handleInbound(ctx context.Context, connOrStream io.R
 				break // Partial packet, wait for more data
 			}
 
-			if totalLen > client.parent.adapter.MTU() {
+			if totalLen > client.parent.adapter.BlockSize() {
 				client.logger.Debugf("IPv=%d,len=%d,proto=%d | %d:%s->%s:%d | discarded, too long",
 					prePkt.Version(), totalLen, prePkt.Protocol(),
 					prePkt.SourcePort(), prePkt.SourceIP(),
@@ -86,7 +88,7 @@ func (client *ClientTunnel) handleInbound(ctx context.Context, connOrStream io.R
 			}
 
 			// Get new packet from pool and copy data
-			buf := client.parent.bufferPool.Get().([]byte)
+			buf := client.parent.bufferPool.GetBuffer(bufferSize)
 			copy(buf[:totalLen], unprocessed[processed:processed+totalLen])
 
 			var pkt network.IPPacket
@@ -105,11 +107,13 @@ func (client *ClientTunnel) handleInbound(ctx context.Context, connOrStream io.R
 
 			pkt.UpdateChecksum()
 
-			select {
+			inbound <- pkt
+			/*select {
 			case inbound <- pkt:
 			default:
-				client.parent.bufferPool.Put(buf)
-			}
+				client.logger.Errorf("inbound queue is full, dropping packet")
+				client.parent.bufferPool.PutBuffer(buf)
+			}*/
 
 			processed += totalLen
 		}

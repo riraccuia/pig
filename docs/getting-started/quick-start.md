@@ -56,7 +56,7 @@ If you prefer a fixed address and open ports yourself (no smarts):
 
 ```bash
 # Alice
-sudo ./pig -l -s -a 0.0.0.0:443 -P quic -k
+sudo ./pig -l -s -a :443 -P quic -k
 
 # Bob
 sudo ./pig -c -s -a alice.example.com:443 -P quic -k -R 192.168.1.100/32
@@ -83,6 +83,6 @@ Check out the [config reference](../reference/config/config.md) for the full lis
 - [CLI reference](../reference/cli/pig.md)
 - [Connect](../reference/cli/connect.md) / [Listen](../reference/cli/listen.md)
 - [NAT traversal](../nat/nat.md)
-- [Docker](../docker/docker.md)
+- [Docker](../deploy/docker.md)
 - [Examples](../../examples/)
 

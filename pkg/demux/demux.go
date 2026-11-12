@@ -18,24 +18,21 @@ import (
 	"context"
 
 	"github.com/riraccuia/pig/pkg/common"
-	"github.com/riraccuia/pig/pkg/config"
 )
 
 type Demux struct {
 	logger     common.Logger
 	adapter    common.TunnelAdapter
-	mtu        int
 	inbound    common.PacketQueue
 	outbound   common.PacketQueue
 	routeTable *routeTable
 	bufferPool common.BufferPool
 }
 
-func New(logger common.Logger, adapter common.TunnelAdapter, mtu int) *Demux {
+func New(logger common.Logger, adapter common.TunnelAdapter) *Demux {
 	return &Demux{
 		logger:     logger,
 		adapter:    adapter,
-		mtu:        mtu,
 		inbound:    make(common.PacketQueue, 1024),
 		outbound:   make(common.PacketQueue, 1024),
 		routeTable: newRouteTable(),
@@ -49,8 +46,8 @@ func (d *Demux) Start(ctx context.Context) {
 	go d.readFromOutbound(ctx)
 }
 
-func (d *Demux) AddRoutes(ta *Adapter, routes []config.Route) {
-	d.routeTable.addRoutes(ta, routes)
+func (d *Demux) AddRoutes(ta *Adapter, dest []string) {
+	d.routeTable.addRoutes(ta, dest)
 }
 
 func (d *Demux) RemoveRoutes(ta *Adapter) {

@@ -95,7 +95,7 @@ func DialConn(ctx context.Context, conn net.Conn, address string, tlsConfig *tls
 
 	remoteAddr, _ := net.ResolveTCPAddr("tcp", address)
 
-	netConn := websocket.NetConn(ctx, wsConn, websocket.MessageBinary)
+	netConn := websocket.NetConn(context.Background(), wsConn, websocket.MessageBinary)
 
 	return &WSConn{
 		Conn:       netConn,
@@ -136,7 +136,7 @@ func Dial(ctx context.Context, srcPort int, address string, tlsConfig *tls.Confi
 		return nil, err
 	}
 
-	netConn := websocket.NetConn(ctx, wsConn, websocket.MessageBinary)
+	netConn := websocket.NetConn(context.Background(), wsConn, websocket.MessageBinary)
 
 	return &WSConn{
 		Conn:       netConn,

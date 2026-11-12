@@ -32,8 +32,8 @@ type Logger struct {
 
 // NewLogger creates a new Logger instance.
 func NewLogger() *Logger {
-	wr := diode.NewWriter(os.Stdout, 1024, 10*time.Millisecond, func(missed int) {
-		fmt.Fprintf(os.Stdout, "Logger Dropped %d messages\n", missed)
+	wr := diode.NewWriter(os.Stderr, 1024, 10*time.Millisecond, func(missed int) {
+		fmt.Fprintf(os.Stderr, "Logger Dropped %d messages\n", missed)
 	})
 	output := &zerolog.ConsoleWriter{
 		Out:        wr, //zerolog.SyncWriter(NewBufferedWriter(ctx, 1024)),
@@ -75,7 +75,7 @@ func NewFileLogger(path string, rotateSizeAny any) (*Logger, error) {
 // without buffering. This logger will block until each message is written.
 func NewBlockingLogger() *Logger {
 	output := &zerolog.ConsoleWriter{
-		Out:        os.Stdout,
+		Out:        os.Stderr,
 		TimeFormat: time.RFC3339,
 	}
 	zl := zerolog.New(output).Level(zerolog.InfoLevel).With().Timestamp().Logger()
@@ -166,7 +166,7 @@ func NewBufferedWriter(ctx context.Context, n int) bufferedWriter {
 				if !ok {
 					continue
 				}
-				os.Stdout.Write(b)
+				os.Stderr.Write(b)
 			case <-ctx.Done():
 				return
 			}

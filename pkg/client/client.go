@@ -34,25 +34,24 @@ import (
 // Client represents a tunnel client that handles traffic between
 // a local network adapter and a remote server.
 type Client struct {
-	logger          common.Logger
-	dropLogger      *common.DelayedCounterProcessor
-	config          *config.TunnelConfig
-	adapterConfig   *config.AdapterConfig
-	conn            transport.Conn
-	streams         *streams.StreamManager
-	adapter         common.TunnelAdapter
-	inbound         common.PacketQueue
-	outbound        *queue.FIFO[network.IPPacket]
-	bufferPool      common.BufferPool
-	authenticator   common.Authenticator
-	state           atomic.Int32
-	peerAddr        atomic.Value
-	mappedIPs       *sync.Map
-	conntrack       *Conntrack
-	started, closed atomic.Bool
-	mainWg, mgrWg   *sync.WaitGroup
-	connError       chan error
-	events          chan *EventContext
+	logger               common.Logger
+	dropLogger           *common.DelayedCounterProcessor
+	config               *config.TunnelConfig
+	adapterConfig        *config.AdapterConfig
+	conn                 transport.Conn
+	streams              *streams.StreamManager
+	adapter              common.TunnelAdapter
+	inbound              common.PacketQueue
+	outbound             *queue.FIFO[network.IPPacket]
+	bufferPool           common.BufferPool
+	authenticator        common.Authenticator
+	state                atomic.Int32
+	peerAddr             atomic.Value
+	conntrack            *Conntrack
+	started, closed      atomic.Bool
+	mainWg, mgrWg, outWg sync.WaitGroup
+	connError            chan error
+	events               chan *EventContext
 }
 
 type atomicAddr struct {
@@ -77,7 +76,7 @@ func New(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *conf
 // In the multi-tunnel case the controller passes a per-tunnel virtual adapter
 // (tunnelAdapter) so that reads only deliver packets routed to this tunnel.
 func NewWithAdapter(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *config.TunnelConfig, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Client, error) {
-	logger.Infof("%s | Creating client with adapter %s, IP: %s, MTU %d", tunnelCfg.Name, adapter.Name(), adapter.IP(), adapter.MTU())
+	logger.Infof("New client with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), adapter.MTU())
 
 	adapterConfig := adapterCfg
 	if tunnelCfg.Adapter != nil {
@@ -94,9 +93,6 @@ func NewWithAdapter(logger common.Logger, adapterCfg *config.AdapterConfig, tunn
 		connError:     make(chan error, 1),
 		authenticator: authenticator,
 		events:        make(chan *EventContext, 10),
-		mappedIPs:     &sync.Map{},
-		mainWg:        &sync.WaitGroup{},
-		mgrWg:         &sync.WaitGroup{},
 	}
 	return cl, nil
 }
@@ -136,7 +132,7 @@ func (c *Client) Start(ctx context.Context, dialFunc func(ctx context.Context) (
 }
 
 func (c *Client) manageConnection(ctx context.Context, dialFunc func(ctx context.Context) (transport.Conn, error)) {
-	c.logger.Infof("Connecting to %s", c.config.Name)
+	c.logger.Info("Connecting")
 
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -152,18 +148,16 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func(ctx context
 
 	conn, err := dialFunc(ctx)
 	if err != nil {
-		c.logger.Errorf("Failed to connect to %s: %v", c.config.Name, err)
-		select {
-		case <-ctx.Done():
+		c.logger.Errorf("Failed to connect: %v", err)
+		if common.IsContextDone(ctx) {
 			event := &EventContext{State: StateStopped}
 			c.cancelAndSignalEvent(cancel, event)
-			c.logger.Infof("Context done, exiting")
-			return
-		case <-time.After(time.Second * 5):
-			event := &EventContext{State: StateConnectionFailed, Error: err}
-			c.cancelAndSignalEvent(cancel, event)
+			c.logger.Info("Context done, exiting")
 			return
 		}
+		event := &EventContext{State: StateConnectionFailed, Error: err}
+		c.cancelAndSignalEvent(cancel, event)
+		return
 	}
 
 	// Perform authentication if configured
@@ -182,20 +176,20 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func(ctx context
 	c.resetClosed()
 
 	c.mgrWg.Go(func() { c.readFromAdapter(ctx) })
-	c.mgrWg.Go(func() { c.writeToAdapter(ctx) })
+	c.mgrWg.Go(func() { c.writeToAdapter() })
 	c.mgrWg.Go(func() { c.handleInbound(ctx, conn) })
-	c.mgrWg.Go(func() { c.handleOutbound(ctx, conn) })
+	c.outWg.Go(func() { c.handleOutbound(conn) })
 
-	c.logger.Infof("Connected to %s: %s", c.config.Name, conn.RemoteAddr())
+	c.logger.Infof("Connected: %s", conn.RemoteAddr())
 	c.signalEvent(&EventContext{State: StateConnected, Conn: conn})
 
 	select {
 	case <-ctx.Done():
-		c.logger.Infof("Context done for %s, exiting", c.config.Name)
+		c.logger.Info("Context done, exiting")
 		event := &EventContext{State: StateStopped, Conn: c.conn, Error: ctx.Err()}
 		c.cancelAndSignalEvent(cancel, event)
 	case err := <-c.connError:
-		c.logger.Errorf("Connection lost for %s: %v", c.config.Name, err)
+		c.logger.Errorf("Connection lost: %v", err)
 		event := &EventContext{State: StateDisconnected, Conn: c.conn, Error: err}
 		c.cancelAndSignalEvent(cancel, event)
 	}
@@ -206,6 +200,9 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func(ctx context
 func (c *Client) Name() string {
 	return c.config.Name
 }
+
+// Config returns the tunnel configuration.
+func (c *Client) Config() *config.TunnelConfig { return c.config }
 
 // Wait waits for the client tunnel to stop.
 func (c *Client) Wait() {
@@ -218,25 +215,31 @@ func (c *Client) cancelAndSignalEvent(cancel context.CancelFunc, event *EventCon
 	if !c.closed.CompareAndSwap(false, true) {
 		return
 	}
-	cancel()
-	if event != nil {
-		c.signalEvent(event)
+	// stop producing outbound packets
+	if dl, ok := c.adapter.(transport.DeadLiner); ok {
+		dl.SetReadDeadline(time.Now())
 	}
-	c.state.Store(int32(StateStopped))
+	// close the outbound queue and wait for the last
+	// packets to be processed
+	c.outbound.Close()
+	c.outWg.Wait()
+	// close all streams (if any) and the connection
 	c.streams.CloseAll()
 	if c.conn != nil {
 		_ = c.conn.Close()
 	}
-	if deadliner, ok := c.adapter.(transport.DeadLiner); ok {
-		deadliner.SetReadDeadline(time.Now())
-	}
+	// cancel the context
+	cancel()
+	// close the inbound queue
 	close(c.inbound)
-	c.outbound.Close()
+	// signal the event
+	if event != nil {
+		c.signalEvent(event)
+	}
+	// set the state to stopped and drain the queues from any leftover packets
+	c.state.Store(int32(StateStopped))
 	c.drainQueues()
 }
-
-// Config returns the tunnel configuration.
-func (c *Client) Config() *config.TunnelConfig { return c.config }
 
 // PeerAddr returns the remote address when connected, or nil otherwise.
 func (c *Client) PeerAddr() net.Addr {
@@ -308,4 +311,8 @@ func (c *Client) setupQueues() {
 
 func (c *Client) resetClosed() {
 	c.closed.CompareAndSwap(true, false)
+}
+
+func (c *Client) blockSize() int {
+	return c.adapter.BlockSize()
 }

@@ -26,7 +26,7 @@ import (
 // conn implements transport.Conn and net.Conn by wrapping an ICMP connection with TLS.
 type conn struct {
 	*tls.Conn
-	// icmpConn transport.Conn
+	icmp net.Conn
 }
 
 // newConn creates a new TLS-over-ICMP connection.
@@ -34,18 +34,17 @@ func newConn(icmpConn net.Conn, tlsConfig *tls.Config, isServer bool) (*conn, er
 	icmpConn.SetReadDeadline(time.Now().Add(time.Second * 5))
 	defer icmpConn.SetReadDeadline(time.Time{})
 
-	c := &conn{}
+	c := &conn{icmp: icmpConn}
 	// Create TLS connection using our conn as the underlying transport
 	switch isServer {
 	case false:
 		c.Conn = tls.Client(icmpConn, tlsConfig)
 	case true:
 		c.Conn = tls.Server(icmpConn, tlsConfig)
-		// return c, nil
 	}
 
 	// Perform TLS handshake
-	if err := c.Conn.Handshake(); err != nil {
+	if err := c.Handshake(); err != nil {
 		icmpConn.Close()
 		return nil, err
 	}
@@ -66,4 +65,12 @@ func (c *conn) AcceptStream(ctx context.Context) (transport.Stream, error) {
 // NewStream implements transport.Conn.
 func (c *conn) NewStream(ctx context.Context) (transport.Stream, error) {
 	return nil, transport.ErrNotImplemented
+}
+
+// Close waits for the underlying ICMP conn to finish delivering outbound data before TLS is closed.
+func (c *conn) Close() error {
+	if w, ok := c.icmp.(interface{ WaitPeerAcked() }); ok {
+		w.WaitPeerAcked()
+	}
+	return c.Conn.Close()
 }

@@ -39,6 +39,8 @@ import (
 // Both directions borrow buffers synchronously: Write does not return until
 // the device has copied b; Read copies into the caller before releasing the
 // device buffer.
+//
+// Listen/accept conns may also run an rx_bytes idle watcher (see idle.go).
 type Conn struct {
 	dev        *device.Device
 	tun        *fakeTUN
@@ -51,6 +53,8 @@ type Conn struct {
 
 	readDeadline  atomic.Value // time.Time
 	writeDeadline atomic.Value // time.Time
+
+	idle *idleState
 
 	readPending *bytes.Buffer
 }
@@ -126,6 +130,7 @@ func (c *Conn) Read(b []byte) (int, error) {
 
 func (c *Conn) Close() error {
 	c.closeOnce.Do(func() {
+		c.stopIdleWatcher()
 		if c.underlyingConn != nil {
 			_ = c.underlyingConn.Close()
 		}

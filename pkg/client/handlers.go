@@ -34,21 +34,22 @@ func (c *Client) handleInbound(ctx context.Context, conn transport.Conn) {
 }
 
 // handleOutbound manages outbound packet routing based on connection type.
-func (c *Client) handleOutbound(ctx context.Context, conn transport.Conn) {
+func (c *Client) handleOutbound(conn transport.Conn) {
 	if conn == nil {
 		c.logger.Debugf("no connection, skipping outbound packet handling")
 		return
 	}
 	if conn.IsStreamed() {
-		c.processOutboundStream(ctx)
+		c.processOutboundStream()
 		return
 	}
-	c.processOutboundConn(ctx, conn)
+	c.processOutboundConn(conn)
 }
 
 // processInbound processes incoming IPv4 packets from the connection or stream
 // and forwards them to the local network adapter.
 func (c *Client) processInbound(ctx context.Context, connOrStream io.ReadWriteCloser) {
+	blockSize := c.blockSize()
 	// load the idle timeout settings from the parent config
 	idleTimeout := time.Duration(c.config.IdleTimeout) * time.Second
 
@@ -93,7 +94,7 @@ func (c *Client) processInbound(ctx context.Context, connOrStream io.ReadWriteCl
 
 			totalLen := prePkt.TotalLength()
 
-			if totalLen > c.adapter.MTU() {
+			if totalLen > blockSize {
 				// consume the packet and continue
 				c.logger.Debugf("received packet inbound with unexpected length: %d", totalLen)
 				processed += totalLen
@@ -105,7 +106,7 @@ func (c *Client) processInbound(ctx context.Context, connOrStream io.ReadWriteCl
 			}
 
 			// Get new packet from pool and copy data
-			buf := c.bufferPool.GetBuffer(c.adapter.MTU())
+			buf := c.bufferPool.GetBuffer(blockSize)
 			copy(buf[:totalLen], unprocessed[processed:processed+totalLen])
 
 			var pkt network.IPPacket
@@ -134,7 +135,7 @@ func (c *Client) processInbound(ctx context.Context, connOrStream io.ReadWriteCl
 			select {
 			case c.inbound <- pkt:
 			default:
-				c.logger.Errorf("adapter inbound channel full, dropping packet")
+				c.logger.Errorf("adapter inbound queue full, dropping packet")
 				c.bufferPool.PutBuffer(pkt.Bytes())
 			}
 
@@ -155,63 +156,67 @@ func (c *Client) processInbound(ctx context.Context, connOrStream io.ReadWriteCl
 
 // processOutboundStream processes outbound packets for streamed connections,
 // selecting appropriate streams based on destination IP.
-func (c *Client) processOutboundStream(ctx context.Context) {
+func (c *Client) processOutboundStream() {
 	for {
-		if common.IsContextDone(ctx) {
+		pkts, empty, closed := c.outbound.TryPopAll()
+		if empty && closed {
+			return
+		}
+		if empty {
+			pkts = c.outbound.PopAll()
+		}
+		if pkts == nil {
 			return
 		}
 
-		pkt := c.outbound.Pop()
-		if pkt == nil {
-			return
-		}
-		stream := c.streams.SelectByIPAndPort(pkt.DestinationIP(), pkt.DestinationPort())
-		if stream == nil {
-			c.bufferPool.PutBuffer(pkt.Bytes())
-			continue
-		}
+		for _, pkt := range pkts {
+			stream := c.streams.SelectByIPAndPort(pkt.DestinationIP(), pkt.DestinationPort())
+			if stream == nil {
+				c.bufferPool.PutBuffer(pkt.Bytes())
+				continue
+			}
 
-		totalLen := pkt.TotalLength()
-		if totalLen <= 0 || totalLen > len(pkt.Bytes()) {
-			c.bufferPool.PutBuffer(pkt.Bytes())
-			continue
-		}
+			totalLen := pkt.TotalLength()
+			if totalLen <= 0 || totalLen > len(pkt.Bytes()) {
+				c.bufferPool.PutBuffer(pkt.Bytes())
+				continue
+			}
 
-		switch realPkt := pkt.(type) {
-		case network.IPv4Packet:
-			tuple, _ := NewTuple(realPkt)
-			entry, ok := c.conntrack.Load(tuple)
-			if !ok {
-				entry = &ConnTrackEntry{
-					InMappedDst: tuple.SrcIP,
+			switch realPkt := pkt.(type) {
+			case network.IPv4Packet:
+				tuple, _ := NewTuple(realPkt)
+				entry, ok := c.conntrack.Load(tuple)
+				if !ok {
+					entry = &ConnTrackEntry{
+						InMappedDst: tuple.SrcIP,
+					}
+					entry.UpdateExpireAt(tuple.ProtocolData)
+
+					invertedTuple := tuple.Inverted()
+					invertedTuple.DestIP = c.adapter.IP()
+
+					c.conntrack.Store(tuple, entry)
+					c.conntrack.Store(invertedTuple, entry)
+					break
 				}
 				entry.UpdateExpireAt(tuple.ProtocolData)
-
-				invertedTuple := tuple.Inverted()
-				invertedTuple.DestIP = c.adapter.IP()
-
-				c.conntrack.Store(tuple, entry)
-				c.conntrack.Store(invertedTuple, entry)
-				break
+			case network.IPv6Packet:
 			}
-			entry.UpdateExpireAt(tuple.ProtocolData)
-		case network.IPv6Packet:
-		}
 
-		_, err := stream.Write(pkt.Bytes()[:totalLen])
-		stream.Flush()
-		c.bufferPool.PutBuffer(pkt.Bytes())
-		if err == nil {
-			continue
+			_, err := stream.Write(pkt.Bytes()[:totalLen])
+			stream.Flush()
+			c.bufferPool.PutBuffer(pkt.Bytes())
+			if err == nil {
+				continue
+			}
+			c.logger.Errorf("failed to write to stream: %v", err)
+			stream.Close()
 		}
-		c.logger.Errorf("failed to write to stream: %v", err)
-		stream.Close()
-		return
 	}
 }
 
 // processOutboundConn processes outbound packets for non-streamed connections.
-func (c *Client) processOutboundConn(ctx context.Context, conn transport.Conn) {
+func (c *Client) processOutboundConn(conn transport.Conn) {
 	// Create a buffer to hold multiple packets
 	const maxBatchSize = 64 * 1024 // 64KB batch size
 	buffer := make([]byte, 0, maxBatchSize)
@@ -221,6 +226,7 @@ func (c *Client) processOutboundConn(ctx context.Context, conn transport.Conn) {
 	writeBatch := func() error {
 		err := flushOutboundBatch(conn, batch)
 		if err != nil {
+			c.logger.Errorf("failed to write batch to connection: %v", err)
 			select {
 			case c.connError <- err:
 			default:
@@ -233,6 +239,7 @@ func (c *Client) processOutboundConn(ctx context.Context, conn transport.Conn) {
 	processPacket := func(pkt network.IPPacket) error {
 		totalLen := pkt.TotalLength()
 		if totalLen <= 0 || totalLen > len(pkt.Bytes()) {
+			//c.logger.Errorf("skip pkt totalLen=%d bufLen=%d", totalLen, len(pkt.Bytes()))
 			c.bufferPool.PutBuffer(pkt.Bytes())
 			return nil
 		}
@@ -262,7 +269,6 @@ func (c *Client) processOutboundConn(ctx context.Context, conn transport.Conn) {
 		if len(batch)+totalLen > maxBatchSize {
 			if err := writeBatch(); err != nil {
 				c.bufferPool.PutBuffer(pkt.Bytes())
-				c.logger.Debugf("failed to write batch to connection: %v", err)
 				return err
 			}
 		}
@@ -274,7 +280,6 @@ func (c *Client) processOutboundConn(ctx context.Context, conn transport.Conn) {
 		// If batch is full, write immediately
 		if len(batch) >= maxBatchSize {
 			if err := writeBatch(); err != nil {
-				c.logger.Debugf("failed to write batch to connection: %v", err)
 				return err
 			}
 		}
@@ -282,35 +287,26 @@ func (c *Client) processOutboundConn(ctx context.Context, conn transport.Conn) {
 	}
 
 	for {
-		if common.IsContextDone(ctx) {
-			return
-		}
-
 		pkts, empty, closed := c.outbound.TryPopAll()
-		if closed {
-			if empty {
-				return
-			}
-			for _, pkt := range pkts {
-				c.bufferPool.PutBuffer(pkt.Bytes())
-			}
+		if empty && closed {
+			writeBatch()
 			return
 		}
 		if empty {
 			// write the data quickly when the channel has no more packets
 			if err := writeBatch(); err != nil {
-				c.logger.Errorf("failed to write batch to connection: %v", err)
 				return
 			}
 			pkts = c.outbound.PopAll()
 		}
 		if pkts == nil {
+			writeBatch()
 			return
 		}
 		for _, pkt := range pkts {
 			err := processPacket(pkt)
 			if err != nil {
-				c.logger.Debugf("failed to process packet: %v", err)
+				writeBatch()
 				return
 			}
 		}

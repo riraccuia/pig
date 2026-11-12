@@ -91,6 +91,9 @@ func (l *Listener) acceptPeer(ctx context.Context, raw net.Conn) (*Conn, error) 
 		return nil, err
 	}
 	wgConn.underlyingConn = raw
+	if len(opts.peers) > 0 {
+		wgConn.startIdleWatcher(opts.peers[0].publicKeyHex)
+	}
 
 	return wgConn, nil
 }

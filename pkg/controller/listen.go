@@ -30,54 +30,65 @@ import (
 	"github.com/riraccuia/pig/pkg/transport/ws"
 )
 
-func (c *Controller) getListenFunc(cfg *config.TunnelConfig, mtu int) (func(ctx context.Context) (transport.Listener, error), error) {
+func (c *Controller) getListenFunc(tunnelInfo *TunnelInfo, mtu int) (func(ctx context.Context) (transport.Listener, error), error) {
+	cfg := tunnelInfo.Tunnel.Config()
 	switch {
-	case cfg.ICE == nil || !cfg.ICE.Enabled:
-		return c.getServerListenFunc(cfg, mtu)
 	case cfg.ICE != nil && cfg.ICE.Enabled:
-		return c.getICEListenFunc(cfg, mtu)
+		return c.getICEListenFunc(tunnelInfo, mtu)
+	default:
+		return c.getServerListenFunc(tunnelInfo, mtu)
 	}
-	return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 }
 
-func (c *Controller) getServerListenFunc(cfg *config.TunnelConfig, mtu int) (func(ctx context.Context) (transport.Listener, error), error) {
+func (c *Controller) getServerListenFunc(tunnelInfo *TunnelInfo, mtu int) (func(ctx context.Context) (transport.Listener, error), error) {
+	cfg := tunnelInfo.Tunnel.Config()
+	logger := tunnelInfo.Logger
+
+	bindAdapter := ""
+	if cfg.Proto == config.TransportICMP || cfg.Proto == config.TransportTLSICMP {
+		if cfg.Adapter == nil || cfg.Adapter.BindAdapter == "" {
+			return nil, fmt.Errorf("bind adapter required but not configured")
+		}
+		bindAdapter = cfg.Adapter.BindAdapter
+	}
+
 	switch cfg.Proto {
 	case config.TransportQUIC:
 		tlsConfig, err := c.createTLSConfig(config.TunnelDirectionListen, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return qt.GetServerListenFunc(c.logger, cfg, tlsConfig), nil
+		return qt.GetServerListenFunc(logger, cfg, tlsConfig), nil
 	case config.TransportUDP:
-		return udp.GetServerListenFunc(c.logger, cfg), nil
+		return udp.GetServerListenFunc(logger, cfg), nil
 	case config.TransportTLS:
 		tlsConfig, err := c.createTLSConfig(config.TunnelDirectionListen, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return trtls.GetServerListenFunc(c.logger, cfg, tlsConfig), nil
+		return trtls.GetServerListenFunc(logger, cfg, tlsConfig), nil
 	case config.TransportWS:
 		tlsConfig, err := c.createTLSConfig(config.TunnelDirectionListen, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return ws.GetServerListenFunc(c.logger, cfg, tlsConfig), nil
+		return ws.GetServerListenFunc(logger, cfg, tlsConfig), nil
 	case config.TransportICMP:
-		return icmp.GetServerListenFunc(c.logger, cfg, cfg.Adapter.BindAdapter), nil
+		return icmp.GetServerListenFunc(logger, cfg, bindAdapter), nil
 	case config.TransportTLSICMP:
 		tlsConfig, err := c.createTLSConfig(config.TunnelDirectionListen, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return tlsicmp.GetServerListenFunc(c.logger, cfg, tlsConfig, cfg.Adapter.BindAdapter), nil
+		return tlsicmp.GetServerListenFunc(logger, cfg, tlsConfig, bindAdapter), nil
 	case config.TransportDTLS:
 		tlsConfig, err := c.createTLSConfig(config.TunnelDirectionListen, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		return dtls.GetServerListenFunc(c.logger, cfg, tlsConfig, mtu), nil
+		return dtls.GetServerListenFunc(logger, cfg, tlsConfig, mtu), nil
 	case config.TransportWG:
-		return wireguard.GetServerListenFunc(c.logger, cfg, mtu), nil
+		return wireguard.GetServerListenFunc(logger, cfg, mtu), nil
 	default:
 		return nil, fmt.Errorf("unsupported transport type: %s", cfg.Proto)
 	}

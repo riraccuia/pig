@@ -28,7 +28,7 @@ import (
 )
 
 func (c *Controller) startClient(ctx context.Context) {
-	c.Go(func() { c.doStartClient(ctx, c.cfg) })
+	c.doStartClient(ctx, c.cfg)
 }
 
 func (c *Controller) doStartClient(ctx context.Context, cfg *config.Config) {
@@ -36,15 +36,17 @@ func (c *Controller) doStartClient(ctx context.Context, cfg *config.Config) {
 		return
 	}
 
-	adapterCfg := &cfg.Adapter
 	connectTunnels := tunnelsByDirection(cfg, config.TunnelDirectionConnect)
 
 	c.logger.Infof("Starting pig connect runtime | Tunnels: %d", len(connectTunnels))
 
 	c.scriptExecutor = script.New(c.logger, cfg.ScriptPath)
 
-	if err := c.setupSharedClientAdapter(ctx, adapterCfg); err != nil {
-		c.logger.Fatalf("Failed to setup adapter: %v", err)
+	if c.needsSharedAdapter(connectTunnels) {
+		adapterCfg := &cfg.Adapter
+		if err := c.setupSharedClientAdapter(ctx, adapterCfg); err != nil {
+			c.logger.Fatalf("Failed to setup adapter: %v", err)
+		}
 	}
 
 	for _, tunnelCfg := range connectTunnels {
@@ -52,6 +54,21 @@ func (c *Controller) doStartClient(ctx context.Context, cfg *config.Config) {
 			c.logger.Fatalf("Failed to add client tunnel: %v", err)
 		}
 	}
+}
+
+func (c *Controller) needsSharedAdapter(tunnelCfgs []*config.TunnelConfig) bool {
+	if len(tunnelCfgs) == 0 {
+		return false
+	}
+	if len(tunnelCfgs) == 1 {
+		return tunnelCfgs[0].Adapter == nil
+	}
+	for _, tunnelCfg := range tunnelCfgs {
+		if tunnelCfg.Adapter == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // setupSharedClientAdapter creates the adapter and starts the reader goroutine that dispatches
@@ -62,7 +79,7 @@ func (c *Controller) setupSharedClientAdapter(ctx context.Context, cfg *config.A
 		return err
 	}
 	c.sharedClientAdapter = adapter
-	c.demux = demux.New(c.logger, c.sharedClientAdapter, c.sharedClientAdapter.MTU()).WithBufferPool(c.bufferPool)
+	c.demux = demux.New(c.logger, c.sharedClientAdapter).WithBufferPool(c.bufferPool)
 	c.demux.Start(ctx)
 	c.logger.Infof("Created shared adapter %s, IP: %s, MTU %d", c.sharedClientAdapter.Name(), c.sharedClientAdapter.IP(), c.sharedClientAdapter.MTU())
 	return nil
@@ -76,24 +93,26 @@ func (c *Controller) AddClientTunnel(ctx context.Context, tunnelCfg *config.Tunn
 		return fmt.Errorf("tunnel %s is not a connect tunnel", tunnelCfg.Name)
 	}
 
-	tunnel, dialer, err := c.newClientTunnel(ctx, tunnelCfg)
+	tunnelInfo, dialFunc, err := c.newClientTunnel(ctx, tunnelCfg)
 	if err != nil {
 		return err
 	}
 
-	c.tunnels.Store(tunnelCfg.Name, tunnel)
-
-	c.Go(func() { c.runClientTunnel(ctx, tunnel, dialer, tunnelCfg.ReconnectInterval) })
+	c.tunnelsWg.Go(func() { c.runClientTunnel(ctx, tunnelInfo, dialFunc, tunnelCfg.ReconnectInterval) })
 
 	return nil
 }
 
-func (c *Controller) newClientTunnel(ctx context.Context, tunnelCfg *config.TunnelConfig) (*client.Client, func(ctx context.Context) (transport.Conn, error), error) {
-	transportStr := tunnelCfg.Name
+func (c *Controller) newClientTunnel(ctx context.Context, tunnelCfg *config.TunnelConfig) (*TunnelInfo, func(ctx context.Context) (transport.Conn, error), error) {
+	logger := c.logger.WithFields([]common.LoggerField{
+		{Key: "tunnel", Value: tunnelCfg.Name},
+	})
+
+	transportStr := "New tunnel"
 	if tunnelCfg.ICE == nil || !tunnelCfg.ICE.Enabled {
 		transportStr += fmt.Sprintf(" | Transport:%s | Target: %s:%d", tunnelCfg.Proto, tunnelCfg.Connect.Address, tunnelCfg.Connect.Port)
 	}
-	c.logger.Infof("Adding tunnel %s", transportStr)
+	logger.Infof(transportStr)
 
 	authenticator, err := c.createClientAuthenticator(tunnelCfg.Auth)
 	if err != nil {
@@ -122,40 +141,58 @@ func (c *Controller) newClientTunnel(ctx context.Context, tunnelCfg *config.Tunn
 		useAdapter = tunAdapter
 	}
 
-	tunnel, err := client.NewWithAdapter(c.logger, adapterCfg, tunnelCfg, useAdapter, authenticator)
+	tunnel, err := client.NewWithAdapter(logger, adapterCfg, tunnelCfg, useAdapter, authenticator)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create client: %w", err)
 	}
+	tunnel = tunnel.WithBufferPool(c.bufferPool)
 
-	dialer, err := c.getDialFunc(tunnelCfg, useAdapter.MTU())
+	tunnelInfo := &TunnelInfo{
+		Logger: logger,
+		Tunnel: tunnel,
+	}
+
+	dialFunc, err := c.getDialFunc(tunnelInfo, useAdapter.MTU())
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create dialer: %w", err)
 	}
 
-	return tunnel.WithBufferPool(c.bufferPool), dialer, nil
+	if err := c.StoreTunnelInfo(tunnelInfo); err != nil {
+		return nil, nil, err
+	}
+
+	return tunnelInfo, dialFunc, nil
 }
 
-func (c *Controller) runClientTunnel(ctx context.Context, tunnel *client.Client, dialer func(ctx context.Context) (transport.Conn, error), reconnectInterval int) {
+func (c *Controller) runClientTunnel(ctx context.Context, tunnelInfo *TunnelInfo, dialFunc func(ctx context.Context) (transport.Conn, error), reconnectInterval int) {
 	t := time.NewTimer(0)
 	defer t.Stop()
 
-	c.Go(func() { c.handleClientEvents(ctx, tunnel) })
+	tunnel := tunnelInfo.Tunnel.(*client.Client)
+	logger := tunnelInfo.Logger
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	c.tunnelsWg.Go(func() { c.handleClientEvents(ctx, tunnelInfo) })
 	for {
 		select {
 		case <-t.C:
 		case <-ctx.Done():
-			c.logger.Debugf("Controller exiting, client tunnel %s stopped", tunnel.Name())
+			logger.Debug("Controller exiting, tunnel stopped")
 			return
 		}
-		if err := tunnel.Start(ctx, dialer); err != nil {
-			c.logger.Fatalf("Failed to start tunnel: %v", err)
+		if err := tunnel.Start(ctx, dialFunc); err != nil {
+			logger.Fatalf("Failed to start tunnel: %v", err)
 		}
 		tunnel.Wait()
 		if common.IsContextDone(ctx) {
-			c.logger.Debugf("Controller exiting, client tunnel %s stopped", tunnel.Name())
+			logger.Debug("Controller exiting, tunnel stopped")
 			return
 		}
-		c.logger.Infof("Retrying connection to %s in %d seconds", tunnel.Name(), reconnectInterval)
+		if reconnectInterval <= 0 {
+			return
+		}
+		logger.Infof("Retrying connection in %d seconds", reconnectInterval)
 		t.Reset(time.Duration(reconnectInterval) * time.Second)
 	}
 }

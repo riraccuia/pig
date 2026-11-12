@@ -25,9 +25,7 @@ import (
 )
 
 func (c *Controller) startServer(ctx context.Context) {
-	c.Go(func() {
-		c.doStartServer(ctx, c.cfg)
-	})
+	c.doStartServer(ctx, c.cfg)
 }
 
 func (c *Controller) doStartServer(ctx context.Context, cfg *config.Config) {
@@ -39,7 +37,9 @@ func (c *Controller) doStartServer(ctx context.Context, cfg *config.Config) {
 	c.logger.Infof("Starting pig listen runtime | Listeners: %d", len(listenTunnels))
 
 	for _, tunnelCfg := range listenTunnels {
-		c.startServerTunnel(ctx, tunnelCfg)
+		c.tunnelsWg.Go(func() {
+			c.startServerTunnel(ctx, tunnelCfg)
+		})
 	}
 }
 
@@ -50,38 +50,56 @@ func (c *Controller) startServerTunnel(ctx context.Context, tunnelCfg *config.Tu
 		authenticator common.Authenticator
 	)
 
-	transportStr := tunnelCfg.Name
+	logger := c.logger.WithFields([]common.LoggerField{
+		{
+			Key:   "tunnel",
+			Value: tunnelCfg.Name,
+		},
+	})
+
+	transportStr := ""
 	if tunnelCfg.ICE == nil || !tunnelCfg.ICE.Enabled {
 		transportStr += fmt.Sprintf(" | Transport:%s", tunnelCfg.Proto)
 	}
 
-	c.logger.Infof("Starting listener %s", transportStr)
+	logger.Infof("New listener %s", transportStr)
 
 	if tunnelCfg.ICE != nil && tunnelCfg.ICE.Enabled {
-		c.logger.Info("ICE enabled | STUN server: ", tunnelCfg.ICE.STUNAddress, " | MQTT broker: ", tunnelCfg.ICE.Signaling.MQTT.Address)
+		logger.Info("ICE enabled | STUN server: ", tunnelCfg.ICE.STUNAddress, " | MQTT broker: ", tunnelCfg.ICE.Signaling.MQTT.Address)
 	}
 	if tunnelCfg.Adapter == nil {
-		c.logger.Fatalf("Listener %s requires a dedicated adapter", tunnelCfg.Name)
+		logger.Fatal("Listener requires a dedicated adapter")
 	}
 
 	authenticator, err := c.createServerAuthenticator(tunnelCfg.Auth)
 	if err != nil {
-		c.logger.Fatalf("Failed to create authenticator: %v", err)
+		logger.Fatalf("Failed to create authenticator: %v", err)
 	}
 	adapter, err := c.createAdapter(tunnelCfg.Adapter, true)
 	if err != nil {
-		c.logger.Fatalf("Failed to create adapter: %v", err)
-	}
-	listener, err = c.getListenFunc(tunnelCfg, adapter.MTU())
-	if err != nil {
-		c.logger.Fatalf("Failed to get server listener: %v", err)
+		logger.Fatalf("Failed to create adapter: %v", err)
 	}
 	c.adapters.Store(adapter.Name(), adapter)
-	tunnel, err = server.NewWithAdapter(c.logger, tunnelCfg.Adapter, tunnelCfg, adapter, authenticator)
+	tunnel, err = server.NewWithAdapter(logger, tunnelCfg.Adapter, tunnelCfg, adapter, authenticator)
 	if err != nil {
 		c.logger.Fatalf("Failed to create server: %v", err)
 	}
-	if err := tunnel.Start(ctx, listener); err != nil {
-		c.logger.Fatalf("Failed to start tunnel: %v", err)
+	tunnelInfo := &TunnelInfo{
+		Logger: logger,
+		Tunnel: tunnel,
 	}
+	if err := c.StoreTunnelInfo(tunnelInfo); err != nil {
+		logger.Errorf("Failed to store tunnel info: %v", err)
+		return
+	}
+	listener, err = c.getListenFunc(tunnelInfo, adapter.MTU())
+	if err != nil {
+		logger.Errorf("Failed to get server listener: %v", err)
+		return
+	}
+	if err := tunnel.Start(ctx, listener); err != nil {
+		logger.Errorf("Failed to start: %v", err)
+		return
+	}
+	tunnel.Wait()
 }

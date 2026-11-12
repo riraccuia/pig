@@ -13,7 +13,7 @@ Confirm TUN is available:
 ls -l /dev/net/tun
 ```
 
-Most distributions enable this by default. Containers need the device mounted or created (see [Docker](../docker/docker.md)).
+Most distributions enable this by default. Containers need the device mounted or created (see [Docker](../deploy/docker.md)).
 
 ## Download a release
 
@@ -55,4 +55,8 @@ make pig-linux-arm7
 ./pig -h
 ```
 
-Use `sudo` whenever you start a tunnel. Next: [Quick start](../getting-started/quick-start.md).
+Use `sudo` whenever you start a tunnel.
+
+To run pig on boot with forwarding and masquerade, see [systemd (Linux)](../deploy/systemd.md).
+
+Next: [Quick start](../getting-started/quick-start.md).

@@ -91,7 +91,6 @@ func (pc *PathFinder) processOffer(ctx context.Context, topicBase string, offer 
 
 	answerCandidates, localInfo = pc.buildLocalCandidates(localEndpoints, listenPort, pc.protos)
 	answerCandidates = append(answerCandidates, pc.buildReflexiveCandidates(ctx, localEndpoints, localInfo, pc.protos)...)
-	answerCandidates = dedupCandidates(answerCandidates)
 
 	pc.opts.Logger.Tracef("ICE: preparing to send ICE answer to client. SessionID: %s", offer.Offer.SessionID)
 

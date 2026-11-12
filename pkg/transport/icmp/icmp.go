@@ -48,7 +48,7 @@ var (
 	MSS uint32 = 1460
 
 	globalListener       *sharedListener
-	globalListenerDoOnce = &sync.Once{}
+	globalListenerDoOnce sync.Once
 )
 
 func validateAddress(address string) (*net.IPAddr, error) {
@@ -65,7 +65,7 @@ func validateAddress(address string) (*net.IPAddr, error) {
 // GetClientDialFunc returns a function that creates client connections based on config.
 func GetClientDialFunc(logger common.Logger, config *config.TunnelConfig, bindAdapter string) func(ctx context.Context) (transport.Conn, error) {
 	return func(ctx context.Context) (transport.Conn, error) {
-		err := SetupGlobalListener(ctx, logger, bindAdapter, false)
+		err := SetupGlobalListenerOnce(ctx, logger, bindAdapter, false)
 		if err != nil {
 			return nil, fmt.Errorf("failed to setup icmp listener: %w", err)
 		}
@@ -101,7 +101,7 @@ func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, bind
 			return nil, fmt.Errorf("failed to initialize system: %w", err)
 		}
 
-		err := SetupGlobalListener(ctx, logger, bindAdapter, true)
+		err := SetupGlobalListenerOnce(ctx, logger, bindAdapter, true)
 		if err != nil {
 			return nil, fmt.Errorf("failed to setup icmp listener: %w", err)
 		}
@@ -110,7 +110,7 @@ func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, bind
 	}
 }
 
-func SetupGlobalListener(ctx context.Context, logger common.Logger, bindAdapter string, isServer bool) (err error) {
+func SetupGlobalListenerOnce(ctx context.Context, logger common.Logger, bindAdapter string, isServer bool) (err error) {
 	globalListenerDoOnce.Do(func() {
 		var (
 			bindAddr *net.IPAddr

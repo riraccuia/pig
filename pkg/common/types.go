@@ -15,6 +15,7 @@
 package common
 
 import (
+	"io"
 	"net"
 
 	"github.com/riraccuia/pig/pkg/network"
@@ -23,10 +24,9 @@ import (
 type PacketQueue chan network.IPPacket
 
 type TunnelAdapter interface {
-	Read([]byte) (int, error)
-	Write([]byte) (int, error)
-	Close() error
+	io.ReadWriteCloser
 	MTU() int
+	BlockSize() int
 	IP() net.IP
 	IPNet() *net.IPNet
 	IP6() net.IP
@@ -35,7 +35,13 @@ type TunnelAdapter interface {
 	Index() int
 }
 
+type LoggerField struct {
+	Key   string
+	Value any
+}
+
 type Logger interface {
+	WithFields(fields []LoggerField) Logger
 	SetLevel(level string)
 	PrintLevel(level string, args ...any)
 	Info(args ...any)

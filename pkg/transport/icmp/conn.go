@@ -16,6 +16,7 @@ package icmp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -51,48 +52,34 @@ type Conn struct {
 	// for congestion control, fast retransmit,
 	// fast recovery, etc.
 	// NewReno algorithm.
-	rq, ooq          *RetransmitQueue
-	retransmit       atomic.Bool
-	recovery         atomic.Bool
-	transmitBlocked  bool
-	transmitWg       *sync.Cond
-	peerAck, peerSeq uint32
-	prevPeerAck      uint32
-	ack, seq         atomic.Uint32
-	sentAck          atomic.Uint32
-	ackTimer, rto    *time.Timer
-	recover          atomic.Uint32
-	cwnd             atomic.Uint32
-	ssthresh         uint32
-	flightSize       *FlightCounter
-	dupCnt           uint8
-	ackBytesCount    uint32
-	closeOnce        *sync.Once
+	rq, ooq           *RetransmitQueue
+	retransmit        atomic.Bool
+	recovery          atomic.Bool
+	transmitBlocked   bool
+	transmitWg        *sync.Cond
+	peerAck, peerSeq  uint32
+	prevPeerAck       uint32
+	ack, seq          atomic.Uint32
+	sentAck           atomic.Uint32
+	ackTimer, rto     *time.Timer
+	recover           atomic.Uint32
+	cwnd              atomic.Uint32
+	ssthresh          uint32
+	flightSize        *FlightCounter
+	dupCnt            uint8
+	ackBytesCount     uint32
+	closeOnce         sync.Once
+	writeWg           sync.WaitGroup
+	peerCloseReceived atomic.Bool
 }
 
 func Dial(ctx context.Context, logger common.Logger, bindAdapter, targetAddr string, icmpID uint16, isServer bool) (transport.Conn, error) {
-	/*var (
-		bindAddr *net.IPAddr
-		iface    *net.Interface
-		err      error
-	)
-	if bindAdapter != "" {
-		bindAddr, iface, err = getAdapterAddr(bindAdapter)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get adapter address: %w", err)
-		}
-	}*/
 	return dial(ctx, logger, bindAdapter, targetAddr, icmpID, isServer)
 }
 
 // dial creates a new client connection to a target address.
 func dial(ctx context.Context, logger common.Logger, bindAdapter, targetAddr string, icmpID uint16, isServer bool) (transport.Conn, error) {
-	/*var (
-		sharedListener *sharedListener
-		err            error
-	)*/
-
-	err := SetupGlobalListener(ctx, logger, bindAdapter, isServer)
+	err := SetupGlobalListenerOnce(ctx, logger, bindAdapter, isServer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup icmp listener: %w", err)
 	}
@@ -150,7 +137,6 @@ func newConnection(listener *sharedListener, remoteAddr *net.IPAddr, icmpID uint
 		icmpID:     icmpID,
 		ackTimer:   time.NewTimer(time.Millisecond * 300),
 		rto:        time.NewTimer(time.Second),
-		closeOnce:  &sync.Once{},
 	}
 
 	// Initialize atomic values
@@ -161,7 +147,7 @@ func newConnection(listener *sharedListener, remoteAddr *net.IPAddr, icmpID uint
 
 	// Start the shared read/write loops
 	go c.readLoop()
-	go c.writeLoop()
+	c.writeWg.Go(c.writeLoop)
 
 	return c
 }
@@ -187,14 +173,38 @@ func (c *Conn) RemoteAddr() net.Addr {
 	return c.remoteAddr
 }
 
+// WaitPeerAcked waits until outbound data already handed to this conn has been
+// sent and acknowledged by the peer. No-op on the server. Bounded so shutdown
+// cannot hang forever if the peer stops ACKing.
+func (c *Conn) WaitPeerAcked() {
+	if c.listener.isServer {
+		return
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for c.writeBuf.Len() > 0 || isUint32SeqHigher(c.seq.Load(), c.peerAck) {
+		if time.Now().After(deadline) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func (c *Conn) Close() error {
 	c.closeOnce.Do(func() {
-		c.sendCloseMessage()
-
-		c.cancel()
-		c.readBuf.Close()
+		// 1. stop accepting more app writes; keep unread bytes
 		c.writeBuf.Close()
-
+		c.flightSize.Close()
+		c.recovery.Store(false)
+		c.rto.Stop()
+		c.ackTimer.Stop()
+		c.retransmit.Store(false)
+		c.unblockTransmit()
+		// 2. wait until writeLoop has drained writeBuf onto the wire
+		c.writeWg.Wait()
+		// 3. tell peer we're done, then tear down readers
+		c.sendCloseMessage()
+		c.readBuf.Close()
+		c.cancel()
 		// Remove from listener's client map
 		key := getClientKey(c.remoteAddr.IP, uint16(c.icmpID))
 		c.listener.clients.Delete(key)
@@ -203,12 +213,37 @@ func (c *Conn) Close() error {
 	return nil
 }
 
+// closeFromPeer is used when the peer already sent ICMP close.
+// Must not wait for peerAck (deadlock: we are inside readLoop).
+func (c *Conn) closeFromPeer() {
+	c.closeOnce.Do(func() {
+		c.readBuf.Close()
+		c.writeBuf.Close()
+		c.cancel()
+		c.flightSize.Close()
+		c.rto.Stop()
+		c.ackTimer.Stop()
+		c.recovery.Store(false)
+		c.retransmit.Store(false)
+		c.unblockTransmit()
+		c.writeWg.Wait()
+		key := getClientKey(c.remoteAddr.IP, uint16(c.icmpID))
+		c.listener.clients.Delete(key)
+		c.listener.logger.Infof("connection closed (peer), ip: %s, icmp id: %d",
+			c.remoteAddr.IP.String(), c.icmpID)
+	})
+}
+
 func (c *Conn) Read(b []byte) (n int, err error) {
+	n, err = c.readBuf.Read(b)
+	if n > 0 {
+		return n, nil
+	}
 	select {
 	case <-c.ctx.Done():
 		return 0, fmt.Errorf("connection closed")
 	default:
-		return c.readBuf.Read(b)
+		return 0, err
 	}
 }
 
@@ -261,10 +296,23 @@ func (c *Conn) readLoop() {
 		case data := <-c.incoming:
 			if err := c.processICMPPacket(data); err != nil {
 				c.listener.logger.Errorf("Error processing ICMP packet: %v", err)
-				c.Close()
 				return
 			}
-			// c.listener.bufPool.Put(data)
+			if !c.peerCloseReceived.Load() {
+				break
+			}
+			// drain incoming channel
+			for {
+				select {
+				case data := <-c.incoming:
+					if err := c.processICMPPacket(data); err != nil {
+						c.listener.logger.Errorf("Error processing ICMP packet: %v", err)
+					}
+				default:
+					c.closeFromPeer()
+					return
+				}
+			}
 		}
 
 		// Timers management
@@ -316,6 +364,9 @@ func (c *Conn) writeLoop() {
 
 			// Send application data
 			if err := c.serializeOutboundData(); err != nil {
+				if errors.Is(err, errBufferClosed) {
+					return // drained after writeBuf.Close()
+				}
 				c.listener.logger.Errorf("Error sending data: %v", err)
 				continue
 			}
@@ -331,7 +382,8 @@ func (c *Conn) processICMPPacket(packet *Packet) error {
 	}
 
 	if packet.IcmpCode == 255 {
-		return fmt.Errorf("received close packet")
+		c.peerCloseReceived.Store(true)
+		return nil
 	}
 
 	if packet.IcmpEchoID != c.icmpID {
@@ -358,7 +410,7 @@ func (c *Conn) processICMPPacket(packet *Packet) error {
 	}
 
 	// validate this is a valid peer sequence number
-	if isUint32SeqHigher(packet.PacketSeq, c.peerSeq) {
+	if len(packet.Data) > 0 && isUint32SeqHigher(packet.PacketSeq, c.peerSeq) {
 		c.listener.logger.Tracef("Invalid peer seq: %s, WANT_SEQ: %d", packet.PigPacket(), c.peerSeq)
 		if !c.recovery.Load() {
 			c.listener.logger.Debug("Loss detected, entering recovery")
@@ -408,10 +460,11 @@ func (c *Conn) processICMPPacket(packet *Packet) error {
 		// update our next peer sequence number
 		c.peerSeq = packet.PacketSeq + uint32(len(packet.Data))
 		c.listener.clearMemory(packet.buffer)
-		c.recoverFromLoss(c.peerSeq)
-		c.recovery.Store(false)
-		// we can now resume transmitting
-		c.unblockTransmit()
+		if c.recoverFromLoss(c.peerSeq) {
+			c.recovery.Store(false)
+			// we can now resume transmitting
+			c.unblockTransmit()
+		}
 		return nil
 	}
 

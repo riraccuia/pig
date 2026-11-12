@@ -20,20 +20,6 @@ import (
 	"github.com/riraccuia/pig/pkg/ice/message"
 )
 
-func dedupCandidates(candidates []message.ICECandidate) []message.ICECandidate {
-	seen := map[string]struct{}{}
-	out := make([]message.ICECandidate, 0, len(candidates))
-	for _, c := range candidates {
-		key := candidateKey(c)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, c)
-	}
-	return out
-}
-
 func dedupConnectPaths(paths []*ConnectPath) []*ConnectPath {
 	seen := make(map[string]struct{}, len(paths))
 	out := make([]*ConnectPath, 0, len(paths))

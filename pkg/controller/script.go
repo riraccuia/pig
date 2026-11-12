@@ -18,11 +18,10 @@ import (
 	"strings"
 
 	"github.com/riraccuia/pig/pkg/client"
-	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/script"
 )
 
-func (c *Controller) executeClientScript(proto config.TransportType, tunnel *client.Client, eventContext *client.EventContext) {
+func (c *Controller) executeClientScript(tunnel *client.Client, eventContext *client.EventContext) {
 	if c.scriptExecutor == nil {
 		return
 	}
@@ -43,7 +42,7 @@ func (c *Controller) executeClientScript(proto config.TransportType, tunnel *cli
 		AdapterIndex: tunnel.GetAdapter().Index(),
 		RemoteAddr:   remoteAddr,
 		NatAddr:      "", // No NAT address in client mode
-		TunnelProto:  string(proto),
+		TunnelProto:  string(tunnel.Config().Proto),
 	}
 	c.scriptExecutor.ExecuteScript(sctx)
 }
