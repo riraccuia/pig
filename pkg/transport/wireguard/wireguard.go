@@ -98,6 +98,9 @@ func GetListenerFromConn(ctx context.Context, co net.Conn, tunnelCfg *config.Tun
 		return nil, err
 	}
 	wgConn.underlyingConn = udpConn
+	if len(opts.peers) > 0 {
+		wgConn.startIdleWatcher(opts.peers[0].publicKeyHex)
+	}
 	return ice.NewListenerConn(wgConn, nil), nil
 }
 

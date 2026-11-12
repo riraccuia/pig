@@ -312,3 +312,7 @@ func (c *Client) setupQueues() {
 func (c *Client) resetClosed() {
 	c.closed.CompareAndSwap(true, false)
 }
+
+func (c *Client) blockSize() int {
+	return c.adapter.BlockSize()
+}

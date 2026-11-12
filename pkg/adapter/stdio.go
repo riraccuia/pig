@@ -30,11 +30,11 @@ import (
 )
 
 const (
-	stdioIPHeaderLen  = 20
-	stdioUDPHeaderLen = 8
-	stdioHeaderLen    = stdioIPHeaderLen + stdioUDPHeaderLen
-	stdioUDPPort      = 1234
-	stdioBlockSize    = 1<<16 - 1
+	stdioIPHeaderLen         = 20
+	stdioUDPHeaderLen        = 8
+	stdioHeaderLen           = stdioIPHeaderLen + stdioUDPHeaderLen
+	stdioUDPPort             = 1234
+	stdioBlockSize    uint16 = 1 << 14 // bound to uint16 to avoid overflows (IP dgram max length is 65535)
 )
 
 var _ common.TunnelAdapter = (*StdioAdapter)(nil)
@@ -75,7 +75,7 @@ func NewStdioAdapter(cfg AdapterConfig) (*StdioAdapter, error) {
 		in:        newStdioReader(),
 		out:       os.Stdout,
 		mtu:       cfg.MTU,
-		blockSize: stdioBlockSize,
+		blockSize: int(stdioBlockSize),
 	}, nil
 }
 

@@ -29,14 +29,14 @@ func (c *Client) readFromAdapter(ctx context.Context) {
 		c.readFromAdapterOutQueue(ctx)
 		return
 	}
-	bufferSize := c.adapter.BlockSize()
+	blockSize := c.blockSize()
 
 	for {
 		if common.IsContextDone(ctx) {
 			return
 		}
 
-		buf := c.bufferPool.GetBuffer(bufferSize)
+		buf := c.bufferPool.GetBuffer(blockSize)
 		nr, err := c.adapter.Read(buf[:])
 		if nr == 0 && err != nil {
 			c.bufferPool.PutBuffer(buf)

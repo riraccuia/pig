@@ -29,13 +29,13 @@ Pig can be used as:
 
 - an **exit node**: send all (or selected) traffic from a laptop through a
 home or VPS pig (`-R full` or specific subnet/s).
-Authenticate with [JWT / OAuth / OIDC](docs/index.md#authentication);
+Authenticate with [JWT / OAuth / OIDC](docs/index.md#authentication).
 - a **netcat over encrypted tunnel**: chat, copy files, or attach a shell with `-nc`,
-with or without opening a listen port on the far side;
+with or without opening a listen port on the far side.
 - a **site-to-site / mesh hop**: chain pigs, or mix pig tunnels with
-WireGuard VPNs in one process;
+WireGuard VPNs in one process.
 - a **transport lab**: pick [QUIC, TLS, WebSocket, WireGuard, DTLS,
-TLS-in-ICMP](docs/reference/cli/protos.md), or `-P .` to let pig choose;
+TLS-in-ICMP](docs/reference/cli/protos.md), or `-P .` to let pig choose.
 
 ## Getting started
 
@@ -121,13 +121,13 @@ The `-o` (once) flag causes the listener to accept only one connection and exits
 Pick **one** pair.
 
 ```bash
-# --- Alice (listen + send) ---
+# --- Alice (save) ---
 # NAT traversal
 sudo ./pig -l -id pig-demo -P . -k -sk passphrase -nc -o > received.bin
 # Simple mode
 sudo ./pig -l -s -P ws -a :443 -k -nc -o > received.bin
 
-# --- Bob (connect + receive) ---
+# --- Bob (send) ---
 # NAT traversal
 sudo ./pig -c -id pig-demo -k -sk passphrase -nc < original.bin
 # Simple mode

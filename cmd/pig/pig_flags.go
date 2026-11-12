@@ -49,7 +49,7 @@ const (
 	FLAG_SPORT        = "p"
 	FLAG_TADDR        = "ta"
 	FLAG_RETRY        = "r"
-	FLAG_IDLE_TIMEOUT = "t"
+	FLAG_IDLE_TIMEOUT = "i"
 	FLAG_ROUTE        = "R"
 	FLAG_SCRIPT       = "S"
 	FLAG_VERBOSE      = "v"

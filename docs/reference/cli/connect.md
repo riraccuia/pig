@@ -22,7 +22,7 @@ General options:
      values. Defaults to random generated /30 within 100.64.0.0/11 for connect nodes and /16 within
      100.96.0.0/11 for listening nodes.
  -r  Reconnect interval in seconds. Defaults to 5.
- -t  Idle timeout in seconds for tunnels. Defaults to 0.
+ -i  Idle timeout in seconds for tunnels. Defaults to 0.
  -R  Route subnets through the tunnel. Use 'full4', 'full6', 'full' (as shortcuts for full tunnel
      routing) or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'.
  -nc Enables netcat mode: stdin is redirected to the stdout of the connected peer (and vice versa) over

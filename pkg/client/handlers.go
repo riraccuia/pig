@@ -49,6 +49,7 @@ func (c *Client) handleOutbound(conn transport.Conn) {
 // processInbound processes incoming IPv4 packets from the connection or stream
 // and forwards them to the local network adapter.
 func (c *Client) processInbound(ctx context.Context, connOrStream io.ReadWriteCloser) {
+	blockSize := c.blockSize()
 	// load the idle timeout settings from the parent config
 	idleTimeout := time.Duration(c.config.IdleTimeout) * time.Second
 
@@ -93,7 +94,7 @@ func (c *Client) processInbound(ctx context.Context, connOrStream io.ReadWriteCl
 
 			totalLen := prePkt.TotalLength()
 
-			if totalLen > c.adapter.BlockSize() {
+			if totalLen > blockSize {
 				// consume the packet and continue
 				c.logger.Debugf("received packet inbound with unexpected length: %d", totalLen)
 				processed += totalLen
@@ -105,7 +106,7 @@ func (c *Client) processInbound(ctx context.Context, connOrStream io.ReadWriteCl
 			}
 
 			// Get new packet from pool and copy data
-			buf := c.bufferPool.GetBuffer(c.adapter.BlockSize())
+			buf := c.bufferPool.GetBuffer(blockSize)
 			copy(buf[:totalLen], unprocessed[processed:processed+totalLen])
 
 			var pkt network.IPPacket

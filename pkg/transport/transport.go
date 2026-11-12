@@ -44,17 +44,13 @@ type DeadLiner interface {
 }
 
 type Conn interface {
+	io.ReadWriteCloser
+	DeadLiner
 	IsStreamed() bool
-	Read(b []byte) (n int, err error)
-	Write(b []byte) (n int, err error)
-	Close() error
 	AcceptStream(ctx context.Context) (Stream, error)
 	NewStream(ctx context.Context) (Stream, error)
 	LocalAddr() net.Addr
 	RemoteAddr() net.Addr
-	SetDeadline(t time.Time) error
-	SetReadDeadline(t time.Time) error
-	SetWriteDeadline(t time.Time) error
 }
 
 // AtomicPacketConn may be implemented by a Conn that requires one IP packet

@@ -74,7 +74,7 @@ func GetServerListenFunc(logger common.Logger, config *config.TunnelConfig, tlsC
 			tlsConfig.Clone(),
 		)
 		if err != nil && err != http.ErrServerClosed {
-			logger.Errorf("WebSocket server error: %v", err)
+			return nil, fmt.Errorf("WebSocket server error: %w", err)
 		}
 		return tr, nil
 	}

@@ -62,7 +62,7 @@ func (s *Server) readFromAdapter(ctx context.Context) {
 }
 
 func (s *Server) readFromTunQueue(ctx context.Context, q io.Reader) {
-	bufferSize := s.adapter.MTU()
+	bufferSize := s.adapter.BlockSize()
 
 	for {
 		if common.IsContextDone(ctx) {

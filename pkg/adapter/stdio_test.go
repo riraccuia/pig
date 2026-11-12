@@ -21,14 +21,16 @@ func detachStdioIn(a *StdioAdapter) {
 }
 
 func TestStdioAdapterDataIntegrity(t *testing.T) {
+	bs := int(stdioBlockSize)
+
 	cases := []struct {
 		name string
 		size int
 	}{
-		{"1x block", stdioBlockSize},
-		{"2x block", 2 * stdioBlockSize},
-		{"4x block", 4 * stdioBlockSize},
-		{"8x block", 8 * stdioBlockSize},
+		{"1x block", bs},
+		{"2x block", 2 * bs},
+		{"4x block", 4 * bs},
+		{"8x block", 8 * bs},
 	}
 
 	for _, tc := range cases {

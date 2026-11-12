@@ -56,7 +56,7 @@ If you prefer a fixed address and open ports yourself (no smarts):
 
 ```bash
 # Alice
-sudo ./pig -l -s -a 0.0.0.0:443 -P quic -k
+sudo ./pig -l -s -a :443 -P quic -k
 
 # Bob
 sudo ./pig -c -s -a alice.example.com:443 -P quic -k -R 192.168.1.100/32
