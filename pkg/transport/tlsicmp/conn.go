@@ -17,9 +17,11 @@ package tlsicmp
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"time"
 
+	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -50,6 +52,19 @@ func newConn(icmpConn net.Conn, tlsConfig *tls.Config, isServer bool) (*conn, er
 	}
 
 	return c, nil
+}
+
+func (c conn) String() string {
+	tlsState := c.ConnectionState()
+	if !tlsState.HandshakeComplete {
+		return fmt.Sprintf("proto=%s | handshake not completed", config.TransportTLSICMP)
+	}
+	return fmt.Sprintf("proto=%s | tls=%s,cipher=%s,curve=%s",
+		config.TransportTLSICMP,
+		tls.VersionName(tlsState.Version),
+		tls.CipherSuiteName(tlsState.CipherSuite),
+		tlsState.CurveID.String(),
+	)
 }
 
 // IsStreamed implements transport.Conn.

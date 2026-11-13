@@ -9,8 +9,8 @@ require (
 	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/lestrrat-go/jwx/v4 v4.5.0
-	github.com/pion/dtls/v4 v4.0.0-rc.3
-	github.com/pion/transport/v5 v5.1.1
+	github.com/pion/dtls/v4 v4.0.2
+	github.com/pion/transport/v5 v5.1.5
 	github.com/quic-go/quic-go v0.62.0
 	github.com/rs/zerolog v1.35.1
 	golang.org/x/crypto v0.57.0

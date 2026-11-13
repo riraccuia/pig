@@ -38,6 +38,19 @@ type QuicTransport struct {
 	endpoint *quic.Endpoint
 }
 
+func (c QuicConn) String() string {
+	tlsState := c.conn.ConnectionState()
+	if !tlsState.HandshakeComplete {
+		return fmt.Sprintf("proto=%s | handshake not completed", config.TransportQUIC)
+	}
+	return fmt.Sprintf("proto=%s | quic=stdlib | tls=%s,cipher=%s,curve=%s",
+		config.TransportQUIC,
+		tls.VersionName(tlsState.Version),
+		tls.CipherSuiteName(tlsState.CipherSuite),
+		tlsState.CurveID.String(),
+	)
+}
+
 func (c *QuicConn) IsStreamed() bool {
 	return true
 }

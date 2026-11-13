@@ -16,11 +16,14 @@ package quicgo
 
 import (
 	"context"
+	"crypto/tls"
+	"fmt"
 	"net"
 	"time"
 
 	"github.com/quic-go/quic-go"
 	"github.com/riraccuia/pig/pkg/common"
+	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
@@ -30,6 +33,24 @@ type QuicConn struct {
 
 type QuicStream struct {
 	*quic.Stream
+}
+
+func (c QuicConn) String() string {
+	quicState := c.conn.ConnectionState()
+	tlsState := quicState.TLS
+	if !tlsState.HandshakeComplete {
+		return fmt.Sprintf("proto=%s | handshake not completed", config.TransportQUIC)
+	}
+	quicVersion := quicState.Version.String()
+	gsoEnabled := quicState.GSO
+	return fmt.Sprintf("proto=%s | quic=%s,gso=%v | tls=%s,cipher=%s,curve=%s",
+		config.TransportQUIC,
+		quicVersion,
+		gsoEnabled,
+		tls.VersionName(tlsState.Version),
+		tls.CipherSuiteName(tlsState.CipherSuite),
+		tlsState.CurveID.String(),
+	)
 }
 
 func (s *QuicStream) Flush() error {

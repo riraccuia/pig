@@ -17,12 +17,27 @@ package tls
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 
+	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/transport"
 )
 
 type TLSConn struct {
 	*tls.Conn
+}
+
+func (c TLSConn) String() string {
+	tlsState := c.ConnectionState()
+	if !tlsState.HandshakeComplete {
+		return fmt.Sprintf("proto=%s | handshake not completed", config.TransportTLS)
+	}
+	return fmt.Sprintf("proto=%s | tls=%s,cipher=%s,curve=%s",
+		config.TransportTLS,
+		tls.VersionName(tlsState.Version),
+		tls.CipherSuiteName(tlsState.CipherSuite),
+		tlsState.CurveID.String(),
+	)
 }
 
 func (t *TLSConn) IsStreamed() bool {

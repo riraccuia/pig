@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -85,6 +86,10 @@ func (s *Server) handleNewClient(ctx context.Context, conn transport.Conn) (ok b
 	client.parent.clients.Store(sourceIP.String(), client)
 	if sourceIP6 != nil {
 		client.parent.clients.Store(sourceIP6.String(), client)
+	}
+
+	if info, ok := conn.(fmt.Stringer); ok {
+		client.logger.Debug(info)
 	}
 
 	go func() {

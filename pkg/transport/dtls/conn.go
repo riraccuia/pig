@@ -20,6 +20,8 @@ import (
 	"net"
 
 	"github.com/pion/dtls/v4"
+	"github.com/pion/dtls/v4/pkg/protocol"
+	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/network"
 	"github.com/riraccuia/pig/pkg/transport"
 )
@@ -32,6 +34,29 @@ type DTLSConn struct {
 // NewDTLSConn creates a new DTLS connection wrapper.
 func NewDTLSConn(dtlsConn *dtls.Conn) *DTLSConn {
 	return &DTLSConn{Conn: dtlsConn}
+}
+
+func (c DTLSConn) String() string {
+	dtlsState, ok := c.ConnectionState()
+	if !ok {
+		return fmt.Sprintf("proto=%s | state not available", config.TransportDTLS)
+	}
+	dtlsVersion := ""
+	switch dtlsState.NegotiatedVersion() {
+	case protocol.Version1_0:
+		dtlsVersion = "1.0"
+	case protocol.Version1_2:
+		dtlsVersion = "1.2"
+	case protocol.Version1_3:
+		dtlsVersion = "1.3"
+	default:
+		dtlsVersion = "unknown"
+	}
+	return fmt.Sprintf("proto=%s | dtls=%s,cipher=%s",
+		config.TransportDTLS,
+		dtlsVersion,
+		dtlsState.CipherSuiteID.String(),
+	)
 }
 
 // Implement transport.Conn interface methods.

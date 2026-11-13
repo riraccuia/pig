@@ -181,6 +181,11 @@ func (c *Client) manageConnection(ctx context.Context, dialFunc func(ctx context
 	c.outWg.Go(func() { c.handleOutbound(conn) })
 
 	c.logger.Infof("Connected: %s", conn.RemoteAddr())
+
+	if info, ok := conn.(fmt.Stringer); ok {
+		c.logger.Debug(info)
+	}
+
 	c.signalEvent(&EventContext{State: StateConnected, Conn: conn})
 
 	select {

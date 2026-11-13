@@ -15,10 +15,7 @@
 package controller
 
 import (
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
-	"os"
 
 	"github.com/riraccuia/pig/pkg/auth/jwt"
 	"github.com/riraccuia/pig/pkg/auth/oauth"
@@ -26,71 +23,6 @@ import (
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/config"
 )
-
-func (c *Controller) configureMTLS(direction config.TunnelDirection, cfg *config.TrustConfig, tlsConfig *tls.Config) error {
-	if cfg == nil || cfg.MTLS == nil {
-		return nil
-	}
-	if direction == config.TunnelDirectionConnect {
-		return c.configureClientMTLS(cfg.MTLS, tlsConfig)
-	}
-	return c.configureServerMTLS(cfg.MTLS, tlsConfig)
-}
-
-func (c *Controller) configureClientMTLS(cfg *config.MTLSConfig, tlsConfig *tls.Config) error {
-	if cfg == nil {
-		return nil
-	}
-
-	if cfg.CertFile != "" {
-		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
-		if err != nil {
-			return fmt.Errorf("failed to load TLS certificate: %w", err)
-		}
-		tlsConfig.Certificates = []tls.Certificate{cert}
-	}
-
-	if cfg.TrustPEM == "" {
-		return nil
-	}
-
-	c.logger.Info("Configuring peer trust for outbound TLS")
-
-	ca, err := os.ReadFile(cfg.TrustPEM)
-	if err != nil {
-		return fmt.Errorf("failed to read CA file: %w", err)
-	}
-	tlsConfig.RootCAs = x509.NewCertPool()
-	if !tlsConfig.RootCAs.AppendCertsFromPEM(ca) {
-		return fmt.Errorf("failed to append CA certs to pool")
-	}
-
-	return nil
-}
-
-func (c *Controller) configureServerMTLS(cfg *config.MTLSConfig, tlsConfig *tls.Config) error {
-	if cfg == nil {
-		return nil
-	}
-	if cfg.TrustPEM == "" {
-		return nil
-	}
-
-	c.logger.Info("Configuring peer trust for inbound TLS")
-
-	ca, err := os.ReadFile(cfg.TrustPEM)
-	if err != nil {
-		return fmt.Errorf("failed to read CA file: %w", err)
-	}
-
-	tlsConfig.ClientCAs = x509.NewCertPool()
-	if !tlsConfig.ClientCAs.AppendCertsFromPEM(ca) {
-		return fmt.Errorf("failed to append CA certs to pool")
-	}
-	tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-
-	return nil
-}
 
 func (c *Controller) createClientAuthenticator(cfg *config.AuthConfig) (authenticator common.Authenticator, err error) {
 	if cfg == nil || cfg.Type == config.AuthTypeNone {
