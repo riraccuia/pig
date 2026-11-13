@@ -263,7 +263,7 @@ func (l *sharedListener) writePacket(dst net.IP, msg *icmp.Message) error {
 		Protocol: protocolICMP,
 		Dst:      dst.To4(),
 	}
-	if err := l.ip4Conn.WriteTo(header, msgBytes, nil); err != nil {
+	if err := l.WriteTo(header, msgBytes, nil); err != nil {
 		return fmt.Errorf("error writing ICMP packet: %w", err)
 	}
 	return nil
