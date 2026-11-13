@@ -8,7 +8,7 @@
 Peers find each other either automatically with NAT traversal, or with a plain `host:port` dial when you already have a reachable address.  
 Each side can expose a TUN interface (route IP traffic) or stdin/stdout (netcat-style byte streams).  
 Pig can handle multiple connected tunnels at the same time, and/or chain them to create mesh networks.  
-It can also connect to any [WireGuard](docs/wireguard/wireguard.md) server, inlcuding ones from many known VPN providers.
+It can also connect to any [WireGuard](docs/transports/wireguard.md) server, inlcuding ones from many known VPN providers.
 
 It is small and runs on Linux, macOS, and Windows.  
 The project is in early development, please open an issue if you find any bugs or have any suggestions.

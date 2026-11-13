@@ -69,7 +69,9 @@ func (p *Packet) Unmarshal(data []byte) error {
 	if len(p.IcmpPayload) < eHeaderSize {
 		return nil
 	}
+	// extract sequence and sequence and acknowledgment from payload
 	p.PacketSeq, p.PacketAck = getSeqAck(p.IcmpPayload[:eHeaderSize])
+	// strip our header
 	p.Data = p.IcmpPayload[eHeaderSize:]
 	return nil
 }
