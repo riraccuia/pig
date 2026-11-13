@@ -14,25 +14,13 @@
 
 package icmp
 
-import (
-	"fmt"
-	"net"
-)
+import "net"
 
-// ReadMsgIP reads the next IPv4 ICMP datagram from the SIO_RCVALL socket.
-// Non-ICMP traffic is skipped. oob is ignored; oobn and flags are always 0.
+// ReadMsgIP reads an ICMP datagram from the IPPROTO_ICMP socket.
+//
+// Uses ReadFromIP (WSARecvFrom) instead of ReadMsgIP (WSARecvMsg). oob is
+// ignored; oobn and flags are always 0.
 func (l *sharedListener) ReadMsgIP(b, _ []byte) (n, oobn, flags int, addr *net.IPAddr, err error) {
-	if l.recvConn == nil {
-		return 0, 0, 0, nil, fmt.Errorf("windows ICMP receive socket not configured")
-	}
-	for {
-		n, addr, err = l.recvConn.ReadFromIP(b)
-		if err != nil {
-			return 0, 0, 0, nil, err
-		}
-		// IPv4 header protocol field
-		if n >= 20 && b[9] == protocolICMP {
-			return n, 0, 0, addr, nil
-		}
-	}
+	n, addr, err = l.conn.ReadFromIP(b)
+	return n, 0, 0, addr, err
 }

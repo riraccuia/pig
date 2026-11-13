@@ -54,8 +54,8 @@ func (p *Packet) Unmarshal(data []byte) error {
 		if payloadOffset < 20 || payloadOffset > len(data) || len(data) < payloadOffset+icmpHeaderSize {
 			return fmt.Errorf("packet too short")
 		}
-		p.IPSrc = data[12:16]
-		p.IPDst = data[16:20]
+		p.IPSrc = append(net.IP(nil), data[12:16]...)
+		p.IPDst = append(net.IP(nil), data[16:20]...)
 		ipPayload = data[payloadOffset:]
 	} else {
 		if len(data) < icmpHeaderSize {

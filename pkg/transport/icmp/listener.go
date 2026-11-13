@@ -31,12 +31,9 @@ import (
 
 // sharedListener handles the raw ICMP socket and connection dispatching.
 type sharedListener struct {
-	isServer bool
-	ip4Conn  *ipv4.RawConn
-	conn     *ipConn
-	// recvConn is a Windows-only IPPROTO_IP socket with SIO_RCVALL so Echo
-	// Replies are visible despite icmp.sys; nil on other platforms.
-	recvConn   *net.IPConn
+	isServer   bool
+	ip4Conn    *ipv4.RawConn
+	conn       *ipConn
 	localAddr  *net.IPAddr
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -137,9 +134,6 @@ func (l *sharedListener) Close() error {
 		l.clients.Delete(key)
 		return true
 	})
-	if l.recvConn != nil {
-		l.recvConn.Close()
-	}
 	return l.conn.Close()
 }
 
@@ -166,7 +160,11 @@ func (l *sharedListener) readPackets() {
 				l.clearMemory(buffer)
 				continue
 			}
-			packet.IPSrc = ipSrc.IP.To4()
+			// Prefer IPv4 header source when present. Sockaddr from some Windows
+			// read paths is unreliable and overwriting breaks demux/ACKs.
+			if len(packet.IPSrc) != net.IPv4len && ipSrc != nil {
+				packet.IPSrc = ipSrc.IP.To4()
+			}
 
 			select {
 			case l.packetChan <- packet:
