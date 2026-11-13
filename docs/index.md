@@ -30,9 +30,10 @@ Table of contents for pig user documentation. New guides are added here by topic
 - [OAuth](auth/oauth.md)
 - [OIDC](auth/oidc.md)
 
-## WireGuard
+## Transports
 
-- [WireGuard](wireguard/wireguard.md)
+- [WireGuard](transports/wireguard.md)
+- [TLS-in-ICMP](transports/tls-in-icmp.md)
 
 ## NAT
 

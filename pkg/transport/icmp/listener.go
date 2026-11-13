@@ -74,19 +74,9 @@ func newSharedListener(ctx context.Context, logger common.Logger, bindAddr *net.
 		return nil, fmt.Errorf("failed to create ICMP socket: %w", err)
 	}
 
-	ip4Conn, err := ipv4.NewRawConn(conn.IPConn)
-	if err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("failed to create raw connection: %w", err)
-	}
-
-	ip4Conn.SetWriteBuffer(defaultBufferSize)
-	ip4Conn.SetReadBuffer(defaultBufferSize)
-
 	listenerCtx, cancel := context.WithCancel(ctx)
 	l := &sharedListener{
 		isServer:   isServer,
-		ip4Conn:    ip4Conn,
 		conn:       conn,
 		localAddr:  conn.LocalAddr().(*net.IPAddr),
 		ctx:        listenerCtx,
@@ -96,6 +86,11 @@ func newSharedListener(ctx context.Context, logger common.Logger, bindAddr *net.
 		packetChan: make(chan *Packet, 1024),
 		bufPool:    sync.Pool{New: func() any { buffer := make([]byte, iface.MTU); return &buffer }},
 		logger:     logger,
+	}
+	if err := l.setupRawConn(); err != nil {
+		cancel()
+		conn.Close()
+		return nil, err
 	}
 
 	// Start the packet dispatch loop
@@ -147,7 +142,7 @@ func (l *sharedListener) readPackets() {
 			// buffer := make([]byte, l.mtu)
 			buffer := l.getBuffer()
 
-			n, _, _, ipSrc, err := l.conn.ReadMsgIP(buffer, nil)
+			n, _, _, ipSrc, err := l.ReadMsgIP(buffer, nil)
 			if err != nil {
 				l.logger.Errorf("Error reading ICMP packet: %v", err)
 				l.clearMemory(buffer)
@@ -263,7 +258,7 @@ func (l *sharedListener) writePacket(dst net.IP, msg *icmp.Message) error {
 		Protocol: protocolICMP,
 		Dst:      dst.To4(),
 	}
-	if err := l.ip4Conn.WriteTo(header, msgBytes, nil); err != nil {
+	if err := l.WriteTo(header, msgBytes, nil); err != nil {
 		return fmt.Errorf("error writing ICMP packet: %w", err)
 	}
 	return nil
