@@ -15,33 +15,17 @@
 package icmp
 
 import (
-	"fmt"
 	"net"
 
 	"golang.org/x/net/ipv4"
 )
 
-// WriteTo writes an IPv4+ICMP datagram through the IPConn.
+// WriteTo writes an ICMP payload through the IPConn.
 //
-// ipv4.NewRawConn enables IP_HDRINCL on the socket, so Windows expects a full
-// IPv4 header before the ICMP payload. ipv4.RawConn.WriteTo (sendmsg) is not
-// implemented on Windows, so we marshal the header ourselves and WriteToIP.
+// ipv4.RawConn.WriteTo (sendmsg) is not implemented on Windows. With IP_HDRINCL
+// left off (see setupRawConn), Winsock builds the IPv4 header; only the ICMP
+// message is written. The header argument supplies the destination address.
 func (l *sharedListener) WriteTo(header *ipv4.Header, p []byte, _ *ipv4.ControlMessage) error {
-	if header.Src == nil && l.localAddr != nil {
-		header.Src = l.localAddr.IP.To4()
-	}
-	wh, err := header.Marshal()
-	if err != nil {
-		return err
-	}
-	need := len(wh) + len(p)
-	buf := l.getBuffer()
-	defer l.clearMemory(buf)
-	if need > len(buf) {
-		return fmt.Errorf("icmp write exceeds buffer: need %d have %d", need, len(buf))
-	}
-	copy(buf, wh)
-	copy(buf[len(wh):], p)
-	_, err = l.conn.WriteToIP(buf[:need], &net.IPAddr{IP: header.Dst})
+	_, err := l.conn.WriteToIP(p, &net.IPAddr{IP: header.Dst})
 	return err
 }
