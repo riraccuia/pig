@@ -18,11 +18,12 @@ package icmp
 
 import (
 	"fmt"
+	"net"
 
 	"golang.org/x/net/ipv4"
 )
 
-func (l *sharedListener) setupRawConn() error {
+func (l *sharedListener) setupRawConn(_ *net.Interface) error {
 	ip4Conn, err := ipv4.NewRawConn(l.conn.IPConn)
 	if err != nil {
 		return fmt.Errorf("failed to create raw connection: %w", err)

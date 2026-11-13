@@ -31,9 +31,12 @@ import (
 
 // sharedListener handles the raw ICMP socket and connection dispatching.
 type sharedListener struct {
-	isServer   bool
-	ip4Conn    *ipv4.RawConn
-	conn       *ipConn
+	isServer bool
+	ip4Conn  *ipv4.RawConn
+	conn     *ipConn
+	// recvConn is a Windows-only IPPROTO_IP socket with SIO_RCVALL so Echo
+	// Replies are visible despite icmp.sys; nil on other platforms.
+	recvConn   *net.IPConn
 	localAddr  *net.IPAddr
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -74,6 +77,11 @@ func newSharedListener(ctx context.Context, logger common.Logger, bindAddr *net.
 		return nil, fmt.Errorf("failed to create ICMP socket: %w", err)
 	}
 
+	mtu := 1500
+	if iface != nil && iface.MTU > 0 {
+		mtu = iface.MTU
+	}
+
 	listenerCtx, cancel := context.WithCancel(ctx)
 	l := &sharedListener{
 		isServer:   isServer,
@@ -81,13 +89,13 @@ func newSharedListener(ctx context.Context, logger common.Logger, bindAddr *net.
 		localAddr:  conn.LocalAddr().(*net.IPAddr),
 		ctx:        listenerCtx,
 		cancel:     cancel,
-		mss:        iface.MTU - ipHeaderSize - icmpHeaderSize,
+		mss:        mtu - ipHeaderSize - icmpHeaderSize,
 		connChan:   make(chan transport.Conn, 1024),
 		packetChan: make(chan *Packet, 1024),
-		bufPool:    sync.Pool{New: func() any { buffer := make([]byte, iface.MTU); return &buffer }},
+		bufPool:    sync.Pool{New: func() any { buffer := make([]byte, mtu); return &buffer }},
 		logger:     logger,
 	}
-	if err := l.setupRawConn(); err != nil {
+	if err := l.setupRawConn(iface); err != nil {
 		cancel()
 		conn.Close()
 		return nil, err
@@ -129,6 +137,9 @@ func (l *sharedListener) Close() error {
 		l.clients.Delete(key)
 		return true
 	})
+	if l.recvConn != nil {
+		l.recvConn.Close()
+	}
 	return l.conn.Close()
 }
 
