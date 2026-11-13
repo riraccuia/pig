@@ -46,23 +46,14 @@ func NewPacket(buffer []byte, len int) (*Packet, error) {
 }
 
 func (p *Packet) Unmarshal(data []byte) error {
-	var ipPayload []byte
-	// Windows AF_INET raw sockets normally include the IPv4 header; some
-	// read paths may return ICMP-only. Detect by version nibble.
-	if len(data) >= 20 && data[0]>>4 == 4 {
-		payloadOffset := int(data[0]&0x0F) << 2
-		if payloadOffset < 20 || payloadOffset > len(data) || len(data) < payloadOffset+icmpHeaderSize {
-			return fmt.Errorf("packet too short")
-		}
-		p.IPSrc = append(net.IP(nil), data[12:16]...)
-		p.IPDst = append(net.IP(nil), data[16:20]...)
-		ipPayload = data[payloadOffset:]
-	} else {
-		if len(data) < icmpHeaderSize {
-			return fmt.Errorf("packet too short")
-		}
-		ipPayload = data
+	if len(data) < 20+icmpHeaderSize {
+		return fmt.Errorf("packet too short")
 	}
+	// read ip fields
+	p.IPSrc = data[12:16]
+	p.IPDst = data[16:20]
+	payloadOffset := int(data[0]&0x0F) << 2
+	ipPayload := data[payloadOffset:]
 	// read icmp fields
 	p.IcmpType = ipv4.ICMPType(ipPayload[0])
 	p.IcmpCode = ipPayload[1]
@@ -72,7 +63,7 @@ func (p *Packet) Unmarshal(data []byte) error {
 	if len(p.IcmpPayload) < eHeaderSize {
 		return nil
 	}
-	// extract sequence and acknowledgment from payload
+	// extract sequence and sequence and acknowledgment from payload
 	p.PacketSeq, p.PacketAck = getSeqAck(p.IcmpPayload[:eHeaderSize])
 	// strip our header
 	p.Data = p.IcmpPayload[eHeaderSize:]

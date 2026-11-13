@@ -16,10 +16,11 @@ package icmp
 
 import "net"
 
-// ReadMsgIP reads an ICMP datagram from the IPPROTO_ICMP socket.
+// ReadMsgIP reads an ICMP datagram from the IPConn.
 //
-// Uses ReadFromIP (WSARecvFrom) instead of ReadMsgIP (WSARecvMsg). oob is
-// ignored; oobn and flags are always 0.
+// net.IPConn.ReadMsgIP uses WSARecvMsg, which is unreliable for SOCK_RAW
+// IPPROTO_ICMP on Windows. ReadFromIP (WSARecvFrom) matches the Winsock
+// raw-socket receive model. oob is ignored; oobn and flags are always 0.
 func (l *sharedListener) ReadMsgIP(b, _ []byte) (n, oobn, flags int, addr *net.IPAddr, err error) {
 	n, addr, err = l.conn.ReadFromIP(b)
 	return n, 0, 0, addr, err
