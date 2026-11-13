@@ -147,7 +147,7 @@ func (l *sharedListener) readPackets() {
 			// buffer := make([]byte, l.mtu)
 			buffer := l.getBuffer()
 
-			n, _, _, ipSrc, err := l.conn.ReadMsgIP(buffer, nil)
+			n, _, _, ipSrc, err := l.ReadMsgIP(buffer, nil)
 			if err != nil {
 				l.logger.Errorf("Error reading ICMP packet: %v", err)
 				l.clearMemory(buffer)
