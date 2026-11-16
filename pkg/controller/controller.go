@@ -69,7 +69,10 @@ func (c *Controller) WithConfig(cfg *config.Config) *Controller {
 	if c.logger != nil {
 		return c
 	}
-	c.setupLogger()
+	if err := c.setupLogger(); err != nil {
+		c.logger = log.NewBlockingLogger()
+		c.logger.Errorf("%v: logging to stderr", err)
+	}
 	return c
 }
 

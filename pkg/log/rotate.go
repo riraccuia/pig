@@ -20,9 +20,14 @@ import (
 	"strconv"
 )
 
+const defaultRotateSize int64 = 5 * 1024 * 1024
+
 // RotateSizeFromRotateString converts a rotate size string to an int64.
 // e.g. "100k" -> 100 * 1024, "1m" -> 1 * 1024 * 1024, "1g" -> 1 * 1024 * 1024 * 1024
 func RotateSizeFromRotateString(rotateSize any) (int64, error) {
+	if rotateSize == nil {
+		return defaultRotateSize, nil
+	}
 	rotateSizeInt64, ok := rotateSize.(int64)
 	if ok {
 		return rotateSizeInt64, nil
@@ -32,7 +37,7 @@ func RotateSizeFromRotateString(rotateSize any) (int64, error) {
 		return 0, fmt.Errorf("invalid rotate size: want string or int64, got %T", rotateSize)
 	}
 	if rotateSizeStr == "" {
-		return 5 * 1024 * 1024, nil
+		return defaultRotateSize, nil
 	}
 
 	re := regexp.MustCompile(`^(\d+)([kmg])$`)
