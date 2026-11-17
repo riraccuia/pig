@@ -20,6 +20,11 @@ func TestRotateSizeFromRotateString_ValidSizes(t *testing.T) {
 			want:  5 * 1024 * 1024,
 		},
 		{
+			name:  "absent value uses default size",
+			input: nil,
+			want:  5 * 1024 * 1024,
+		},
+		{
 			name:  "kilobytes",
 			input: "100k",
 			want:  100 * 1024,
