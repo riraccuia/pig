@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"runtime"
 
 	"github.com/BurntSushi/toml"
 	"github.com/riraccuia/pig/pkg/adapter"
@@ -160,32 +161,102 @@ type Config struct {
 }
 
 type AdapterConfig struct {
-	// default=tun
-	// desc=Adapter type.
-	adapterType string
+	// default=DefaultAdapterType
+	// desc=Adapter type. This can be one of "tun", "http_proxy", "stdio".
+	AdapterType string `toml:"adapter_type" json:"adapter_type"`
+	// optional=true
+	// desc=Adapter configuration, fields depend on the adapter type.
+	// Use AdapterTunConfig for "tun", AdapterHTTPProxyConfig for "http_proxy", and AdapterStdIOConfig for "stdio".
+	AdapterConfig any `toml:"adapter_config,omitempty" json:"adapter_config,omitzero"`
+
+	// hidden=true
+	// desc=This is only used for documentation purposes.
+	_ *AdapterTunConfig `toml:"tun,omitempty"` // json:"tun,omitzero"`
+	// hidden=true
+	// desc=This is only used for documentation purposes.
+	_ *AdapterHTTPProxyConfig `toml:"http_proxy,omitempty"` // json:"http_proxy,omitzero"`
+	// hidden=true
+	// desc=This is only used for documentation purposes.
+	_ *AdapterStdIOConfig `toml:"stdio,omitempty"` // json:"stdio,omitzero"`
+}
+
+func (a *AdapterConfig) ToAdapterConfig() any {
+	switch a.AdapterType {
+	case "tun":
+		cfg := a.AdapterConfig.(*AdapterTunConfig)
+		return &adapter.AdapterConfig{
+			Address:    cfg.TunnelAddress,
+			MTU:        cfg.MTU,
+			MultiQueue: cfg.MultiQueue && runtime.GOOS == "linux",
+		}
+	case "stdio":
+		return &adapter.AdapterStdIOConfig{
+			MTU: a.AdapterConfig.(*AdapterStdIOConfig).MTU,
+		}
+	case "http_proxy":
+		cfg := a.AdapterConfig.(*AdapterHTTPProxyConfig)
+		return &adapter.AdapterHTTPProxyConfig{
+			Address:    cfg.TunnelAddress,
+			UseIPv6:    cfg.UseIPv6,
+			MTU:        cfg.MTU,
+			ListenAddr: cfg.ListenAddress,
+			DNSServer:  cfg.DNSAddress,
+		}
+	}
+	return nil
+}
+
+type AdapterStdIOConfig struct {
+	// optional=true
+	// default=DefaultMTU
+	// desc=Maximum Transmission Unit.
+	MTU int `toml:"mtu,omitzero" json:"mtu,omitzero"`
+}
+
+type AdapterTunConfig struct {
+	// optional=true
 	// desc=CIDR format.
 	TunnelAddress []string `toml:"tunnel_address,omitempty" json:"tunnel_address,omitzero"`
+	// optional=true
 	// default=DefaultMTU
 	// desc=Maximum Transmission Unit.
 	MTU int `toml:"mtu,omitzero" json:"mtu,omitzero"`
 	// optional=true
-	// desc=Adapter name to bind to, e.g. "eth0". Only required when 'proto' is tls-in-icmp.
-	BindAdapter string `toml:"bind_adapter,omitempty" json:"bind_adapter,omitzero"`
-	// default=DefaultQueueSize
-	// optional=true
-	// desc=Size of the network queues for the tunnel.
-	QueueSize int `toml:"queue_size,omitzero" json:"queue_size,omitzero"`
+	// desc=MultiQueue enables tun multi-queue support.
+	// It is only valid on Linux platforms.
+	MultiQueue bool `toml:"multi_queue,omitempty" json:"multi_queue,omitzero"`
 }
 
-func (a *AdapterConfig) AdapterType() string {
-	if a.adapterType == "" {
-		return string(adapter.AdapterTypeTun)
-	}
-	return a.adapterType
+type AdapterHTTPProxyConfig struct {
+	// optional=true
+	// desc=CIDR format.
+	TunnelAddress []string `toml:"tunnel_address,omitempty" json:"tunnel_address,omitzero"`
+	// optional=true
+	// desc=Use IPv6. The proxy will attempt to resolve IPv6 addresses for targets first.
+	UseIPv6 bool `toml:"use_ipv6,omitempty" json:"use_ipv6,omitzero"`
+	// optional=true
+	// default=DefaultMTU
+	// desc=Maximum Transmission Unit.
+	MTU int `toml:"mtu,omitzero" json:"mtu,omitzero"`
+	// default=":8080"
+	// optional=true
+	// desc=HTTP proxy listen address.
+	ListenAddress string `toml:"listen_address,omitempty" json:"listen_address,omitzero"`
+	// optional=true
+	// desc=HTTP proxy DNS server address.
+	DNSAddress string `toml:"dns_address,omitempty" json:"dns_address,omitzero"`
+}
+
+func (a *AdapterConfig) SetTunAdapter() {
+	a.AdapterType = string(adapter.AdapterTypeTun)
 }
 
 func (a *AdapterConfig) SetStdIOAdapter() {
-	a.adapterType = string(adapter.AdapterTypeStdio)
+	a.AdapterType = string(adapter.AdapterTypeStdio)
+}
+
+func (a *AdapterConfig) SetHTTPProxyAdapter() {
+	a.AdapterType = string(adapter.AdapterTypeHTTPProxy)
 }
 
 type TunnelConfig struct {
@@ -196,6 +267,13 @@ type TunnelConfig struct {
 	// optional=true
 	// desc=Adapter configuration specific for this tunnel. Mandatory when the direction is "listen".
 	Adapter *AdapterConfig `toml:"adapter" json:"adapter"`
+	// optional=true
+	// desc=Adapter name to bind to, e.g. "eth0". Only required when 'proto' is tls-in-icmp.
+	BindAdapter string `toml:"bind_adapter,omitempty" json:"bind_adapter,omitzero"`
+	// default=DefaultQueueSize
+	// optional=true
+	// desc=Size of the network queues for the tunnel.
+	QueueSize int `toml:"queue_size,omitzero" json:"queue_size,omitzero"`
 	// optional=true
 	// desc=Connect target configuration. Use with NAT traversal disabled.
 	Connect ConnectTarget `toml:"connect,omitempty" json:"connect,omitzero"`
@@ -579,7 +657,7 @@ func IsTOML(str string) bool {
 }
 
 func (c AdapterConfig) IsZero() bool {
-	return len(c.TunnelAddress) == 0 && c.MTU == 0 && c.BindAdapter == "" && c.QueueSize == 0
+	return c.AdapterType == "" && c.AdapterConfig == nil
 }
 
 func (c *Config) HasConnectTunnels() bool {

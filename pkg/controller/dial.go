@@ -72,9 +72,9 @@ func (c *Controller) getClientDialFunc(tunnelInfo *TunnelInfo, mtu int) (func(ct
 		case config.TransportWS:
 			return ws.GetClientDialFunc(logger, cfg, tlsConfig)(ctx)
 		case config.TransportICMP:
-			return icmp.GetClientDialFunc(logger, cfg, cfg.Adapter.BindAdapter)(ctx)
+			return icmp.GetClientDialFunc(logger, cfg, cfg.BindAdapter)(ctx)
 		case config.TransportTLSICMP:
-			return tlsicmp.GetClientDialFunc(logger, cfg, tlsConfig, cfg.Adapter.BindAdapter)(ctx)
+			return tlsicmp.GetClientDialFunc(logger, cfg, tlsConfig, cfg.BindAdapter)(ctx)
 		case config.TransportDTLS:
 			return dtls.GetClientDialFunc(logger, cfg, tlsConfig, mtu)(ctx)
 		case config.TransportWG:

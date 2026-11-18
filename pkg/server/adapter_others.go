@@ -58,7 +58,7 @@ func (s *Server) readFromAdapter(ctx context.Context) {
 }
 
 func (s *Server) processInbound(ctx context.Context) {
-	pq := make(common.PacketQueue, s.adapterCfg.QueueSize)
+	pq := make(common.PacketQueue, s.config.QueueSize)
 	s.inbound = append(s.inbound, pq)
 	s.processInboundQueue(ctx, s.adapter, pq)
 }

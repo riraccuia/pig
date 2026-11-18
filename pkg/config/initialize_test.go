@@ -174,7 +174,7 @@ func TestTunnelConfigInitializeWireGuard(t *testing.T) {
 			}
 
 			tc := tt.tc
-			err := tc.Initialize("", []string{"stun.example:3478"}, &MQTTBrokerConfig{})
+			err := tc.Initialize([]string{"stun.example:3478"}, &MQTTBrokerConfig{})
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error")

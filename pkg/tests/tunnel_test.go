@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/client"
 	"github.com/riraccuia/pig/pkg/config"
 	"github.com/riraccuia/pig/pkg/log"
@@ -255,8 +256,11 @@ func TestEndToEndTunnelWithQUICMockedAdapter(t *testing.T) {
 			{
 				Direction: config.TunnelDirectionListen,
 				Adapter: &config.AdapterConfig{
-					TunnelAddress: []string{"10.0.0.1/24"},
-					MTU:           1300,
+					AdapterType: string(adapter.AdapterTypeTun),
+					AdapterConfig: &config.AdapterTunConfig{
+						TunnelAddress: []string{"10.0.0.1/24"},
+						MTU:           1300,
+					},
 				},
 				TLSConfig: config.TLSConfig{
 					Insecure: true,
@@ -275,8 +279,11 @@ func TestEndToEndTunnelWithQUICMockedAdapter(t *testing.T) {
 	// Create client config
 	clientConfig := &config.Config{
 		Adapter: config.AdapterConfig{
-			TunnelAddress: []string{"10.0.0.1/32"},
-			MTU:           1300,
+			AdapterType: string(adapter.AdapterTypeTun),
+			AdapterConfig: &config.AdapterTunConfig{
+				TunnelAddress: []string{"10.0.0.1/32"},
+				MTU:           1300,
+			},
 		},
 		Tunnels: []config.TunnelConfig{
 			{
@@ -304,13 +311,13 @@ func TestEndToEndTunnelWithQUICMockedAdapter(t *testing.T) {
 	logger.SetLevel("debug")
 
 	// Create and start client with mock adapter
-	cli, err := client.NewWithAdapter(logger, &clientConfig.Adapter, &clientConfig.Tunnels[0], clientAdapter, nil)
+	cli, err := client.NewWithAdapter(logger, &clientConfig.Tunnels[0], clientAdapter, nil)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
 	// Create and start server with mock adapter
-	srv, err := server.NewWithAdapter(logger, serverConfig.Tunnels[0].Adapter, &serverConfig.Tunnels[0], serverAdapter, nil)
+	srv, err := server.NewWithAdapter(logger, &serverConfig.Tunnels[0], serverAdapter, nil)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}

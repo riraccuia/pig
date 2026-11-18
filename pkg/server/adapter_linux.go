@@ -37,7 +37,7 @@ func (s *Server) processInbound(ctx context.Context) {
 		queues = append(queues, s.adapter)
 	}
 	for _, q := range queues {
-		pq := make(common.PacketQueue, s.adapterCfg.QueueSize)
+		pq := make(common.PacketQueue, s.config.QueueSize)
 		go s.processInboundQueue(ctx, q, pq)
 		s.inbound = append(s.inbound, pq)
 	}

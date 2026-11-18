@@ -73,7 +73,7 @@ func bytesToIPv4(ip net.IP) uint32 {
 //
 // Returns:
 //   - error: nil if successful, otherwise an error describing what went wrong
-func configureWinTun(adapter *NativeTun, config AdapterConfig) error {
+func configureWinTun(adapter *NativeTun, config *AdapterConfig) error {
 	// Input validation
 	if adapter == nil {
 		return fmt.Errorf("configureWinTun: adapter cannot be nil")

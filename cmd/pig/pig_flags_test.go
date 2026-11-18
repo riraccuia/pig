@@ -49,11 +49,15 @@ func TestApplyCommandLineFlagsClientMode(t *testing.T) {
 	if tc.Connect.Address != "127.0.0.1" || tc.Connect.Port != 4444 || tc.Connect.SrcPort != 5555 {
 		t.Fatalf("unexpected connect target: %#v", tc.Connect)
 	}
-	if cfg.Adapter.TunnelAddress[0] != "10.0.0.2/32" {
-		t.Fatalf("unexpected connect adapter: %#v", cfg.Adapter)
+	if tc.Adapter == nil || tc.Adapter.AdapterConfig == nil {
+		t.Fatalf("unexpected nil adapter config: %#v", tc.Adapter)
 	}
-	if tc.Adapter != nil {
-		t.Fatalf("unexpected tunnel adapter in client mode: %#v", tc.Adapter)
+	adapterCfg, ok := tc.Adapter.AdapterConfig.(*config.AdapterTunConfig)
+	if !ok {
+		t.Fatalf("unexpected adapter config type: %T", tc.Adapter.AdapterConfig)
+	}
+	if adapterCfg.TunnelAddress[0] != "10.0.0.2/32" {
+		t.Fatalf("unexpected connect adapter: %#v", cfg.Adapter)
 	}
 	if tc.TLSConfig.CertFile != "" || tc.TLSConfig.KeyFile != "" {
 		t.Fatalf("unexpected tls config: %#v", tc.TLSConfig)
@@ -93,10 +97,14 @@ func TestApplyCommandLineFlagsServerMode(t *testing.T) {
 	if tc.Listen.Address != "0.0.0.0" || tc.Listen.Port != 7777 {
 		t.Fatalf("unexpected listen target: %#v", tc.Listen)
 	}
-	if len(cfg.Adapter.TunnelAddress) > 0 {
-		t.Fatalf("unexpected connect adapter in server mode: %#v", cfg.Adapter)
+	if tc.Adapter == nil || tc.Adapter.AdapterConfig == nil {
+		t.Fatalf("unexpected nil adapter config: %#v", tc.Adapter)
 	}
-	if tc.Adapter == nil || tc.Adapter.TunnelAddress[0] != "10.0.1.1/24" {
+	adapterCfg, ok := tc.Adapter.AdapterConfig.(*config.AdapterTunConfig)
+	if !ok {
+		t.Fatalf("unexpected adapter config type: %T", tc.Adapter.AdapterConfig)
+	}
+	if adapterCfg.TunnelAddress[0] != "10.0.1.1/24" {
 		t.Fatalf("unexpected listen adapter: %#v", tc.Adapter)
 	}
 	if tc.TLSConfig.CertFile != "server.pem" || tc.TLSConfig.KeyFile != "server.key" {

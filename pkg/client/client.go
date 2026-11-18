@@ -37,7 +37,6 @@ type Client struct {
 	logger               common.Logger
 	dropLogger           *common.DelayedCounterProcessor
 	config               *config.TunnelConfig
-	adapterConfig        *config.AdapterConfig
 	conn                 transport.Conn
 	streams              *streams.StreamManager
 	adapter              common.TunnelAdapter
@@ -62,26 +61,18 @@ type atomicAddr struct {
 // Use this for standalone / single-tunnel operation where the caller does not
 // manage the adapter externally.
 func New(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *config.TunnelConfig, authenticator common.Authenticator) (*Client, error) {
-	a, err := adapter.NewAdapter(adapter.AdapterConfig{
-		Address: adapterCfg.TunnelAddress,
-		MTU:     adapterCfg.MTU,
-	})
+	a, err := adapter.NewAdapter(logger, adapter.AdapterType(adapterCfg.AdapterType), adapterCfg.ToAdapterConfig())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adapter: %w", err)
 	}
-	return NewWithAdapter(logger, adapterCfg, tunnelCfg, a, authenticator)
+	return NewWithAdapter(logger, tunnelCfg, a, authenticator)
 }
 
 // NewWithAdapter creates a new Client instance with a caller-supplied adapter.
 // In the multi-tunnel case the controller passes a per-tunnel virtual adapter
 // (tunnelAdapter) so that reads only deliver packets routed to this tunnel.
-func NewWithAdapter(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *config.TunnelConfig, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Client, error) {
+func NewWithAdapter(logger common.Logger, tunnelCfg *config.TunnelConfig, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Client, error) {
 	logger.Infof("New client with adapter %s, IP: %s, MTU %d", adapter.Name(), adapter.IP(), adapter.MTU())
-
-	adapterConfig := adapterCfg
-	if tunnelCfg.Adapter != nil {
-		adapterConfig = tunnelCfg.Adapter
-	}
 
 	cl := &Client{
 		logger:        logger,
@@ -89,7 +80,6 @@ func NewWithAdapter(logger common.Logger, adapterCfg *config.AdapterConfig, tunn
 		streams:       streams.New(),
 		adapter:       adapter,
 		bufferPool:    common.DefaultBufferPool,
-		adapterConfig: adapterConfig,
 		connError:     make(chan error, 1),
 		authenticator: authenticator,
 		events:        make(chan *EventContext, 10),
@@ -296,7 +286,7 @@ func (c *Client) drainConnError() {
 }
 
 func (c *Client) setupQueues() {
-	queueSize := c.adapterConfig.QueueSize
+	queueSize := c.config.QueueSize
 	if queueSize <= 0 {
 		queueSize = config.DefaultQueueSize
 	}

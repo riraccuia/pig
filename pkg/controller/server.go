@@ -75,12 +75,12 @@ func (c *Controller) startServerTunnel(ctx context.Context, tunnelCfg *config.Tu
 	if err != nil {
 		logger.Fatalf("Failed to create authenticator: %v", err)
 	}
-	adapter, err := c.createAdapter(tunnelCfg.Adapter, true)
+	adapter, err := c.createAdapter(logger, tunnelCfg.Adapter, true)
 	if err != nil {
 		logger.Fatalf("Failed to create adapter: %v", err)
 	}
 	c.adapters.Store(adapter.Name(), adapter)
-	tunnel, err = server.NewWithAdapter(logger, tunnelCfg.Adapter, tunnelCfg, adapter, authenticator)
+	tunnel, err = server.NewWithAdapter(logger, tunnelCfg, adapter, authenticator)
 	if err != nil {
 		c.logger.Fatalf("Failed to create server: %v", err)
 	}

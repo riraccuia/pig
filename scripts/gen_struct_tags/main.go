@@ -149,6 +149,7 @@ type parsedMeta struct {
 	Optional bool
 	Desc     string
 	ok       bool
+	Hidden   bool // if true, the field is not included in the output
 }
 
 type structFields struct {
@@ -414,6 +415,9 @@ func formatMeta(m parsedMeta) string {
 	if m.Optional {
 		parts = append(parts, "Optional: true")
 	}
+	if m.Hidden {
+		parts = append(parts, "Hidden: true")
+	}
 	if m.Desc != "" {
 		parts = append(parts, "Desc: "+strconv.Quote(m.Desc))
 	}
@@ -463,6 +467,16 @@ func parseFieldComment(field *ast.Field) (parsedMeta, error) {
 			}
 			meta.Optional = b
 			sawOptional = true
+			meta.ok = true
+		case "hidden":
+			if meta.Hidden {
+				return parsedMeta{}, fmt.Errorf("duplicate hidden=")
+			}
+			b, err := strconv.ParseBool(val)
+			if err != nil {
+				return parsedMeta{}, fmt.Errorf("hidden=%s: %w", val, err)
+			}
+			meta.Hidden = b
 			meta.ok = true
 		case "desc":
 			parts := []string{val}

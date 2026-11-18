@@ -9,6 +9,7 @@ import (
 type FieldMeta struct {
 	Default  string
 	Optional bool
+	Hidden   bool
 	Desc     string
 }
 
@@ -67,9 +68,9 @@ func walkDirect(t reflect.Type, prefix string, descs map[string]FieldMeta) ([]Fi
 	var fields []FieldDoc
 	var refs []typeJob
 	for field := range t.Fields() {
-		if !field.IsExported() {
-			continue
-		}
+		//if !field.IsExported() {
+		//	continue
+		//}
 		key, skip, embed := fieldKey(field)
 		if skip {
 			continue
@@ -85,7 +86,9 @@ func walkDirect(t reflect.Type, prefix string, descs map[string]FieldMeta) ([]Fi
 		lookup := joinPath(prefix, key)
 		meta := resolveMeta(lookup, field, descs)
 		docs, more := directField(key, lookup, elem, field.Tag, meta, descs)
-		fields = append(fields, docs...)
+		if !meta.Hidden {
+			fields = append(fields, docs...)
+		}
 		refs = append(refs, more...)
 	}
 	return fields, refs
@@ -158,9 +161,9 @@ func walkStruct(t reflect.Type, path string, descs map[string]FieldMeta, visitin
 }
 
 func walkField(field reflect.StructField, parent string, descs map[string]FieldMeta, visiting map[reflect.Type]bool) []FieldDoc {
-	if !field.IsExported() {
-		return nil
-	}
+	//if !field.IsExported() {
+	//	return nil
+	//}
 
 	key, skip, embed := fieldKey(field)
 	if skip {

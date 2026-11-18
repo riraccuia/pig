@@ -71,6 +71,7 @@ const (
 	FLAG_WRED_TH      = "wt"
 	FLAG_NETCAT       = "nc"
 	FLAG_ACCEPT_ONCE  = "o"
+	FLAG_HTTP_PROXY   = "http-proxy"
 
 	FLAG_DOCS_CONFIG = FLAG_MAIN_CONFIG
 	FLAG_DOCS_ENV    = "env"
@@ -96,6 +97,7 @@ var pigFlags = map[string][3]string{
 	FLAG_ROUTE:        {FLAG_ROUTE, "c", "Route subnets through the tunnel. Use 'full4', 'full6', 'full' (as shortcuts for full tunnel routing) or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'."},
 	FLAG_NETCAT:       {FLAG_NETCAT, "a", "Enables netcat mode: stdin is redirected to the stdout of the connected peer (and vice versa) over the encrypted tunnel."},
 	FLAG_ACCEPT_ONCE:  {FLAG_ACCEPT_ONCE, "l", "Accept one client, then exit after it disconnects."},
+	FLAG_HTTP_PROXY:   {FLAG_HTTP_PROXY, "c", "Listen address [host]:port. Exposes a local HTTP proxy server whose outgoing traffic always traverses the tunnel."},
 	// scripting settings
 	FLAG_SCRIPT: {FLAG_SCRIPT, "c", "Takes the path to an executable file that will be called on tunnel events. See '" + binaryName + " -docs env' for the list of environment variables that are passed to the script."},
 	// logging settings
@@ -156,6 +158,7 @@ type Flags struct {
 	toConfig       string
 	netcat         bool
 	acceptOnce     bool
+	httpProxy      string
 }
 
 func parsePigFlags(mode Mode, flagSet *flag.FlagSet) *Flags {
@@ -189,6 +192,11 @@ func parsePigFlags(mode Mode, flagSet *flag.FlagSet) *Flags {
 			os.Exit(1)
 		}
 	})
+	if isFlagPassed(flagSet, FLAG_HTTP_PROXY) && isFlagPassed(flagSet, FLAG_NETCAT) {
+		fmt.Fprintf(os.Stderr, "The '-%s' and '-%s' flags cannot be used together.\n\n", FLAG_HTTP_PROXY, FLAG_NETCAT)
+		printListenConnectUsage(mode)
+		os.Exit(1)
+	}
 	return flags
 }
 
@@ -226,7 +234,7 @@ func initPig(mode Mode) (*config.Config, common.Logger) {
 	}
 
 	applyICESettings(cfg, flags, logger)
-	setupNetcatMode(cfg, flags, flagSet, logger)
+	setupAdapterMode(cfg, flags, flagSet, logger)
 	outputConfig(cfg, flags.toConfig)
 
 	err = cfg.Initialize()
@@ -322,6 +330,7 @@ func defineFlags(flagSet *flag.FlagSet) *Flags {
 	flagSet.StringVar(&flags.route, pigFlags[FLAG_ROUTE][0], "", pigFlags[FLAG_ROUTE][2])
 	flagSet.BoolVar(&flags.netcat, pigFlags[FLAG_NETCAT][0], false, pigFlags[FLAG_NETCAT][2])
 	flagSet.BoolVar(&flags.acceptOnce, pigFlags[FLAG_ACCEPT_ONCE][0], false, pigFlags[FLAG_ACCEPT_ONCE][2])
+	flagSet.StringVar(&flags.httpProxy, pigFlags[FLAG_HTTP_PROXY][0], "", pigFlags[FLAG_HTTP_PROXY][2])
 	// scripting settings
 	flagSet.StringVar(&flags.scriptPath, pigFlags[FLAG_SCRIPT][0], "", pigFlags[FLAG_SCRIPT][2])
 	// logging settings
@@ -358,7 +367,7 @@ func applyCommandLineFlags(cfg *config.Config, flags *Flags, mode Mode, logger c
 	// adapterCfg := &cfg.Adapter
 	//if tc.Direction == config.TunnelDirectionListen {
 	tc.Adapter = &config.AdapterConfig{}
-	adapterCfg := tc.Adapter
+	//adapterCfg := tc.Adapter
 	//}
 
 	switch flags.iceDisabled {
@@ -407,14 +416,17 @@ func applyCommandLineFlags(cfg *config.Config, flags *Flags, mode Mode, logger c
 	setConfigField(&tc.Wred.WeightFactor, flags.wredWF)
 
 	// Adapter settings
-	if flags.tunnelAddress != "" {
-		adapterCfg.TunnelAddress = strings.Split(flags.tunnelAddress, ",")
-	}
+	/*if !flags.netcat && flags.tunnelAddress != "" {
+		adapterCfg.SetTunAdapter()
+		tunCfg := &config.AdapterTunConfig{}
+		tunCfg.TunnelAddress = strings.Split(flags.tunnelAddress, ",")
+		setConfigField(&tunCfg.MTU, flags.mtu)
+		adapterCfg.AdapterConfig = tunCfg
+	}*/
 	// setConfigField(&adapterCfg.TunnelAddress[0], flags.tunnelAddress)
 
-	setConfigField(&adapterCfg.BindAdapter, flags.bindAdapter)
-	setConfigField(&adapterCfg.MTU, flags.mtu)
-	setConfigField(&adapterCfg.QueueSize, flags.queueSize)
+	setConfigField(&tc.BindAdapter, flags.bindAdapter)
+	setConfigField(&tc.QueueSize, flags.queueSize)
 
 	setConfigField(&cfg.ScriptPath, flags.scriptPath)
 
@@ -623,7 +635,17 @@ func tunnelRoutesFromKeyWord(k string) ([]config.Route, error) {
 	}
 }
 
-func setupNetcatMode(cfg *config.Config, flags *Flags, flagSet *flag.FlagSet, logger common.Logger) {
+func setupAdapterMode(cfg *config.Config, flags *Flags, flagSet *flag.FlagSet, logger common.Logger) {
+	if setupNetcatMode(cfg, flags, flagSet, logger) {
+		return
+	}
+	if setupHTTPProxyMode(cfg, flags, flagSet, logger) {
+		return
+	}
+	setupTunMode(cfg, flags, flagSet, logger)
+}
+
+func setupNetcatMode(cfg *config.Config, flags *Flags, flagSet *flag.FlagSet, logger common.Logger) (configured bool) {
 	if !flags.netcat {
 		return
 	}
@@ -637,6 +659,9 @@ func setupNetcatMode(cfg *config.Config, flags *Flags, flagSet *flag.FlagSet, lo
 	tc = &cfg.Tunnels[0]
 
 	tc.Adapter.SetStdIOAdapter()
+	stdioCfg := &config.AdapterStdIOConfig{}
+	setConfigField(&stdioCfg.MTU, flags.mtu)
+	tc.Adapter.AdapterConfig = stdioCfg
 	tc.ReconnectInterval = -1
 	tc.Wred.MaxDropProbability = -1
 
@@ -646,4 +671,54 @@ func setupNetcatMode(cfg *config.Config, flags *Flags, flagSet *flag.FlagSet, lo
 		cfg.LogConfig.Level = "disabled"
 		logger.SetLevel("disabled")
 	}
+	return true
+}
+
+func setupHTTPProxyMode(cfg *config.Config, flags *Flags, flagSet *flag.FlagSet, logger common.Logger) (configured bool) {
+	if flags.httpProxy == "" {
+		return
+	}
+
+	var tc *config.TunnelConfig
+
+	if len(cfg.Tunnels) == 0 {
+		logger.Fatalf("HTTP proxy mode requires a tunnel")
+		return
+	}
+
+	if isFlagPassed(flagSet, FLAG_ROUTE) {
+		logger.Fatalf("HTTP proxy mode does not support the '-%s' flag", FLAG_ROUTE)
+		return
+	}
+
+	tc = &cfg.Tunnels[0]
+
+	tc.Adapter.SetHTTPProxyAdapter()
+	httpProxyCfg := &config.AdapterHTTPProxyConfig{}
+	setConfigField(&httpProxyCfg.MTU, flags.mtu)
+	tc.Adapter.AdapterConfig = httpProxyCfg
+	httpProxyCfg.ListenAddress = flags.httpProxy
+
+	cfg.RouteConfig.Enabled = false
+	return true
+}
+
+func setupTunMode(cfg *config.Config, flags *Flags, flagSet *flag.FlagSet, logger common.Logger) {
+	var tc *config.TunnelConfig
+
+	if len(cfg.Tunnels) == 0 {
+		logger.Fatalf("Tun mode requires a tunnel")
+		return
+	}
+
+	tc = &cfg.Tunnels[0]
+
+	tc.Adapter.SetTunAdapter()
+	tunCfg := &config.AdapterTunConfig{}
+	setConfigField(&tunCfg.MTU, flags.mtu)
+	if flags.tunnelAddress != "" {
+		tunCfg.TunnelAddress = strings.Split(flags.tunnelAddress, ",")
+	}
+	tc.Adapter.AdapterConfig = tunCfg
+
 }

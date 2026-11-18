@@ -24,7 +24,7 @@ import (
 
 const tunName = "pig"
 
-func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
+func NewTunAdapter(config *AdapterConfig) (common.TunnelAdapter, error) {
 	//wintun.SetLogger(nil)
 
 	ifName := tunName

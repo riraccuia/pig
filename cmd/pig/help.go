@@ -64,6 +64,7 @@ func printListenConnectUsage(mode Mode) {
 	printFlagMode(w, mode, pigFlags[FLAG_ROUTE])
 	printFlagMode(w, mode, pigFlags[FLAG_NETCAT])
 	printFlagMode(w, mode, pigFlags[FLAG_ACCEPT_ONCE])
+	printFlagMode(w, mode, pigFlags[FLAG_HTTP_PROXY])
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Scripting options:")
 	printFlagMode(w, mode, pigFlags[FLAG_SCRIPT])

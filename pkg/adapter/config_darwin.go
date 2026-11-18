@@ -83,7 +83,7 @@ type in6_aliasreq struct {
 //   - ifName: The name of the created interface
 //   - adapter: The adapter object
 //   - error: nil if successful, otherwise contains the error description
-func configureTUN(config AdapterConfig) (ifName string, adapter *utunAdapter, err error) {
+func configureTUN(config *AdapterConfig) (ifName string, adapter *utunAdapter, err error) {
 	// Create control socket
 	sockfd, err := unix.Socket(unix.AF_SYSTEM, unix.SOCK_DGRAM, SYSPROTO_CONTROL)
 	if err != nil {

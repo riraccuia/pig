@@ -8,25 +8,27 @@ OUTPUT
 OPTIONS
 
 General options:
- -s  Simple mode. Disables NAT traversal to establish direct connections, in which case ports need to be
-     opened manually on edge routers and/or firewalls.
- -id ID or friendly name for a listening node. This identifier is registered for signaling during NAT
-     traversal. When the connecting side uses it, it doesn't need to know the other node's address.
- -a  Address [host]:port. Or use -id in NAT traversal mode. In simple mode, this is the connect node's
-     target address and the listen node's bind address.
- -I  The adapter/interface to bind to, required only when '-P' is *-ICMP.
- -P  Transport protocol for the tunnel. See 'pig -docs protos' for the list of supported ones. The
-     special '.' option selects all available protocols for candidate generation with NAT traversal.
- -p  Source port to use for the connection.
- -ta Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR
-     values. Defaults to random generated /30 within 100.64.0.0/11 for connect nodes and /16 within
-     100.96.0.0/11 for listening nodes.
- -r  Reconnect interval in seconds. Defaults to 5.
- -i  Idle timeout in seconds for tunnels. Defaults to 0.
- -R  Route subnets through the tunnel. Use 'full4', 'full6', 'full' (as shortcuts for full tunnel
-     routing) or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'.
- -nc Enables netcat mode: stdin is redirected to the stdout of the connected peer (and vice versa) over
-     the encrypted tunnel.
+ -s          Simple mode. Disables NAT traversal to establish direct connections, in which case ports need to be
+             opened manually on edge routers and/or firewalls.
+ -id         ID or friendly name for a listening node. This identifier is registered for signaling during NAT
+             traversal. When the connecting side uses it, it doesn't need to know the other node's address.
+ -a          Address [host]:port. Or use -id in NAT traversal mode. In simple mode, this is the connect node's
+             target address and the listen node's bind address.
+ -I          The adapter/interface to bind to, required only when '-P' is *-ICMP.
+ -P          Transport protocol for the tunnel. See 'pig -docs protos' for the list of supported ones. The
+             special '.' option selects all available protocols for candidate generation with NAT traversal.
+ -p          Source port to use for the connection.
+ -ta         Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR
+             values. Defaults to random generated /30 within 100.64.0.0/11 for connect nodes and /16 within
+             100.96.0.0/11 for listening nodes.
+ -r          Reconnect interval in seconds. Defaults to 5.
+ -i          Idle timeout in seconds for tunnels. Defaults to 0.
+ -R          Route subnets through the tunnel. Use 'full4', 'full6', 'full' (as shortcuts for full tunnel
+             routing) or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'.
+ -nc         Enables netcat mode: stdin is redirected to the stdout of the connected peer (and vice versa) over
+             the encrypted tunnel.
+ -http-proxy Listen address [host]:port. Exposes a local HTTP proxy server whose outgoing traffic always
+             traverses the tunnel.
 
 Scripting options:
  -S Takes the path to an executable file that will be called on tunnel events. See 'pig -docs env' for
