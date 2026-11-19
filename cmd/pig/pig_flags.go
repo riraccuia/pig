@@ -262,16 +262,13 @@ func initPigConfig() *config.Config {
 		printConfigUsage()
 		os.Exit(1)
 	}
+	// this will initialize the config with proper defaults
 	cfg, err := config.LoadConfigFromFile(configPath)
 	if err != nil {
 		log.NewBlockingLogger().Fatalf("Failed to load config file: %v", err)
 	}
 	if toConfig != "" {
 		outputConfig(cfg, toConfig)
-	}
-	err = cfg.Initialize()
-	if err != nil {
-		log.NewBlockingLogger().Fatalf("Failed to initialize config: %v", err)
 	}
 	return cfg
 }

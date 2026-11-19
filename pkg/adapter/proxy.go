@@ -92,7 +92,7 @@ func NewProxyAdapter(cfg *AdapterHTTPProxyConfig) (*ProxyAdapter, error) {
 	if err := a.setupResolver(cfg.DNSServer); err != nil {
 		return nil, err
 	}
-	stack, err := netstack.New(logger, a.ip4, a.ip6, netstack.Options{MSS: cfg.MTU - proxyTCPIPOverhead})
+	stack, err := netstack.New(logger, a.ip4, a.ip6, netstack.Options{MTU: cfg.MTU})
 	if err != nil {
 		return nil, fmt.Errorf("proxy adapter: %w", err)
 	}
@@ -125,7 +125,7 @@ func (a *ProxyAdapter) parseAddress(address []string, useIPv6 bool) error {
 			}
 			a.lookupNetwork = "ip4"
 			if !useIPv6 {
-				return nil
+				break
 			}
 		}
 		if !useIPv6 {
@@ -139,11 +139,18 @@ func (a *ProxyAdapter) parseAddress(address []string, useIPv6 bool) error {
 			}
 			a.lookupNetwork = "ip6"
 			if a.ip4 != nil {
-				return nil
+				break
 			}
 		}
 	}
-	return errors.New("proxy adapter: invalid tunnel address")
+	if a.ip4 == nil && a.ip6 == nil {
+		return errors.New("proxy adapter: invalid tunnel address")
+	}
+	if a.ip4 != nil && a.ip6 != nil {
+		a.lookupNetwork = "ip"
+		return nil
+	}
+	return nil
 }
 
 func (a *ProxyAdapter) configureAddresses(address []string, useIPv6 bool) error {
@@ -172,7 +179,7 @@ func (a *ProxyAdapter) configureAddresses(address []string, useIPv6 bool) error 
 		IP:   a.ip6,
 		Mask: net.CIDRMask(prefix.Bits(), 128),
 	}
-	a.lookupNetwork = "ip6"
+	a.lookupNetwork = "ip"
 	return nil
 }
 

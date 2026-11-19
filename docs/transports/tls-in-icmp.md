@@ -37,8 +37,7 @@ Also see:
 - [Protocols](../reference/cli/protos.md) (`pig -docs protos`)
 - [Listen](../reference/cli/listen.md) / [Connect](../reference/cli/connect.md)
 - [Config reference](../reference/config/config.md)
-- [NAT traversal](../nat/nat.md)
-- [Quick start — simple mode](../getting-started/quick-start.md#simple-mode)
+- [Quick start (simple mode)](../getting-started/quick-start.md#simple-mode)
 
 ## Simple mode (recommended today)
 
@@ -88,7 +87,8 @@ Windows (Administrator PowerShell):
 pig.exe -c -s -a alice.example.com -P tls-in-icmp -I WiFi -k -nc
 ```
 
-`-a` is Alice’s host or IPv4. `-nc` turns each side into a bidirectional stdin/stdout pipe over the encrypted tunnel: type on one side, see it on the other.
+`-a` is Alice’s host or IPv4. `-nc` turns each side into a bidirectional stdin/stdout pipe over the encrypted tunnel: type on one side, see it on the other.\
+More on netcat mode: [Stdio adapter](../adapters/stdio.md).
 
 Flags used here:
 

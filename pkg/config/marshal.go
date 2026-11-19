@@ -23,12 +23,16 @@ func newAdapterSettings(adapterType string) (any, error) {
 	return nil, fmt.Errorf("invalid adapter type: %q", adapterType)
 }
 
-func (a *AdapterConfig) UnmarshalJSON(data []byte) error {
+func (a *AdapterConfig) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	rawVal, err := dec.ReadValue()
+	if err != nil {
+		return err
+	}
 	var raw struct {
 		AdapterType   string         `json:"adapter_type"`
 		AdapterConfig jsontext.Value `json:"adapter_config"`
 	}
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := json.Unmarshal(rawVal, &raw); err != nil {
 		return err
 	}
 	adapterType := cmp.Or(raw.AdapterType, string(adapter.AdapterTypeTun))
@@ -84,4 +88,14 @@ func decodeTOMLTable(table any, v any) error {
 	}
 	_, err := toml.Decode(buf.String(), v)
 	return err
+}
+
+func (ic *ICEConfig) IsZero() bool {
+	if ic == nil {
+		return true
+	}
+	if !ic.Enabled {
+		return true
+	}
+	return false
 }

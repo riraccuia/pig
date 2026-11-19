@@ -314,7 +314,7 @@ type TunnelConfig struct {
 	Auth *AuthConfig `toml:"auth" json:"auth"`
 	// optional=true
 	// desc=NAT traversal and path discovery configuration. To enable NAT traversal, set ICEConfig.Enabled=true.
-	ICE *ICEConfig `toml:"ice" json:"ice"`
+	ICE *ICEConfig `toml:"ice,omitempty" json:"ice,omitzero"`
 	// optional=true
 	// desc=Routes to enforce once the tunnel is established.
 	Routes []Route `toml:"routes" json:"routes"`
@@ -358,17 +358,17 @@ type ICEConfig struct {
 	// default=false
 	// optional=true
 	// desc=Enable ICE based network path discovery.
-	Enabled bool `toml:"enabled" json:"enabled"`
+	Enabled bool `toml:"enabled,omitempty" json:"enabled,omitzero"`
 	// optional=true
 	// desc=Protocols to use for candidate generation.
 	// Not needed when TunnelConfig.Proto is already set.
-	Protos []string `toml:"protos" json:"protos"`
+	Protos []string `toml:"protos,omitempty" json:"protos,omitzero"`
 	// optional=true
 	// desc=Optional custom STUN server to use instead of the global config.STUNAddress.
 	STUNAddress []string `toml:"stun_address,omitempty" json:"stun_address,omitzero"`
 	// optional=true
 	// desc=Signaling configuration.
-	Signaling *ICESignalingOpts `toml:"signaling" json:"signaling"`
+	Signaling *ICESignalingOpts `toml:"signaling,omitempty" json:"signaling,omitzero"`
 }
 
 func (c *ICEConfig) UseProtos() (protos []transport.ICEProtocolDefinition) {
@@ -396,23 +396,23 @@ func (c *ICEConfig) UseProtos() (protos []transport.ICEProtocolDefinition) {
 
 type ICESignalingOpts struct {
 	// desc=Use a connection ID to identify the connection, instead of the mapped IP.
-	ServerID string `toml:"server_id" json:"server_id"`
+	ServerID string `toml:"server_id,omitempty" json:"server_id,omitzero"`
 	// optional=true
 	// desc=Encryption key for the signaling messages.
-	EncryptionKey string `toml:"encryption_key" json:"encryption_key"`
+	EncryptionKey string `toml:"encryption_key,omitempty" json:"encryption_key,omitzero"`
 	// default=DefaultConnectOffset
 	// optional=true
 	// desc=Connect offset in milliseconds.
 	ConnectOffset int `toml:"connect_offset,omitzero" json:"connect_offset,omitzero"`
 	// optional=true
 	// desc=Optional MQTT broker configuration to use instead of the default one.
-	MQTT *MQTTBrokerConfig `toml:"mqtt" json:"mqtt"`
+	MQTT *MQTTBrokerConfig `toml:"mqtt,omitempty" json:"mqtt,omitzero"`
 }
 
 type MQTTBrokerConfig struct {
 	// default=DefaultICEBrokerAddress
 	// desc=MQTT broker address in the form of mqtt://host:port or ssl://host:port.
-	Address string `toml:"address" json:"address"`
+	Address string `toml:"address,omitempty" json:"address,omitzero"`
 	// optional=true
 	// desc=MQTT client ID.
 	ClientID string `toml:"client_id,omitempty" json:"client_id,omitzero"`

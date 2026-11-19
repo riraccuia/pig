@@ -33,7 +33,7 @@ const (
 	stdioUDPHeaderLen        = 8
 	stdioHeaderLen           = stdioIPHeaderLen + stdioUDPHeaderLen
 	stdioUDPPort             = 1234
-	stdioBlockSize    uint16 = 1 << 14 // bound to uint16 to avoid overflows (IP dgram max length is 65535)
+	stdioBlockSize    uint16 = 1<<16 - 1 // bound to uint16 to avoid overflows (IP dgram max length is 65535)
 )
 
 type AdapterStdIOConfig struct {
