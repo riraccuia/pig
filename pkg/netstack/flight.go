@@ -22,7 +22,7 @@ func (c *Conn) flightSize() uint32 {
 // usableWindow is how many more bytes may be sent, bounded by both the peer's
 // receive window and the congestion window (RFC 5681 §3.1).
 func (c *Conn) usableWindow() int {
-	wnd := min(c.sndWnd, c.cc.cwnd)
+	wnd := min(c.sndWnd, c.cc.sendWindow())
 	flight := c.flightSize()
 	if flight >= wnd {
 		return 0

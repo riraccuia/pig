@@ -14,16 +14,22 @@
 
 package netstack
 
-import "math"
+import (
+	"math"
+)
 
 const (
 	maxCwnd            = 1 << 30
 	dupAckThreshold    = 3
 	minSsthreshSegment = 2
+	// RFC 9406 bounds the slow-start increase per ACK to 8 segments for an
+	// unpaced sender, so ACKs covering many segments still double cwnd.
+	maxSlowStartSegments = 8
 )
 
 // newReno implements RFC 5681 congestion control with the NewReno fast
-// recovery modification of RFC 6582. All quantities are in bytes.
+// recovery modification of RFC 6582 and Limited Transmit (RFC 3042).
+// All quantities are in bytes.
 type newReno struct {
 	mss        uint32
 	cwnd       uint32
@@ -32,6 +38,11 @@ type newReno struct {
 	bytesAcked uint32
 	dupAcks    int
 	inRecovery bool
+	// limitedSent counts bytes sent beyond cwnd under Limited Transmit.
+	limitedSent uint32
+	// afterRTO is set until data outstanding at the last timeout, all of it
+	// retransmitted by the timer, is acknowledged.
+	afterRTO bool
 }
 
 func (r *newReno) init(mss, iss uint32) {
@@ -54,10 +65,33 @@ func initialWindow(mss uint32) uint32 {
 	return 4 * mss
 }
 
+// sendWindow is cwnd, widened by one segment for each of the first two
+// duplicate ACKs (RFC 3042 §2).
+func (r *newReno) sendWindow() uint32 {
+	if r.inRecovery || r.dupAcks >= dupAckThreshold {
+		return r.cwnd
+	}
+	return r.cwnd + uint32(r.dupAcks)*r.mss
+}
+
+// onTransmit records how much of n new bytes, sent with flight bytes already
+// outstanding, exceeds cwnd and therefore went out under Limited Transmit.
+func (r *newReno) onTransmit(flight, n uint32) {
+	end := flight + n
+	if end <= r.cwnd {
+		return
+	}
+	r.limitedSent += end - max(flight, r.cwnd)
+}
+
 // onNewAck handles an ACK that advances SND.UNA and reports whether the
 // first unacknowledged segment must be retransmitted (an RFC 6582 partial ACK).
 func (r *newReno) onNewAck(acked, ack, flight uint32) bool {
 	r.dupAcks = 0
+	r.limitedSent = 0
+	if seqGT(ack, r.recover) {
+		r.afterRTO = false
+	}
 	if r.inRecovery {
 		return r.onRecoveryAck(acked, ack, flight)
 	}
@@ -84,7 +118,7 @@ func (r *newReno) onRecoveryAck(acked, ack, flight uint32) bool {
 // grow applies slow start or congestion avoidance (RFC 5681 §3.1).
 func (r *newReno) grow(acked uint32) {
 	if r.cwnd < r.ssthresh {
-		r.cwnd = min(r.cwnd+min(acked, r.mss), maxCwnd)
+		r.cwnd = min(r.cwnd+min(acked, maxSlowStartSegments*r.mss), maxCwnd)
 		return
 	}
 	r.bytesAcked += acked
@@ -96,7 +130,8 @@ func (r *newReno) grow(acked uint32) {
 }
 
 // onDupAck counts duplicate ACKs and reports whether to fast retransmit
-// (RFC 6582 §3.2 steps 2 and 4).
+// (RFC 6582 §3.2 steps 2 and 4). Data sent under Limited Transmit must not
+// count towards the new ssthresh (RFC 5681 §3.2 step 2).
 func (r *newReno) onDupAck(sndUna, sndMax, flight uint32) bool {
 	if r.inRecovery {
 		r.cwnd = min(r.cwnd+r.mss, maxCwnd)
@@ -106,6 +141,8 @@ func (r *newReno) onDupAck(sndUna, sndMax, flight uint32) bool {
 	if r.dupAcks != dupAckThreshold || !seqGT(sndUna, r.recover) {
 		return false
 	}
+	flight -= min(r.limitedSent, flight)
+	r.limitedSent = 0
 	r.ssthresh = max(flight/2, minSsthreshSegment*r.mss)
 	r.recover = sndMax - 1
 	r.cwnd = r.ssthresh + dupAckThreshold*r.mss
@@ -114,11 +151,17 @@ func (r *newReno) onDupAck(sndUna, sndMax, flight uint32) bool {
 }
 
 // onRTO collapses the window to one segment (RFC 5681 §3.1, RFC 6582 §3.2 step 6).
+// A timeout of data already retransmitted by the timer keeps ssthresh, as
+// FlightSize then only reflects the one-segment window (RFC 5681 §3.1).
 func (r *newReno) onRTO(flight, sndMax uint32) {
-	r.ssthresh = max(flight/2, minSsthreshSegment*r.mss)
+	if !r.afterRTO {
+		r.ssthresh = max(flight/2, minSsthreshSegment*r.mss)
+	}
+	r.afterRTO = true
 	r.cwnd = r.mss
 	r.recover = sndMax - 1
 	r.inRecovery = false
 	r.dupAcks = 0
 	r.bytesAcked = 0
+	r.limitedSent = 0
 }

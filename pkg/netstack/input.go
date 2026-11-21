@@ -27,6 +27,9 @@ func (c *Conn) handleSegment(seg *segment) {
 
 // processSegment implements RFC 9293 §3.10.7.4 for every state after SYN-SENT.
 func (c *Conn) processSegment(seg *segment) {
+	if c.isRetransmission(seg) {
+		c.ack.reset()
+	}
 	if !c.acceptable(seg) && !c.acceptZeroWindowAck(seg) {
 		c.rejectSegment(seg)
 		return

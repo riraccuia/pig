@@ -20,19 +20,39 @@ type ringBuffer struct {
 	data []byte
 	head int
 	size int
+	cap  int
 }
 
 func newRingBuffer(capacity int) *ringBuffer {
-	return &ringBuffer{data: make([]byte, max(capacity, 1))}
+	return &ringBuffer{cap: max(capacity, 1)}
 }
 
 func (r *ringBuffer) Len() int  { return r.size }
-func (r *ringBuffer) Cap() int  { return len(r.data) }
-func (r *ringBuffer) Free() int { return len(r.data) - r.size }
+func (r *ringBuffer) Cap() int  { return r.cap }
+func (r *ringBuffer) Free() int { return r.cap - r.size }
+
+func (r *ringBuffer) grow(need int) {
+	newLen := min(r.cap, max(need, 2*len(r.data)))
+	nd := make([]byte, newLen)
+	if r.size > 0 {
+		start := r.head
+		copied := copy(nd, r.data[start:min(start+r.size, len(r.data))])
+		rest := r.size - copied
+		copy(nd[copied:copied+rest], r.data[:rest])
+	}
+	r.data = nd
+	r.head = 0
+}
 
 // Write appends as much of p as fits and returns the number of bytes stored.
 func (r *ringBuffer) Write(p []byte) int {
 	n := min(len(p), r.Free())
+	if n == 0 {
+		return 0
+	}
+	if r.size+n > len(r.data) {
+		r.grow(r.size + n)
+	}
 	tail := (r.head + r.size) % len(r.data)
 	copied := copy(r.data[tail:], p[:n])
 	copy(r.data, p[copied:n])
@@ -60,6 +80,9 @@ func (r *ringBuffer) Read(p []byte) int {
 
 func (r *ringBuffer) Discard(n int) {
 	n = min(n, r.size)
+	if n == 0 {
+		return
+	}
 	r.head = (r.head + n) % len(r.data)
 	r.size -= n
 }
@@ -67,4 +90,11 @@ func (r *ringBuffer) Discard(n int) {
 func (r *ringBuffer) Reset() {
 	r.head = 0
 	r.size = 0
+}
+
+// release empties the buffer and drops its storage. The buffer stays usable
+// and grows again on the next Write.
+func (r *ringBuffer) release() {
+	r.Reset()
+	r.data = nil
 }

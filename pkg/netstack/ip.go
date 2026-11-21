@@ -127,15 +127,16 @@ func parseIPv6(b []byte) (datagram, error) {
 
 // buildDatagram wraps t in an IPv4 or IPv6 header chosen by the address
 // family of src and fills in all checksums.
-func buildDatagram(src, dst netip.Addr, t transport) []byte {
+func (s *Stack) buildDatagram(src, dst netip.Addr, t transport) []byte {
 	if src.Is4() {
-		return buildIPv4(src, dst, t)
+		return s.buildIPv4(src, dst, t)
 	}
-	return buildIPv6(src, dst, t)
+	return s.buildIPv6(src, dst, t)
 }
 
-func buildIPv4(src, dst netip.Addr, t transport) []byte {
-	b := make([]byte, ipv4HeaderLen+t.wireLen())
+func (s *Stack) buildIPv4(src, dst netip.Addr, t transport) []byte {
+	b := allocateMem(ipv4HeaderLen + t.wireLen())
+	clear(b[:ipv4HeaderLen])
 	b[0] = 0x45
 	binary.BigEndian.PutUint16(b[2:4], uint16(len(b)))
 	b[6] = ipv4FlagDF
@@ -149,8 +150,9 @@ func buildIPv4(src, dst netip.Addr, t transport) []byte {
 	return b
 }
 
-func buildIPv6(src, dst netip.Addr, t transport) []byte {
-	b := make([]byte, ipv6HeaderLen+t.wireLen())
+func (s *Stack) buildIPv6(src, dst netip.Addr, t transport) []byte {
+	b := allocateMem(ipv6HeaderLen + t.wireLen())
+	clear(b[:60])
 	b[0] = 0x60
 	binary.BigEndian.PutUint16(b[4:6], uint16(t.wireLen()))
 	b[6] = t.proto()

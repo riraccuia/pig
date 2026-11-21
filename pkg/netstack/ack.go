@@ -81,7 +81,7 @@ func (c *Conn) onDuplicateAck() {
 		return
 	}
 	c.stats.fastRetransmits++
-	c.logger.Debugf("netstack: %s fast retransmit at seq %d", c.id, c.sndUna)
+	c.logger.Debugf("netstack: fast retransmit at seq %d", c.sndUna)
 	c.retransmitHead()
 }
 

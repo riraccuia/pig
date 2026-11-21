@@ -119,7 +119,10 @@ func (s *Server) processInboundQueue(ctx context.Context, q io.Writer, pq common
 		case pkt := <-pq:
 			totalLen := pkt.TotalLength()
 			if totalLen > 0 && totalLen <= len(pkt.Bytes()) {
-				q.Write(pkt.Bytes()[:totalLen])
+				_, err := q.Write(pkt.Bytes()[:totalLen])
+				if err != nil {
+					s.logger.Debugf("failed to write packet to adapter queue: %v", err)
+				}
 			}
 			s.bufferPool.PutBuffer(pkt.Bytes())
 		}

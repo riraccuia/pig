@@ -22,6 +22,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/riraccuia/pig/pkg/network"
 )
 
 const udpTestPort = 5353
@@ -46,9 +48,9 @@ func newUDPStack(t *testing.T, opts Options) *Stack {
 }
 
 // craftUDP builds an inbound IP datagram carrying payload from src to dst.
-func craftUDP(src, dst netip.AddrPort, payload []byte) []byte {
+func craftUDP(s *Stack, src, dst netip.AddrPort, payload []byte) []byte {
 	d := udpDatagram{srcPort: src.Port(), dstPort: dst.Port(), payload: payload}
-	return buildDatagram(src.Addr(), dst.Addr(), &d)
+	return s.buildDatagram(src.Addr(), dst.Addr(), &d)
 }
 
 func udpChecksumOffset(addr netip.Addr) int {
@@ -150,8 +152,8 @@ func TestUDPTruncatesShortReadBuffer(t *testing.T) {
 	}
 	src := netip.AddrPortFrom(netip.MustParseAddr("10.0.0.1"), 40000)
 	dst := netip.AddrPortFrom(netip.MustParseAddr("10.0.0.2"), udpTestPort)
-	s.Write(craftUDP(src, dst, []byte("truncated")))
-	s.Write(craftUDP(src, dst, []byte("next")))
+	s.Write(craftUDP(s, src, dst, []byte("truncated")))
+	s.Write(craftUDP(s, src, dst, []byte("next")))
 
 	buf := make([]byte, 5)
 	n, _ := readWithin(t, u, buf)
@@ -203,7 +205,7 @@ func TestUDPReceiveBufferOverflow(t *testing.T) {
 	src := netip.AddrPortFrom(netip.MustParseAddr("10.0.0.1"), 40000)
 	dst := netip.AddrPortFrom(netip.MustParseAddr("10.0.0.2"), udpTestPort)
 	for i := range 5 {
-		s.Write(craftUDP(src, dst, bytes.Repeat([]byte{byte(i)}, payloadLen)))
+		s.Write(craftUDP(s, src, dst, bytes.Repeat([]byte{byte(i)}, payloadLen)))
 	}
 	if got := queued(u); got != 3 {
 		t.Fatalf("queued %d datagrams, want 3", got)
@@ -218,6 +220,9 @@ func TestUDPReceiveBufferOverflow(t *testing.T) {
 	expectNoDatagram(t, u)
 }
 
+// TestUDPChecksumHandling covers RFC 768 (IPv4 may omit the checksum) and
+// RFC 8200 §8.1 (IPv6 requires it), plus corruption. Validation is opt-in
+// via Options.ChecksumValid, so the off path is checked separately.
 func TestUDPChecksumHandling(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -234,24 +239,33 @@ func TestUDPChecksumHandling(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s := newUDPStack(t, Options{})
-			u, err := s.ListenUDP(&net.UDPAddr{Port: udpTestPort})
-			if err != nil {
-				t.Fatalf("listen: %v", err)
-			}
-			src := netip.AddrPortFrom(netip.MustParseAddr(tc.src), 40000)
-			dst := netip.AddrPortFrom(netip.MustParseAddr(tc.dst), udpTestPort)
-			pkt := craftUDP(src, dst, []byte("checksum"))
-			if tc.mutate != nil {
-				tc.mutate(pkt, src.Addr())
-			}
-			if _, err := s.Write(pkt); err != nil {
-				t.Fatalf("write: %v", err)
-			}
-			if got := queued(u) == 1; got != tc.delivered {
-				t.Fatalf("delivered = %v, want %v", got, tc.delivered)
-			}
+			assertUDPDelivery(t, Options{ChecksumValid: network.TransportChecksumValid}, tc.src, tc.dst, tc.mutate, tc.delivered)
 		})
+	}
+	t.Run("skipped when validation is off", func(t *testing.T) {
+		assertUDPDelivery(t, Options{}, "fd00::1", "fd00::2", corruptLastByte, true)
+		assertUDPDelivery(t, Options{}, "fd00::1", "fd00::2", zeroUDPChecksum, true)
+	})
+}
+
+func assertUDPDelivery(t *testing.T, opts Options, srcAddr, dstAddr string, mutate func([]byte, netip.Addr), want bool) {
+	t.Helper()
+	s := newUDPStack(t, opts)
+	u, err := s.ListenUDP(&net.UDPAddr{Port: udpTestPort})
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	src := netip.AddrPortFrom(netip.MustParseAddr(srcAddr), 40000)
+	dst := netip.AddrPortFrom(netip.MustParseAddr(dstAddr), udpTestPort)
+	pkt := craftUDP(s, src, dst, []byte("checksum"))
+	if mutate != nil {
+		mutate(pkt, src.Addr())
+	}
+	if _, err := s.Write(pkt); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if got := queued(u) == 1; got != want {
+		t.Fatalf("delivered = %v, want %v", got, want)
 	}
 }
 
@@ -334,7 +348,7 @@ func TestUDPBinding(t *testing.T) {
 	}
 	src := netip.AddrPortFrom(netip.MustParseAddr("fd00::1"), 40000)
 	dst := netip.AddrPortFrom(netip.MustParseAddr("fd00::2"), udpTestPort)
-	s.Write(craftUDP(src, dst, []byte("other family")))
+	s.Write(craftUDP(s, src, dst, []byte("other family")))
 	if queued(bound4) != 0 {
 		t.Fatal("IPv4-bound socket received an IPv6 datagram")
 	}

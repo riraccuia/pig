@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
+	"github.com/riraccuia/pig/pkg/network"
 )
 
 const (
@@ -237,6 +238,14 @@ func TestTransferWithHeavyLoss(t *testing.T) {
 	t.Logf("sender stats under heavy loss: %+v", stats)
 }
 
+func TestTransferHeldBackBySmallOutboundQueue(t *testing.T) {
+	opts := Options{OutboundQueueLen: 16}
+	stats := testTransfer(t, serverIP4, 4<<20, opts, opts, nil)
+	if stats.retransmits != 0 {
+		t.Fatalf("sender retransmitted on a lossless path: %+v", stats)
+	}
+}
+
 func TestMSSNegotiation(t *testing.T) {
 	client, server := newStackPair(t, Options{MSS: 1000}, Options{}, nil)
 	clientConn, serverConn := connect(t, client, server, serverIP4)
@@ -264,7 +273,7 @@ func TestMSSDefaultWithoutOption(t *testing.T) {
 	local := netip.AddrPortFrom(netip.MustParseAddr("10.0.0.2"), testPort)
 	remote := netip.AddrPortFrom(netip.MustParseAddr("10.0.0.1"), 40000)
 	syn := segment{srcPort: remote.Port(), dstPort: local.Port(), seq: 1000, flags: flagSYN, window: 0xffff}
-	if _, err := stack.Write(buildDatagram(remote.Addr(), local.Addr(), &syn)); err != nil {
+	if _, err := stack.Write(stack.buildDatagram(remote.Addr(), local.Addr(), &syn)); err != nil {
 		t.Fatalf("write SYN: %v", err)
 	}
 
@@ -277,7 +286,7 @@ func TestMSSDefaultWithoutOption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse datagram: %v", err)
 	}
-	if !checksumValid(protoTCP, dg.src, dg.dst, dg.payload) {
+	if !network.TransportChecksumValid(protoTCP, dg.src, dg.dst, dg.payload) {
 		t.Fatal("SYN-ACK has an invalid checksum")
 	}
 	synAck, err := parseSegment(dg.payload)
@@ -309,7 +318,7 @@ func TestMSSDefaultWithoutOption(t *testing.T) {
 }
 
 func TestWindowScaleNegotiation(t *testing.T) {
-	client, server := newStackPair(t, Options{}, Options{RecvBufferSize: 1 << 20}, nil)
+	client, server := newStackPair(t, Options{RecvBufferSize: 4 << 20}, Options{RecvBufferSize: 1 << 20}, nil)
 	clientConn, serverConn := connect(t, client, server, serverIP6)
 
 	clientConn.mu.Lock()

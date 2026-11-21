@@ -65,10 +65,12 @@ type Conn struct {
 	rcvNxt       uint32
 	rcvWscale    uint8
 	rcvAdvWnd    uint32
+	rcvAdvEdge   uint32 // RCV.NXT + RCV.WND as last advertised
 	recvBuf      *ringBuffer
 	ooq          reassemblyQueue
 	finReceived  bool
 	unackedBytes int
+	ack          ackStretch
 
 	localMSS  uint32
 	wsEnabled bool
@@ -115,6 +117,7 @@ func newConn(s *Stack, id endpointID, iss uint32) *Conn {
 		localMSS:  s.opts.localMSS(id.local.Addr()),
 		wsEnabled: !s.opts.DisableWindowScale,
 		rcvWscale: s.wscale,
+		ack:       newAckStretch(),
 		rtt:       newRTTEstimator(s.opts.MinRTO),
 	}
 	c.cond = sync.NewCond(&c.mu)
@@ -222,7 +225,7 @@ func (c *Conn) setState(next State) {
 	if c.state == next {
 		return
 	}
-	c.logger.Debugf("netstack: %s %s -> %s", c.id, c.state, next)
+	c.logger.Debugf("netstack: %s -> %s", c.state, next)
 	c.state = next
 	c.cond.Broadcast()
 	c.onStateEntered(next)
@@ -253,7 +256,7 @@ func (c *Conn) onEstablished() {
 	if l.enqueue(c) {
 		return
 	}
-	c.logger.Debugf("netstack: %s accept queue full, resetting", c.id)
+	c.logger.Debugf("netstack: accept queue full, resetting")
 	c.abort(ErrBacklogFull)
 }
 

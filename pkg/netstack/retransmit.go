@@ -47,7 +47,7 @@ func (c *Conn) onRTO() {
 		c.abort(ErrTimeout)
 		return
 	}
-	c.logger.Debugf("netstack: %s retransmission timeout at seq %d, rto %v", c.id, c.sndUna, c.rtt.rto)
+	c.logger.Debugf("netstack: retransmission timeout at seq %d, rto %v", c.sndUna, c.rtt.rto)
 	c.cc.onRTO(c.flightSize(), c.sndMax)
 	c.sndNxt = c.sndUna
 	if c.finSent && !seqGT(c.sndUna, c.finSeq) {
@@ -61,7 +61,7 @@ func (c *Conn) onHandshakeTimeout() {
 		c.closeWith(ErrTimeout)
 		return
 	}
-	c.logger.Debugf("netstack: %s retransmitting SYN, attempt %d", c.id, c.retries)
+	c.logger.Debugf("netstack: retransmitting SYN, attempt %d", c.retries)
 	c.retransmitSyn()
 	c.armRTO()
 }
@@ -77,10 +77,8 @@ func (c *Conn) retransmitHead() {
 		c.resendFin()
 		return
 	}
-	payload := make([]byte, n)
-	c.sendBuf.Peek(offset, payload)
 	seg := c.newSegment(flagACK, c.sndUna)
-	seg.payload = payload
+	seg.text = c.sendText(c.sndUna, n)
 	c.emit(&seg)
 }
 
@@ -114,7 +112,7 @@ func (c *Conn) onPersist() {
 	c.emit(&seg)
 	c.stats.probes++
 	c.persistBackoff++
-	c.logger.Debugf("netstack: %s zero window probe %d", c.id, c.stats.probes)
+	c.logger.Debugf("netstack: zero window probe %d", c.stats.probes)
 	c.persistTimer.arm(c, c.persistTimeout(), c.onPersist)
 }
 

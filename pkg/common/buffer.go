@@ -14,7 +14,9 @@
 
 package common
 
-import "sync"
+import (
+	"sync"
+)
 
 const (
 	BufferSize512   = 512   // 2^9

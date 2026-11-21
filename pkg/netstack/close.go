@@ -14,7 +14,9 @@
 
 package netstack
 
-import "net"
+import (
+	"net"
+)
 
 // CloseWrite shuts down the sending direction. A FIN follows the queued data.
 func (c *Conn) CloseWrite() error {
@@ -33,7 +35,7 @@ func (c *Conn) Close() error {
 		return nil
 	}
 	c.readClosed = true
-	c.recvBuf.Reset()
+	c.recvBuf.release()
 	c.cond.Broadcast()
 	c.shutdownWrite()
 	c.armOrphanTimeout()
@@ -80,7 +82,9 @@ func (c *Conn) closeWith(err error) {
 	c.setState(StateClosed)
 }
 
-// release frees the control block once CLOSED is reached.
+// release frees the control block once CLOSED is reached. The receive buffer
+// is kept: the application may still read data that arrived before CLOSED,
+// and Close releases it.
 func (c *Conn) release() {
 	c.rtoTimer.stop()
 	c.persistTimer.stop()
@@ -90,6 +94,7 @@ func (c *Conn) release() {
 	c.readDeadline.stop()
 	c.writeDeadline.stop()
 	c.ooq.clear()
+	c.sendBuf.release()
 	c.signalReady()
 	c.cond.Broadcast()
 	c.stack.removeConn(c)

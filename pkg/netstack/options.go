@@ -25,12 +25,12 @@ const (
 	defaultPeerMSS4 = 536
 	defaultPeerMSS6 = 1220
 
-	defaultBufferSize      = 4 << 20
+	defaultBufferSize      = 2 << 20
 	defaultUDPBufferSize   = 1 << 20
 	defaultBacklog         = 128
-	defaultQueueLen        = 8192
-	defaultMSL             = 2 * time.Minute // RFC 9293 §3.4.2
-	defaultFinWait2Timeout = 60 * time.Second
+	defaultQueueLen        = 256
+	defaultMSL             = 15 * time.Second // RFC 9293 §3.4.2, originally 2 minutes
+	defaultFinWait2Timeout = 15 * time.Second
 
 	// RFC 6298 §2.1 and §2.4.
 	initialRTO       = time.Second
@@ -39,7 +39,7 @@ const (
 	clockGranularity = time.Millisecond
 
 	// RFC 9293 §3.8.6.3 caps the delay at 500ms.
-	delayedAckTimeout = 200 * time.Millisecond
+	delayedAckTimeout = 10 * time.Millisecond
 	maxSynRetries     = 6
 	maxDataRetries    = 15
 
@@ -57,6 +57,10 @@ type Options struct {
 	SendBufferSize     int
 	RecvBufferSize     int
 	DisableWindowScale bool
+	// ChecksumValid verifies an inbound TCP or UDP checksum over the IP
+	// pseudo-header. Nil skips validation. network.TransportChecksumValid is
+	// the usual implementation when one is needed.
+	ChecksumValid func(proto uint8, src, dst netip.Addr, transport []byte) bool
 	// UDPRecvBufferSize bounds the bytes queued on each UDP socket; datagrams
 	// arriving while it is full are dropped.
 	UDPRecvBufferSize int

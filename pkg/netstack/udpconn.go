@@ -90,7 +90,9 @@ func (u *UDPConn) readFrom(p []byte) (int, netip.AddrPort, error) {
 	u.queue[0] = udpPacket{}
 	u.queue = u.queue[1:]
 	u.queueBytes -= udpHeaderLen + len(pkt.data)
-	return copy(p, pkt.data), pkt.from, nil
+	n := copy(p, pkt.data)
+	releaseMem(pkt.data)
+	return n, pkt.from, nil
 }
 
 func (u *UDPConn) WriteTo(p []byte, addr net.Addr) (int, error) {
@@ -132,7 +134,7 @@ func (u *UDPConn) writeTo(p []byte, to netip.AddrPort) (int, error) {
 		return 0, ErrMessageTooLong
 	}
 	d := udpDatagram{srcPort: u.local.Port(), dstPort: to.Port(), payload: p}
-	if !u.stack.outbound.push(buildDatagram(src, to.Addr(), &d)) {
+	if !u.stack.outbound.push(u.stack.buildDatagram(src, to.Addr(), &d)) {
 		u.stack.logger.Debugf("netstack: outbound queue full or closed, dropping UDP datagram for %s", to)
 	}
 	return len(p), nil
@@ -164,7 +166,9 @@ func (u *UDPConn) deliver(from netip.AddrPort, data []byte) bool {
 	if u.queueBytes+size > u.stack.opts.UDPRecvBufferSize {
 		return false
 	}
-	u.queue = append(u.queue, udpPacket{from: from, data: append([]byte(nil), data...)})
+	buf := allocateMem(len(data))
+	copy(buf, data)
+	u.queue = append(u.queue, udpPacket{from: from, data: buf})
 	u.queueBytes += size
 	u.cond.Broadcast()
 	return true
@@ -191,6 +195,9 @@ func (u *UDPConn) markClosed() bool {
 		return false
 	}
 	u.closed = true
+	for _, pkt := range u.queue {
+		releaseMem(pkt.data)
+	}
 	u.queue = nil
 	u.queueBytes = 0
 	u.readDeadline.stop()

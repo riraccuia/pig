@@ -21,6 +21,14 @@ type oooSegment struct {
 	fin  bool
 }
 
+func (s *oooSegment) release() {
+	if len(s.data) == 0 {
+		return
+	}
+	releaseMem(s.data)
+	s.data = nil
+}
+
 // reassemblyQueue keeps out-of-order segments sorted by sequence number.
 type reassemblyQueue struct {
 	segs []oooSegment
@@ -28,7 +36,12 @@ type reassemblyQueue struct {
 
 func (q *reassemblyQueue) empty() bool { return len(q.segs) == 0 }
 
-func (q *reassemblyQueue) clear() { q.segs = nil }
+func (q *reassemblyQueue) clear() {
+	for _, seg := range q.segs {
+		seg.release()
+	}
+	q.segs = nil
+}
 
 // insert stores a copy of data, skipping segments already fully queued.
 func (q *reassemblyQueue) insert(seq uint32, data []byte, fin bool) {
@@ -40,7 +53,9 @@ func (q *reassemblyQueue) insert(seq uint32, data []byte, fin bool) {
 		}
 		i++
 	}
-	seg := oooSegment{seq: seq, data: append([]byte(nil), data...), fin: fin}
+	segData := allocateMem(len(data))
+	copy(segData, data)
+	seg := oooSegment{seq: seq, data: segData, fin: fin}
 	q.segs = append(q.segs, oooSegment{})
 	copy(q.segs[i+1:], q.segs[i:])
 	q.segs[i] = seg
@@ -58,6 +73,7 @@ func (q *reassemblyQueue) popReady(rcvNxt uint32) (oooSegment, bool) {
 		q.segs = q.segs[1:]
 		end := seg.seq + uint32(len(seg.data))
 		if seqLT(end, rcvNxt) || (end == rcvNxt && !seg.fin) {
+			seg.release()
 			continue
 		}
 		seg.data = seg.data[rcvNxt-seg.seq:]

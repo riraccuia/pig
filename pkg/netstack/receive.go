@@ -14,6 +14,8 @@
 
 package netstack
 
+import "time"
+
 // processData handles segment text and FIN (RFC 9293 §3.10.7.4, seventh and
 // eighth steps). Out-of-order segments are queued and, like segments that
 // fill a gap, acknowledged immediately (RFC 5681 §4.2).
@@ -27,6 +29,7 @@ func (c *Conn) processData(seg *segment) {
 	}
 	if seg.seq != c.rcvNxt {
 		c.ooq.insert(seg.seq, seg.payload, fin)
+		c.ack.reset()
 		c.sendAck()
 		return
 	}
@@ -38,6 +41,7 @@ func (c *Conn) processData(seg *segment) {
 		return
 	}
 	if c.drainReassembly() || filledGap {
+		c.ack.reset()
 		c.sendAck()
 		return
 	}
@@ -56,7 +60,7 @@ func (c *Conn) deliver(p []byte) {
 		return
 	}
 	if n := c.recvBuf.Write(p); n < len(p) {
-		c.logger.Errorf("netstack: %s receive buffer overflow, lost %d bytes", c.id, len(p)-n)
+		c.logger.Errorf("netstack: receive buffer overflow, lost %d bytes", len(p)-n)
 	}
 }
 
@@ -68,7 +72,10 @@ func (c *Conn) drainReassembly() bool {
 		if !ok {
 			return false
 		}
+		//c.logger.Debugf("netstack: DIAG delivered out-of-order data seq %d len %d, %d bytes below rcvNxt, reassembly len %v",
+		//	seg.seq, len(seg.data), c.rcvNxt-seg.seq, len(c.ooq.segs))
 		c.deliver(seg.data)
+		seg.release()
 		if seg.fin {
 			c.receiveFin()
 			return true
@@ -91,16 +98,47 @@ func (c *Conn) receiveFin() {
 	}
 }
 
-// scheduleAck delays the ACK as allowed by RFC 9293 §3.8.6.3, but
-// acknowledges at least every second full-sized segment.
+// scheduleAck delays the ACK as allowed by RFC 9293 §3.8.6.3 until
+// ackThreshold bytes are unacknowledged or the flow pauses. Each ACK sent at
+// the threshold stretches the next one by a segment.
 func (c *Conn) scheduleAck(n int) {
+	now := time.Now()
+	c.ack.onArrival(now)
 	c.unackedBytes += n
-	if c.unackedBytes >= 2*int(c.sendMSS) {
+	if c.unackedBytes >= c.ackThreshold() {
 		c.sendAck()
+		c.ack.grow()
 		return
 	}
 	if c.delAckTimer.active {
 		return
 	}
-	c.delAckTimer.arm(c, delayedAckTimeout, c.sendAck)
+	c.ack.oldest = now
+	c.delAckTimer.arm(c, c.ack.ackDelay(), c.onAckTimer)
+}
+
+// onAckTimer acknowledges once no data has arrived for ackDelay. A pause
+// while stretched means the sender may be short of window, so the stretch
+// snaps back.
+func (c *Conn) onAckTimer() {
+	if wait := c.ack.ackWait(time.Now()); wait > 0 {
+		c.delAckTimer.arm(c, wait, c.onAckTimer)
+		return
+	}
+	c.ack.reset()
+	c.sendAck()
+}
+
+// ackThreshold is the current stretch in full-sized segments, kept within a
+// quarter of the advertised window so the sender does not run out of window
+// waiting for the ACK.
+func (c *Conn) ackThreshold() int {
+	mss := int(c.localMSS)
+	return max(minAckStretch*mss, min(c.ack.segments*mss, int(c.rcvAdvWnd/4)))
+}
+
+// isRetransmission reports whether seg carries data below RCV.NXT, which the
+// sender only resends while recovering from loss.
+func (c *Conn) isRetransmission(seg *segment) bool {
+	return len(seg.payload) > 0 && seqLT(seg.seq, c.rcvNxt)
 }

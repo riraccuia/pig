@@ -28,6 +28,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/riraccuia/pig/pkg/common"
@@ -50,7 +51,7 @@ type Stack struct {
 	conns      map[endpointID]*Conn
 	listeners  map[uint16]*Listener
 	udpSockets map[uint16]*UDPConn
-	closed     bool
+	closed     atomic.Bool
 }
 
 // New creates a Stack. Either local address may be nil to disable that family.
@@ -133,7 +134,7 @@ func (s *Stack) Write(p []byte) (int, error) {
 }
 
 func (s *Stack) inputTCP(dg datagram) {
-	if !checksumValid(protoTCP, dg.src, dg.dst, dg.payload) {
+	if s.opts.ChecksumValid != nil && !s.opts.ChecksumValid(protoTCP, dg.src, dg.dst, dg.payload) {
 		s.logger.Debugf("netstack: dropping segment with bad checksum from %s", dg.src)
 		return
 	}
@@ -151,12 +152,10 @@ func (s *Stack) inputTCP(dg datagram) {
 
 // Close aborts every connection, listener and UDP socket and releases all resources.
 func (s *Stack) Close() error {
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
+	if !s.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	s.closed = true
+	s.mu.Lock()
 	conns := make([]*Conn, 0, len(s.conns))
 	for _, c := range s.conns {
 		conns = append(conns, c)
@@ -238,9 +237,12 @@ func (s *Stack) Listen(laddr *net.TCPAddr) (net.Listener, error) {
 	}
 	ap := netip.AddrPortFrom(addr, uint16(laddr.Port))
 
+	if s.isClosed() { // fast path
+		return nil, net.ErrClosed
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
+	if s.isClosed() {
 		return nil, net.ErrClosed
 	}
 	if _, used := s.listeners[ap.Port()]; used {
@@ -284,9 +286,12 @@ func (s *Stack) DialUDP(raddr *net.UDPAddr) (*UDPConn, error) {
 }
 
 func (s *Stack) bindUDP(local, remote netip.AddrPort) (*UDPConn, error) {
+	if s.isClosed() { // fast path
+		return nil, net.ErrClosed
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
+	if s.isClosed() {
 		return nil, net.ErrClosed
 	}
 	port := local.Port()
@@ -360,7 +365,7 @@ func (s *Stack) replyClosed(id endpointID, seg *segment) {
 }
 
 func (s *Stack) output(id endpointID, seg *segment) {
-	pkt := buildDatagram(id.local.Addr(), id.remote.Addr(), seg)
+	pkt := s.buildDatagram(id.local.Addr(), id.remote.Addr(), seg)
 	if s.outbound.push(pkt) {
 		return
 	}
@@ -368,9 +373,12 @@ func (s *Stack) output(id endpointID, seg *segment) {
 }
 
 func (s *Stack) newActiveConn(local netip.Addr, remote netip.AddrPort) (*Conn, error) {
+	if s.isClosed() { // fast path
+		return nil, net.ErrClosed
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
+	if s.isClosed() {
 		return nil, net.ErrClosed
 	}
 	port, ok := allocatePort(func(port uint16) bool {
@@ -394,7 +402,7 @@ func (s *Stack) portBusy(id endpointID) bool {
 func (s *Stack) addConn(c *Conn) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, exists := s.conns[c.id]; exists || s.closed {
+	if _, exists := s.conns[c.id]; exists || s.isClosed() {
 		return false
 	}
 	s.conns[c.id] = c
@@ -434,9 +442,7 @@ func (s *Stack) removeListener(l *Listener) {
 }
 
 func (s *Stack) isClosed() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.closed
+	return s.closed.Load()
 }
 
 func (s *Stack) isLocal(addr netip.Addr) bool {

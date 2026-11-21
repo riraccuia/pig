@@ -77,7 +77,7 @@ func (c *Conn) applyPeerOptions(opts tcpOptions) {
 		return
 	}
 	if opts.wscale > maxWindowScale {
-		c.logger.Debugf("netstack: %s peer window scale %d clamped to %d", c.id, opts.wscale, maxWindowScale)
+		c.logger.Debugf("netstack: peer window scale %d clamped to %d", opts.wscale, maxWindowScale)
 	}
 	c.sndWscale = min(opts.wscale, maxWindowScale)
 }
@@ -102,6 +102,7 @@ func (c *Conn) handleSynSent(seg *segment) {
 	}
 	c.irs = seg.seq
 	c.rcvNxt = seg.seq + 1
+	c.rcvAdvEdge = c.rcvNxt
 	c.applyPeerOptions(seg.opts)
 	// Windows in SYN segments are never scaled (RFC 7323 §2.2).
 	c.sndWnd = uint32(seg.window)

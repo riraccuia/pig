@@ -66,6 +66,7 @@ func (c *Client) readFromAdapter(ctx context.Context) {
 		}
 
 		if err != nil {
+			c.logger.Debugf("error pushing packet from adapter to outbound queue: %v", err)
 			c.bufferPool.PutBuffer(buf)
 			continue
 		}

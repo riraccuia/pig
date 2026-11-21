@@ -69,7 +69,7 @@ func (s *Stack) inputUDP(dg datagram) {
 		s.logger.Debugf("netstack: dropping UDP datagram from %s: %v", dg.src, err)
 		return
 	}
-	if !udpChecksumValid(dg, wire) {
+	if s.opts.ChecksumValid != nil && !s.udpChecksumValid(dg, wire) {
 		s.logger.Debugf("netstack: dropping UDP datagram with bad checksum from %s", dg.src)
 		return
 	}
@@ -87,9 +87,9 @@ func (s *Stack) inputUDP(dg datagram) {
 
 // udpChecksumValid accepts a zero checksum ("none computed") only over IPv4
 // (RFC 768); IPv6 makes the UDP checksum mandatory (RFC 8200 §8.1).
-func udpChecksumValid(dg datagram, wire []byte) bool {
+func (s *Stack) udpChecksumValid(dg datagram, wire []byte) bool {
 	if binary.BigEndian.Uint16(wire[6:8]) == 0 {
 		return dg.src.Is4()
 	}
-	return checksumValid(protoUDP, dg.src, dg.dst, wire)
+	return s.opts.ChecksumValid(protoUDP, dg.src, dg.dst, wire)
 }
