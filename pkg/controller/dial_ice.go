@@ -171,11 +171,11 @@ func (c *Controller) connectICEDialPath(ctx context.Context, tunnelInfo *TunnelI
 	case "icmp":
 		cfg := tunnelInfo.Tunnel.Config()
 		bindAdapter := ""
-		if cfg.Adapter == nil || cfg.Adapter.BindAdapter == "" {
+		if cfg.BindAdapter == "" {
 			logger.Error("bind adapter not configured for icmp based paths")
 			return
 		}
-		bindAdapter = cfg.Adapter.BindAdapter
+		bindAdapter = cfg.BindAdapter
 		err = icmp.SetupGlobalListenerOnce(context.Background(), c.logger, bindAdapter, false)
 		if err != nil {
 			logger.Errorf("failed to setup icmp listener: %w", err)

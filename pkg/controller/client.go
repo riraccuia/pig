@@ -74,7 +74,7 @@ func (c *Controller) needsSharedAdapter(tunnelCfgs []*config.TunnelConfig) bool 
 // setupSharedClientAdapter creates the adapter and starts the reader goroutine that dispatches
 // packets via the demux. Must be called after demux is initialized.
 func (c *Controller) setupSharedClientAdapter(ctx context.Context, cfg *config.AdapterConfig) error {
-	adapter, err := c.createAdapter(cfg, false)
+	adapter, err := c.createAdapter(c.logger, cfg, false)
 	if err != nil {
 		return err
 	}
@@ -134,14 +134,14 @@ func (c *Controller) newClientTunnel(ctx context.Context, tunnelCfg *config.Tunn
 		adapterCfg = &c.cfg.Adapter
 		useAdapter = c.demux.NewAdapter(ctx, 1024)
 	default:
-		tunAdapter, err := c.createAdapter(tunnelCfg.Adapter, false)
+		tunAdapter, err := c.createAdapter(logger, tunnelCfg.Adapter, false)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create adapter: %w", err)
 		}
 		useAdapter = tunAdapter
 	}
 
-	tunnel, err := client.NewWithAdapter(logger, adapterCfg, tunnelCfg, useAdapter, authenticator)
+	tunnel, err := client.NewWithAdapter(logger, tunnelCfg, useAdapter, authenticator)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create client: %w", err)
 	}

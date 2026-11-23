@@ -23,26 +23,34 @@ import (
 type AdapterType string
 
 const (
-	AdapterTypeTun   AdapterType = "tun"
-	AdapterTypeStdio AdapterType = "stdio"
+	AdapterTypeTun       AdapterType = "tun"
+	AdapterTypeStdio     AdapterType = "stdio"
+	AdapterTypeHTTPProxy AdapterType = "http_proxy"
 )
 
 type AdapterConfig struct {
 	Type    AdapterType
 	Address []string
 	MTU     int
-	// MultiQueue enables tun multi-queue support
-	// It is only supported on Linux
+	// MultiQueue enables tun multi-queue support.
+	// It is only valid on Linux platforms.
 	MultiQueue bool
+	Logger     common.Logger
 }
 
-func NewAdapter(cfg AdapterConfig) (common.TunnelAdapter, error) {
-	switch cfg.Type {
+func NewAdapter(logger common.Logger, adapterType AdapterType, cfg any) (common.TunnelAdapter, error) {
+	switch adapterType {
 	case AdapterTypeTun:
-		return newAdapter(cfg)
+		cfg := cfg.(*AdapterConfig)
+		return NewTunAdapter(cfg)
 	case AdapterTypeStdio:
+		cfg := cfg.(*AdapterStdIOConfig)
 		return NewStdioAdapter(cfg)
+	case AdapterTypeHTTPProxy:
+		cfg := cfg.(*AdapterHTTPProxyConfig)
+		cfg.Logger = logger
+		return NewProxyAdapter(cfg)
 	default:
-		return nil, fmt.Errorf("invalid adapter type: %s", cfg.Type)
+		return nil, fmt.Errorf("invalid adapter type: %s", adapterType)
 	}
 }

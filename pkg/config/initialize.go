@@ -15,6 +15,7 @@
 package config
 
 import (
+	"cmp"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -25,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/riraccuia/pig/pkg/adapter"
 	"github.com/riraccuia/pig/pkg/network"
 )
 
@@ -45,13 +47,11 @@ var (
 	DefaultICEProtocol      = TransportWS
 	DefaultICESTUNServer    = "stun.nextcloud.com:443"
 
+	DefaultAdapterType           = string(adapter.AdapterTypeTun)
 	DefaultConnectBasePrefixV4   = "100.64.0.0/11"
 	DefaultListenBasePrefixV4    = "100.96.0.0/11"
 	DefaultConnectPrefixLengthV4 = 30
 	DefaultListenPrefixLengthV4  = 16
-
-	DefaultStdioConnectPrefix = "100.64.0.1/32"
-	DefaultStdioListenPrefix  = "100.64.0.1/30"
 
 	DefaultConnectOffset = time.Millisecond * 500
 
@@ -95,7 +95,7 @@ func (c *Config) Initialize() error {
 
 	c.MQTTBroker.Initialize()
 
-	if c.hasDefaultOrConnectTunnels() || !c.Adapter.IsZero() {
+	if c.needsSharedAdapter() {
 		if err := c.Adapter.InitializeDefaultAdapter(); err != nil {
 			return err
 		}
@@ -127,16 +127,16 @@ func (c *Config) Initialize() error {
 		}
 
 		if adapterToInitialize != nil {
-			if err := adapterToInitialize.InitializeTunnelAdapter(c.Tunnels[i].Direction); err != nil {
+			if err := adapterToInitialize.InitializeAdapter(c.Tunnels[i].Direction); err != nil {
 				return fmt.Errorf("tunnel %d: %w", i, err)
 			}
 		}
 
 		adapterCfg := c.AdapterForTunnel(&c.Tunnels[i])
-		if adapterCfg == nil || adapterCfg.IsZero() {
+		if adapterCfg.AdapterConfig == nil {
 			return fmt.Errorf("tunnel %d: adapter is not configured for tunnel %s", i, c.Tunnels[i].Name)
 		}
-		if err := c.Tunnels[i].Initialize(adapterCfg.BindAdapter, c.STUNAddress, &c.MQTTBroker); err != nil {
+		if err := c.Tunnels[i].Initialize(c.STUNAddress, &c.MQTTBroker); err != nil {
 			return fmt.Errorf("tunnel %d: %w", i, err)
 		}
 	}
@@ -147,13 +147,16 @@ func (c *Config) Initialize() error {
 	return nil
 }
 
-func (c *Config) hasDefaultOrConnectTunnels() bool {
+func (c *Config) needsSharedAdapter() bool {
 	for i := range c.Tunnels {
-		if c.Tunnels[i].Direction == "" || c.Tunnels[i].Direction == TunnelDirectionConnect {
+		if c.Tunnels[i].Direction != "" && c.Tunnels[i].Direction != TunnelDirectionConnect {
+			continue
+		}
+		if c.Tunnels[i].Adapter == nil {
 			return true
 		}
 	}
-	return false
+	return !c.Adapter.IsZero()
 }
 
 func (c *LogConfig) Initialize() error {
@@ -175,18 +178,41 @@ func (c *RouteConfig) Initialize() error {
 	return nil
 }
 
-func (c *AdapterConfig) InitializeTunnelAdapter(direction TunnelDirection) error {
+func (c *AdapterConfig) InitializeAdapter(direction TunnelDirection) error {
+	c.AdapterType = cmp.Or(c.AdapterType, DefaultAdapterType)
+	switch c.AdapterType {
+	case string(adapter.AdapterTypeTun):
+		if c.AdapterConfig == nil {
+			c.AdapterConfig = &AdapterTunConfig{}
+		}
+		cfg := c.AdapterConfig.(*AdapterTunConfig)
+		return cfg.Initialize(direction)
+	case string(adapter.AdapterTypeStdio):
+		if c.AdapterConfig == nil {
+			c.AdapterConfig = &AdapterStdIOConfig{}
+		}
+		cfg := c.AdapterConfig.(*AdapterStdIOConfig)
+		if cfg.MTU == 0 {
+			cfg.MTU = DefaultMTU
+		}
+	case string(adapter.AdapterTypeHTTPProxy):
+		if direction == TunnelDirectionListen {
+			return fmt.Errorf("HTTP proxy adapter is only supported for connect tunnels")
+		}
+		if c.AdapterConfig == nil {
+			c.AdapterConfig = &AdapterHTTPProxyConfig{}
+		}
+		cfg := c.AdapterConfig.(*AdapterHTTPProxyConfig)
+		if cfg.MTU == 0 {
+			cfg.MTU = DefaultMTU
+		}
+	}
+	return nil
+}
+
+func (c *AdapterTunConfig) Initialize(direction TunnelDirection) error {
 	if c.MTU == 0 {
 		c.MTU = DefaultMTU
-	}
-	if c.QueueSize == 0 {
-		c.QueueSize = DefaultQueueSize
-	}
-	if c.adapterType == "stdio" {
-		return c.InitializeStdio(direction)
-	}
-	if c.adapterType == "" {
-		c.adapterType = "tun"
 	}
 	if len(c.TunnelAddress) != 0 {
 		return nil
@@ -208,33 +234,29 @@ func (c *AdapterConfig) InitializeTunnelAdapter(direction TunnelDirection) error
 	return nil
 }
 
-func (c *AdapterConfig) InitializeStdio(direction TunnelDirection) error {
-	switch direction {
-	case TunnelDirectionConnect:
-		c.TunnelAddress = []string{DefaultStdioConnectPrefix}
-	case TunnelDirectionListen:
-		c.TunnelAddress = []string{DefaultStdioListenPrefix}
-	}
-	return nil
-}
-
 func (c *AdapterConfig) InitializeDefaultAdapter() error {
-	if c.MTU == 0 {
-		c.MTU = DefaultMTU
+	c.AdapterType = cmp.Or(c.AdapterType, string(adapter.AdapterTypeTun))
+	if c.AdapterType != string(adapter.AdapterTypeTun) {
+		return nil
 	}
-	if c.QueueSize == 0 {
-		c.QueueSize = DefaultQueueSize
+	if c.AdapterConfig == nil {
+		// no adapter config specified, use default settings
+		c.AdapterConfig = &AdapterTunConfig{}
 	}
-	if len(c.TunnelAddress) == 0 {
+	adapterConfig := c.AdapterConfig.(*AdapterTunConfig)
+	if adapterConfig.MTU == 0 {
+		adapterConfig.MTU = DefaultMTU
+	}
+	if len(adapterConfig.TunnelAddress) == 0 {
 		generatedNet, err := network.GenerateIPPrefix(DefaultConnectBasePrefixV4, DefaultConnectPrefixLengthV4, true)
 		if err != nil {
 			return fmt.Errorf("failed to generate tunnel adapter address: %w", err)
 		}
-		c.TunnelAddress = []string{generatedNet.String()}
+		adapterConfig.TunnelAddress = []string{generatedNet.String()}
 		return nil
 	}
 	hasV4Address := false
-	for _, address := range c.TunnelAddress {
+	for _, address := range adapterConfig.TunnelAddress {
 		if _, ipNet, err := net.ParseCIDR(address); err == nil && ipNet.IP.To4() != nil {
 			hasV4Address = true
 			break
@@ -247,16 +269,13 @@ func (c *AdapterConfig) InitializeDefaultAdapter() error {
 	if err != nil {
 		return fmt.Errorf("failed to generate tunnel adapter address: %w", err)
 	}
-	c.TunnelAddress = append(c.TunnelAddress, generatedNet.String())
+	adapterConfig.TunnelAddress = append(adapterConfig.TunnelAddress, generatedNet.String())
 	return nil
 }
 
-func (c *TunnelConfig) Initialize(bindAdapter string, globalStunServers []string, defaultMqttBroker *MQTTBrokerConfig) error {
+func (c *TunnelConfig) Initialize(globalStunServers []string, defaultMqttBroker *MQTTBrokerConfig) error {
 	if c.ICE == nil {
 		c.ICE = &ICEConfig{Enabled: false}
-	}
-	if c.Adapter != nil && c.Adapter.BindAdapter != "" {
-		bindAdapter = c.Adapter.BindAdapter
 	}
 	if c.IdleTimeout == 0 {
 		c.IdleTimeout = DefaultIdleTimeout
@@ -288,6 +307,9 @@ func (c *TunnelConfig) Initialize(bindAdapter string, globalStunServers []string
 	if c.Proto == "" {
 		c.Proto = DefaultICEProtocol
 	}
+	if c.QueueSize == 0 {
+		c.QueueSize = DefaultQueueSize
+	}
 
 	/*if c.Direction == TunnelDirectionConnect {
 		if err := resolveTargetAddress(&c.Connect.Address, "connect"); err != nil {
@@ -303,7 +325,7 @@ func (c *TunnelConfig) Initialize(bindAdapter string, globalStunServers []string
 		}
 	}*/
 
-	if err := c.validateTransportAndTarget(bindAdapter); err != nil {
+	if err := c.validateTransportAndTarget(); err != nil {
 		return err
 	}
 
@@ -311,7 +333,7 @@ func (c *TunnelConfig) Initialize(bindAdapter string, globalStunServers []string
 		return err
 	}
 
-	if err := c.InitializeICE(bindAdapter, globalStunServers, defaultMqttBroker); err != nil {
+	if err := c.InitializeICE(globalStunServers, defaultMqttBroker); err != nil {
 		return err
 	}
 
@@ -395,7 +417,7 @@ func (c *TunnelConfig) dotExpandICEProtos() []string {
 	return c.ICE.Protos
 }
 
-func (c *TunnelConfig) InitializeICE(bindAdapter string, globalStunServers []string, defaultMqttBroker *MQTTBrokerConfig) error {
+func (c *TunnelConfig) InitializeICE(globalStunServers []string, defaultMqttBroker *MQTTBrokerConfig) error {
 	if c.ICE == nil || !c.ICE.Enabled {
 		return nil
 	}
@@ -427,7 +449,7 @@ func (c *TunnelConfig) InitializeICE(bindAdapter string, globalStunServers []str
 			return fmt.Errorf("invalid ICE protocol: %s", proto)
 		case p == TransportWG:
 			hasWG = true
-		case p == TransportTLSICMP && bindAdapter == "":
+		case p == TransportTLSICMP && c.BindAdapter == "":
 			return fmt.Errorf("bind adapter not specified, but required for %s", proto)
 		}
 	}
@@ -572,7 +594,7 @@ func (c *MTLSConfig) Initialize(direction TunnelDirection) error {
 	return nil
 }
 
-func (c *TunnelConfig) validateTransportAndTarget(bindAdapter string) error {
+func (c *TunnelConfig) validateTransportAndTarget() error {
 	if c.Direction == TunnelDirectionConnect && c.needsConnectTarget() {
 		return fmt.Errorf("connect address not specified")
 	}
@@ -586,7 +608,7 @@ func (c *TunnelConfig) validateTransportAndTarget(bindAdapter string) error {
 	}
 
 	if c.Proto == TransportICMP || c.Proto == TransportTLSICMP {
-		if bindAdapter == "" {
+		if c.BindAdapter == "" {
 			return fmt.Errorf("bind adapter not specified, but required for %s", c.Proto)
 		}
 	}

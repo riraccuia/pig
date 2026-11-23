@@ -40,15 +40,11 @@ func TestStdioAdapterDataIntegrity(t *testing.T) {
 				t.Fatalf("rand.Read: %v", err)
 			}
 
-			sender, err := NewStdioAdapter(AdapterConfig{
-				Address: []string{"100.64.0.1/32"},
-			})
+			sender, err := NewStdioAdapter(&AdapterStdIOConfig{MTU: 1420})
 			if err != nil {
 				t.Fatal(err)
 			}
-			receiver, err := NewStdioAdapter(AdapterConfig{
-				Address: []string{"100.64.0.1/30"},
-			})
+			receiver, err := NewStdioAdapter(&AdapterStdIOConfig{MTU: 1420})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -107,9 +103,7 @@ func TestStdioAdapterWrapsStdinAsPacket(t *testing.T) {
 	const input = "hello"
 	wantDst := net.IPv4(100, 64, 0, 2)
 
-	a, err := NewStdioAdapter(AdapterConfig{
-		Address: []string{"100.64.0.1/30"},
-	})
+	a, err := NewStdioAdapter(&AdapterStdIOConfig{MTU: 1420})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,9 +155,7 @@ func TestStdioAdapterWrapsStdinAsPacket(t *testing.T) {
 }
 
 func TestStdioAdapterReadDeadline(t *testing.T) {
-	a, err := NewStdioAdapter(AdapterConfig{
-		Address: []string{"100.64.0.1/32"},
-	})
+	a, err := NewStdioAdapter(&AdapterStdIOConfig{MTU: 1420})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/netip"
 	"os"
 	"sync/atomic"
 	"time"
@@ -34,8 +33,12 @@ const (
 	stdioUDPHeaderLen        = 8
 	stdioHeaderLen           = stdioIPHeaderLen + stdioUDPHeaderLen
 	stdioUDPPort             = 1234
-	stdioBlockSize    uint16 = 1 << 14 // bound to uint16 to avoid overflows (IP dgram max length is 65535)
+	stdioBlockSize    uint16 = 1<<16 - 1 // bound to uint16 to avoid overflows (IP dgram max length is 65535)
 )
+
+type AdapterStdIOConfig struct {
+	MTU int
+}
 
 var _ common.TunnelAdapter = (*StdioAdapter)(nil)
 
@@ -59,15 +62,9 @@ type StdioAdapter struct {
 
 // NewStdioAdapter creates a StdioAdapter from the same AdapterConfig shape used by TUN.
 // cfg.Address must contain an IPv4 CIDR; identity (IP/IPNet) comes from that prefix.
-func NewStdioAdapter(cfg AdapterConfig) (*StdioAdapter, error) {
-	localIP, ipNet, err := parseCIDRForStdio(cfg.Address)
-	if err != nil {
-		return nil, err
-	}
-	remoteIP, err := getFirstSubnetHost(ipNet, localIP)
-	if err != nil {
-		return nil, err
-	}
+func NewStdioAdapter(cfg *AdapterStdIOConfig) (*StdioAdapter, error) {
+	localIP, ipNet, _ := net.ParseCIDR("100.64.0.1/30")
+	remoteIP := net.ParseIP("100.64.0.2")
 	return &StdioAdapter{
 		localIP:   localIP,
 		remoteIP:  remoteIP,
@@ -77,56 +74,6 @@ func NewStdioAdapter(cfg AdapterConfig) (*StdioAdapter, error) {
 		mtu:       cfg.MTU,
 		blockSize: int(stdioBlockSize),
 	}, nil
-}
-
-func parseCIDRForStdio(addresses []string) (net.IP, *net.IPNet, error) {
-	if len(addresses) == 0 {
-		return nil, nil, fmt.Errorf("address is required")
-	}
-	ip, ipNet, err := net.ParseCIDR(addresses[0])
-	if err != nil {
-		return nil, nil, fmt.Errorf("address %s: %w", addresses[0], err)
-	}
-	ip4 := ip.To4()
-	if ip4 == nil {
-		return nil, nil, fmt.Errorf("address %s: expected IPv4", addresses[0])
-	}
-	_, bits := ipNet.Mask.Size()
-	if bits != 32 {
-		return nil, nil, fmt.Errorf("address %s: need IPv4 prefix", addresses[0])
-	}
-	return ip4, ipNet, nil
-}
-
-// getFirstSubnetHost returns the first usable host in ipNet that is not localIP, or the
-// network address if the prefix is /32.
-func getFirstSubnetHost(ipNet *net.IPNet, localIP net.IP) (net.IP, error) {
-	ones, _ := ipNet.Mask.Size()
-	if ones == 32 {
-		return ipNet.IP.To4(), nil
-	}
-	addr, ok := netip.AddrFromSlice(ipNet.IP.To4())
-	if !ok {
-		return nil, fmt.Errorf("invalid network address %s", ipNet)
-	}
-	local, ok := netip.AddrFromSlice(localIP.To4())
-	if !ok {
-		return nil, fmt.Errorf("invalid local address %s", localIP)
-	}
-
-	prefix := netip.PrefixFrom(addr, ones).Masked()
-
-	var peer netip.Addr
-	for peer = prefix.Addr().Next(); ; peer = peer.Next() {
-		if peer.IsUnspecified() || !peer.IsValid() || !prefix.Contains(peer) {
-			return nil, fmt.Errorf("no peer host available in %s", ipNet)
-		}
-		if peer == local {
-			continue
-		}
-		return peer.AsSlice(), nil
-	}
-
 }
 
 func (a *StdioAdapter) Read(buf []byte) (int, error) {

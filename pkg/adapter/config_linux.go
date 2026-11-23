@@ -65,7 +65,7 @@ type ifreqMTU struct {
 // configureTUN creates and configures a TUN interface on Linux.
 // It sets up the interface with the specified name, IP address, MTU, and brings it up.
 // Supports multi-queue for better performance: https://www.kernel.org/doc/Documentation/networking/tuntap.txt
-func configureTUN(config AdapterConfig) (ifName string, adapter *tunAdapter, err error) {
+func configureTUN(config *AdapterConfig) (ifName string, adapter *tunAdapter, err error) {
 	var ifr ifreq
 	ifr.Flags = IFF_TUN | IFF_NO_PI
 

@@ -28,15 +28,15 @@ LogConfig
 +-------------+---------+----------+---------+---------------------------------------------------------------+
 
 AdapterConfig
-+----------------+----------+----------+---------+-----------------------------------------------------------+
-| Field          | Type     | Optional | Default | Description                                               |
-+----------------+----------+----------+---------+-----------------------------------------------------------+
-| tunnel_address | []string | false    | -       | CIDR format.                                              |
-| mtu            | int      | false    | 1420    | Maximum Transmission Unit.                                |
-| bind_adapter   | string?  | true     | -       | Adapter name to bind to, e.g. "eth0". Only required when  |
-|                |          |          |         | 'proto' is tls-in-icmp.                                   |
-| queue_size     | int?     | true     | 256     | Size of the network queues for the tunnel.                |
-+----------------+----------+----------+---------+-----------------------------------------------------------+
++----------------+--------+----------+---------+-------------------------------------------------------------+
+| Field          | Type   | Optional | Default | Description                                                 |
++----------------+--------+----------+---------+-------------------------------------------------------------+
+| adapter_type   | string | false    | tun     | Adapter type. This can be one of "tun", "http_proxy",       |
+|                |        |          |         | "stdio".                                                    |
+| adapter_config | any?   | true     | -       | Adapter configuration, fields depend on the adapter type.   |
+|                |        |          |         | Use AdapterTunConfig for "tun", AdapterHTTPProxyConfig for  |
+|                |        |          |         | "http_proxy", and AdapterStdIOConfig for "stdio".           |
++----------------+--------+----------+---------+-------------------------------------------------------------+
 
 RouteConfig
 +---------+----------+----------+---------+----------------------------------------------------------+
@@ -54,6 +54,9 @@ TunnelConfig
 | direction          | string         | false    | -       | Tunnel direction, either "connect" or "listen". |
 | adapter            | AdapterConfig? | true     | -       | Adapter configuration specific for this tunnel. |
 |                    |                |          |         | Mandatory when the direction is "listen".       |
+| bind_adapter       | string?        | true     | -       | Adapter name to bind to, e.g. "eth0". Only      |
+|                    |                |          |         | required when 'proto' is tls-in-icmp.           |
+| queue_size         | int?           | true     | 256     | Size of the network queues for the tunnel.      |
 | connect            | ConnectTarget? | true     | -       | Connect target configuration. Use with NAT      |
 |                    |                |          |         | traversal disabled.                             |
 | listen             | ListenTarget?  | true     | -       | Listen address to bind to. Use with NAT         |
@@ -87,6 +90,35 @@ MQTTBrokerConfig
 | username  | string? | true     | -                            | MQTT username.                             |
 | password  | string? | true     | -                            | MQTT password.                             |
 +-----------+---------+----------+------------------------------+--------------------------------------------+
+
+AdapterTunConfig
++----------------+-----------+----------+---------+----------------------------------------------------------+
+| Field          | Type      | Optional | Default | Description                                              |
++----------------+-----------+----------+---------+----------------------------------------------------------+
+| tunnel_address | []string? | true     | -       | CIDR format.                                             |
+| mtu            | int?      | true     | 1420    | Maximum Transmission Unit.                               |
+| multi_queue    | bool?     | true     | -       | MultiQueue enables tun multi-queue support. It is only   |
+|                |           |          |         | valid on Linux platforms.                                |
++----------------+-----------+----------+---------+----------------------------------------------------------+
+
+AdapterHTTPProxyConfig
++----------------+-----------+----------+---------+----------------------------------------------------------+
+| Field          | Type      | Optional | Default | Description                                              |
++----------------+-----------+----------+---------+----------------------------------------------------------+
+| tunnel_address | []string? | true     | -       | CIDR format.                                             |
+| use_ipv6       | bool?     | true     | -       | Use IPv6. The proxy will attempt to resolve IPv6         |
+|                |           |          |         | addresses for targets first.                             |
+| mtu            | int?      | true     | 1420    | Maximum Transmission Unit.                               |
+| listen_address | string?   | true     | :8080   | HTTP proxy listen address.                               |
+| dns_address    | string?   | true     | -       | HTTP proxy DNS server address.                           |
++----------------+-----------+----------+---------+----------------------------------------------------------+
+
+AdapterStdIOConfig
++-------+------+----------+---------+----------------------------+
+| Field | Type | Optional | Default | Description                |
++-------+------+----------+---------+----------------------------+
+| mtu   | int? | true     | 1420    | Maximum Transmission Unit. |
++-------+------+----------+---------+----------------------------+
 
 Route
 +-------------+---------+----------+---------+---------------------------------------------------------------+

@@ -3,13 +3,12 @@ stun_global = "stun.mixvoip.com:3478"
 [mqtt_global]
 address = "ssl://broker.hivemq.com:8883"
 
+[route]
+enabled = true
+
 [log]
 # logging to stdout
 level = "info"
-
-# Connect client: adapter is top-level.
-[adapter]
-tunnel_address = ["172.31.254.1/29", "fde6:c530:8426::/64"]
 
 [[tunnels]]
 name = "to-exit"
@@ -21,6 +20,12 @@ routes = [ # Full tunnel through A (exit node).
   { destination = "2000::/3", type = "tunnel" },
   { destination = "64:ff9b::/96", type = "tunnel" }
 ]
+
+[tunnels.adapter]
+adapter_type = "tun"
+
+[tunnels.adapter.adapter_config]
+tunnel_address = ["172.31.254.1/29", "fde6:c530:8426::/64"]
 
 [tunnels.tls]
 insecure = true

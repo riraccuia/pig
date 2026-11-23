@@ -156,11 +156,11 @@ func (c *Controller) connectICEListenPath(ctx context.Context, tunnelInfo *Tunne
 	case "icmp":
 		cfg := tunnelInfo.Tunnel.Config()
 		bindAdapter := ""
-		if cfg.Adapter == nil || cfg.Adapter.BindAdapter == "" {
+		if cfg.BindAdapter == "" {
 			logger.Error("bind adapter not configured for icmp based paths")
 			return
 		}
-		bindAdapter = cfg.Adapter.BindAdapter
+		bindAdapter = cfg.BindAdapter
 		_, err = cp.ConnectICMP(ctx, logger, bindAdapter, true)
 	default:
 		_, err = cp.Connect(ctx)

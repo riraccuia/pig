@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"runtime"
 	"sync"
 
 	"github.com/riraccuia/pig/pkg/adapter"
@@ -128,16 +127,13 @@ func (c *Controller) setupLogger() error {
 	return nil
 }
 
-func (c *Controller) createAdapter(cfg *config.AdapterConfig, multiQueue bool) (common.TunnelAdapter, error) {
-	adapterCfg := adapter.AdapterConfig{
-		Type:       adapter.AdapterType(cfg.AdapterType()),
-		Address:    cfg.TunnelAddress,
-		MTU:        cfg.MTU,
-		MultiQueue: multiQueue && runtime.GOOS == "linux",
-	}
-	a, err := adapter.NewAdapter(adapterCfg)
+func (c *Controller) createAdapter(logger common.Logger, cfg *config.AdapterConfig, multiQueue bool) (common.TunnelAdapter, error) {
+	a, err := adapter.NewAdapter(logger, adapter.AdapterType(cfg.AdapterType), cfg.ToAdapterConfig())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adapter: %w", err)
+	}
+	if adapter.AdapterType(cfg.AdapterType) != adapter.AdapterTypeTun {
+		return a, nil
 	}
 	c.adapters.Store(a.Name(), a)
 	c.routeManager.ExcludeAdapterForLookup(a.Name())
@@ -167,9 +163,11 @@ func (c *Controller) TunnelsDone() <-chan struct{} {
 }
 
 func (c *Controller) Close() {
-	c.logger.Infof("Route manager shutting down, cleaning up all routes")
-	if err := c.routeManager.Cleanup(); err != nil {
-		c.logger.Errorf("Failed to cleanup routes: %v", err)
+	if c.cfg.RouteConfig.Enabled {
+		c.logger.Infof("Route manager shutting down, cleaning up all routes")
+		if err := c.routeManager.Cleanup(); err != nil {
+			c.logger.Errorf("Failed to cleanup routes: %v", err)
+		}
 	}
 
 	c.adapters.Range(func(key, value any) bool {

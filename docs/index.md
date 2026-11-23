@@ -35,6 +35,12 @@ Table of contents for pig user documentation. New guides are added here by topic
 - [WireGuard](transports/wireguard.md)
 - [TLS-in-ICMP](transports/tls-in-icmp.md)
 
+## Adapters
+
+- [TUN](adapters/tun.md)
+- [HTTP proxy](adapters/http_proxy.md)
+- [Stdio](adapters/stdio.md)
+
 ## NAT
 
 - [NAT traversal](nat/nat.md)

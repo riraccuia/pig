@@ -28,8 +28,11 @@ func TestTOMLConfigUnmarshal(t *testing.T) {
 	// Create a test configuration with ICE and signaling
 	cfg := &Config{
 		Adapter: AdapterConfig{
-			TunnelAddress: []string{"10.0.0.1/24"},
-			MTU:           1500,
+			AdapterType: "tun",
+			AdapterConfig: &AdapterTunConfig{
+				TunnelAddress: []string{"10.0.0.1/24"},
+				MTU:           1500,
+			},
 		},
 		Tunnels: []TunnelConfig{
 			{
@@ -117,10 +120,10 @@ func TestConfigInitializeUsesDirectionSpecificAdapterDefaults(t *testing.T) {
 	case TunnelDirectionListen:
 		_, baseNet, _ = net.ParseCIDR(DefaultListenBasePrefixV4)
 	}
-	_, generatedNet, _ := net.ParseCIDR(cfg.Adapter.TunnelAddress[0])
+	_, generatedNet, _ := net.ParseCIDR(cfg.Adapter.AdapterConfig.(*AdapterTunConfig).TunnelAddress[0])
 
 	if !baseNet.Contains(generatedNet.IP) {
-		t.Fatalf("unexpected connect adapter default: %s", cfg.Adapter.TunnelAddress)
+		t.Fatalf("unexpected connect adapter default: %s", cfg.Adapter.AdapterConfig.(*AdapterTunConfig).TunnelAddress)
 	}
 }
 

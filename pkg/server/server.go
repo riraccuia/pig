@@ -32,7 +32,6 @@ import (
 type Server struct {
 	logger          common.Logger
 	config          *config.TunnelConfig
-	adapterCfg      *config.AdapterConfig
 	adapter         common.TunnelAdapter
 	listener        transport.Listener
 	clients         sync.Map
@@ -52,27 +51,23 @@ type Server struct {
 
 // New creates a new Server instance with its own TUN adapter.
 func New(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *config.TunnelConfig, authenticator common.Authenticator) (*Server, error) {
-	a, err := adapter.NewAdapter(adapter.AdapterConfig{
-		Address: adapterCfg.TunnelAddress,
-		MTU:     adapterCfg.MTU,
-	})
+	a, err := adapter.NewAdapter(logger, adapter.AdapterType(adapterCfg.AdapterType), adapterCfg.ToAdapterConfig())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adapter: %w", err)
 	}
-	return NewWithAdapter(logger, adapterCfg, tunnelCfg, a, authenticator)
+	return NewWithAdapter(logger, tunnelCfg, a, authenticator)
 }
 
 // NewWithAdapter creates a new Server instance with a caller-supplied adapter.
-func NewWithAdapter(logger common.Logger, adapterCfg *config.AdapterConfig, tunnelCfg *config.TunnelConfig, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Server, error) {
+func NewWithAdapter(logger common.Logger, tunnelCfg *config.TunnelConfig, adapter common.TunnelAdapter, authenticator common.Authenticator) (*Server, error) {
 	logger.Infof("%s | Creating server with adapter %s, IP: %s, MTU %d", tunnelCfg.Name, adapter.Name(), adapter.IP(), adapter.MTU())
-	queueSize := adapterCfg.QueueSize
+	queueSize := tunnelCfg.QueueSize
 	if queueSize <= 0 {
 		queueSize = config.DefaultQueueSize
 	}
 	s := &Server{
 		logger:        logger,
 		config:        tunnelCfg,
-		adapterCfg:    adapterCfg,
 		adapter:       adapter,
 		sigError:      make(chan error),
 		outbound:      make(common.PacketQueue, queueSize),

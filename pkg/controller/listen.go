@@ -46,10 +46,10 @@ func (c *Controller) getServerListenFunc(tunnelInfo *TunnelInfo, mtu int) (func(
 
 	bindAdapter := ""
 	if cfg.Proto == config.TransportICMP || cfg.Proto == config.TransportTLSICMP {
-		if cfg.Adapter == nil || cfg.Adapter.BindAdapter == "" {
+		if cfg.BindAdapter == "" {
 			return nil, fmt.Errorf("bind adapter required but not configured")
 		}
-		bindAdapter = cfg.Adapter.BindAdapter
+		bindAdapter = cfg.BindAdapter
 	}
 
 	switch cfg.Proto {

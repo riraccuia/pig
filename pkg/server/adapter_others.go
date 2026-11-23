@@ -45,20 +45,19 @@ func (s *Server) readFromAdapter(ctx context.Context) {
 			pkt = network.IPv4Packet(buffer[:n])
 		case 6:
 			pkt = network.IPv6Packet(buffer[:n])
-			s.bufferPool.PutBuffer(buffer)
-			continue
 		}
 
 		select {
 		case s.outbound <- pkt:
 		default:
+			s.logger.Debug("failed to push packet from adapter to outbound queue, dropping packet")
 			s.bufferPool.PutBuffer(buffer)
 		}
 	}
 }
 
 func (s *Server) processInbound(ctx context.Context) {
-	pq := make(common.PacketQueue, s.adapterCfg.QueueSize)
+	pq := make(common.PacketQueue, s.config.QueueSize)
 	s.inbound = append(s.inbound, pq)
 	s.processInboundQueue(ctx, s.adapter, pq)
 }
@@ -78,6 +77,7 @@ func (s *Server) processInboundQueue(ctx context.Context, q io.Writer, pq common
 				_, err := q.Write(pkt.Bytes()[:totalLen])
 				s.bufferPool.PutBuffer(pkt.Bytes())
 				if err != nil {
+					s.logger.Debugf("failed to write packet to adapter queue: %v", err)
 					continue
 				}
 			} else {

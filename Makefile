@@ -42,7 +42,9 @@ cli-reference:
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -c -h; echo '```'; } > $(CLIHELP_DIR)/connect.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -l -h; echo '```'; } > $(CLIHELP_DIR)/listen.md; \
 	{ echo '<pre><code>'; $(GO) run ./$(PIG_DIR) -config invalid -h; echo '</code></pre>'; } | \
-		sed -e 's/ -config / \<a href="config-ref.md"\>-config \<\/a\>/g' \
+		sed -e '/^ -[a-z]*/ s/</\&lt;/g' \
+			-e '/^ -[a-z]*/ s/>/\&gt;/g' \
+			-e 's/^ -config/ \<a href="config-ref.md"\>-config<\/a\>/g' \
 		> $(CLIHELP_DIR)/config.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -docs config; echo '```'; } > $(CLIHELP_DIR)/config-ref.md; \
 	{ echo '```'; $(GO) run ./$(PIG_DIR) -stun -h; echo '```'; } > $(CLIHELP_DIR)/stun.md; \

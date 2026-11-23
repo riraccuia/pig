@@ -1,6 +1,8 @@
 <pre><code>
-Usage: pig <a href="config-ref.md">-config </a><path> [-to-cfg <json|toml>]
+Usage: pig -config <path> [-to-cfg <json|toml>]
 
- <a href="config-ref.md">-config </a>json or toml config file path.
- -to-cfg 'json' or 'toml'. Prints the configuration in the desired format and exits.
+ <a href="config-ref.md">-config</a> &lt;path&gt; (string)
+   json or toml config file path.
+ -to-cfg &lt;format&gt; (string)
+   Takes either 'json' or 'toml'. Turns the current CLI options into a config file and exits.
 </code></pre>

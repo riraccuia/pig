@@ -6,7 +6,7 @@
 
 **Pig** is a single binary that builds a direct, encrypted path, aka a tunnel, between two machines.  
 Peers find each other either automatically with NAT traversal, or with a plain `host:port` dial when you already have a reachable address.  
-Each side can expose a TUN interface (route IP traffic) or stdin/stdout (netcat-style byte streams).  
+Each side picks an [adapter](docs/index.md#adapters): a [TUN](docs/adapters/tun.md) (route IP traffic), [stdio](docs/adapters/stdio.md) (netcat-style byte streams), or a local [HTTP proxy](docs/adapters/http_proxy.md).
 Pig can handle multiple connected tunnels at the same time, and/or chain them to create mesh networks.  
 It can also connect to any [WireGuard](docs/transports/wireguard.md) server, inlcuding ones from many known VPN providers.
 
@@ -27,15 +27,11 @@ Pig's bet is on flexibility. Its data plane does not know about concrete adapter
 
 Pig can be used as: 
 
-- an **exit node**: send all (or selected) traffic from a laptop through a
-home or VPS pig (`-R full` or specific subnet/s).
-Authenticate with [JWT / OAuth / OIDC](docs/index.md#authentication).
-- a **netcat over encrypted tunnel**: chat, copy files, or attach a shell with `-nc`,
-with or without opening a listen port on the far side.
-- a **site-to-site / mesh hop**: chain pigs, or mix pig tunnels with
-WireGuard VPNs in one process.
-- a **transport lab**: pick [QUIC, TLS, WebSocket, WireGuard, DTLS,
-TLS-in-ICMP](docs/reference/cli/protos.md), or `-P .` to let pig choose.
+- an **exit node**: send all (or selected) traffic from a laptop through a home or VPS pig (`-R full` or specific subnet/s). Authenticate with [JWT / OAuth / OIDC](docs/index.md#authentication).
+- a **netcat over encrypted tunnel**: chat, copy files, or attach a shell with `-nc`, with or without opening a listen port on the far side.
+- a **site-to-site / mesh hop**: chain pigs, or mix pig tunnels with WireGuard VPNs in one process.
+- a **transport lab**: pick [QUIC, TLS, WebSocket, WireGuard, DTLS, TLS-in-ICMP](docs/reference/cli/protos.md), or `-P .` to let pig choose.
+- a **local HTTP proxy**: point apps at a local HTTP proxy so their traffic traverses the tunnel without any TUN adapter or OS level routing (See [HTTP proxy](docs/adapters/http_proxy.md) adapter).
 
 ## Getting started
 
@@ -195,6 +191,7 @@ Packages that make this project possible. Thanks to the authors for their work!
 - [rs/zerolog](https://github.com/rs/zerolog) - logging
 - [golang.zx2c4.com/wintun](https://golang.zx2c4.com/wintun) - Windows TUN driver
 - [golang.zx2c4.com/wireguard](https://golang.zx2c4.com/wireguard) - WireGuard transport
+- [elazarl/goproxy](https://github.com/elazarl/goproxy) - HTTP proxy adapter
 
 ## License
 

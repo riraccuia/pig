@@ -37,7 +37,7 @@ func (s *Server) processInbound(ctx context.Context) {
 		queues = append(queues, s.adapter)
 	}
 	for _, q := range queues {
-		pq := make(common.PacketQueue, s.adapterCfg.QueueSize)
+		pq := make(common.PacketQueue, s.config.QueueSize)
 		go s.processInboundQueue(ctx, q, pq)
 		s.inbound = append(s.inbound, pq)
 	}
@@ -119,7 +119,10 @@ func (s *Server) processInboundQueue(ctx context.Context, q io.Writer, pq common
 		case pkt := <-pq:
 			totalLen := pkt.TotalLength()
 			if totalLen > 0 && totalLen <= len(pkt.Bytes()) {
-				q.Write(pkt.Bytes()[:totalLen])
+				_, err := q.Write(pkt.Bytes()[:totalLen])
+				if err != nil {
+					s.logger.Debugf("failed to write packet to adapter queue: %v", err)
+				}
 			}
 			s.bufferPool.PutBuffer(pkt.Bytes())
 		}

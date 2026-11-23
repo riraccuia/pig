@@ -13,6 +13,7 @@ There are currently no dedicated CLI flags for WireGuard keys.
 
 Also see:
 - [Config reference](../reference/config/config.md)
+- [Pig adapters](../adapters/)
 - Env vars: `pig -docs env` or [env](../reference/cli/env.md)
 
 ## Generating keys
@@ -202,6 +203,9 @@ routes = [
 ]
 
 [tunnels.adapter]
+adapter_type = "tun"
+
+[tunnels.adapter.adapter_config]
 # This is the "Address" field from the provider's WireGuard config
 tunnel_address = ["10.10.10.10/32", "2a07:b9::2:5/128"]
 # Pig's MTU defaults to 1420, also the default MTU for WireGuard,
@@ -258,6 +262,9 @@ routes = [
 ]
 
 [tunnels.adapter]
+adapter_type = "tun"
+
+[tunnels.adapter.adapter_config]
 tunnel_address = ["10.10.10.10/32", "2a07:b9::2:5/128"]
 mtu = 1420
 
@@ -272,6 +279,8 @@ private_key = "your_vpn_private_key"
 public_key = "your_vpn_peer_public_key"
 
 # Second tunnel: pig listener in the home network
+# This tunnel has no explicit adapter configuration:
+# a default one (of type "tun") will be assigned.
 [[tunnels]]
 name = "home-pig"
 direction = "connect"

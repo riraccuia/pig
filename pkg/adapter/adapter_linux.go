@@ -25,7 +25,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func newAdapter(config AdapterConfig) (common.TunnelAdapter, error) {
+func NewTunAdapter(config *AdapterConfig) (common.TunnelAdapter, error) {
 	ifName, tun, err := configureTUN(config)
 	if err != nil {
 		return nil, err

@@ -14,158 +14,112 @@
 
 package network
 
+import (
+	"encoding/binary"
+	"net/netip"
+)
+
+// TransportChecksumValid reports whether the TCP or UDP checksum over the
+// IPv4 or IPv6 pseudo-header is correct (RFC 9293 §3.1, RFC 768, RFC 8200 §8.1).
+// A valid transport payload folds to 0xffff. UDP's IPv4-zero / IPv6-mandatory
+// rules are left to the caller.
+func TransportChecksumValid(proto uint8, src, dst netip.Addr, transport []byte) bool {
+	sum := addWords(0, src.AsSlice())             // source address
+	sum = addWords(sum, dst.AsSlice())            // destination address
+	sum += uint64(proto) + uint64(len(transport)) // protocol + length
+	sum = addWords(sum, transport)                // header and payload
+	return fold(sum) == 0xffff                    // valid ones' complement sum
+}
+
+// addWords accumulates network-order 16-bit words into a one's-complement
+// sum (RFC 1071), eight bytes at a time.
+func addWords(sum uint64, b []byte) uint64 {
+	for len(b) >= 8 {
+		sum += uint64(binary.BigEndian.Uint32(b[0:4])) // first 32-bit word
+		sum += uint64(binary.BigEndian.Uint32(b[4:8])) // second 32-bit word
+		b = b[8:]                                      // advance past the pair
+	}
+	for len(b) >= 2 {
+		sum += uint64(binary.BigEndian.Uint16(b[:2])) // leftover 16-bit word
+		b = b[2:]                                     // advance past it
+	}
+	if len(b) == 1 {
+		sum += uint64(b[0]) << 8 // odd trailing byte, high half
+	}
+	return sum
+}
+
+func fold(sum uint64) uint16 {
+	sum = sum>>32 + sum&0xffffffff // 64 → 33 bits
+	sum = sum>>16 + sum&0xffff     // 33 → 17 bits
+	sum = sum>>16 + sum&0xffff     // final end-around carry
+	return uint16(sum)
+}
+
 func (p IPv4Packet) UpdateChecksum() {
 	if p.TotalLength() > len(p) {
-		return
+		return // truncated packet
 	}
-
-	// Update IP header checksum
-	p.updateIPChecksum()
-
-	// Update transport layer checksum based on protocol
+	p.updateIPChecksum() // IP header first
 	switch p.Protocol() {
-	case 1: // ICMP
+	case ProtocolICMP:
 		p.updateICMPChecksum()
-	case 6: // TCP
+	case ProtocolTCP:
 		p.updateTCPChecksum()
-	case 17: // UDP
+	case ProtocolUDP:
 		p.updateUDPChecksum()
 	}
 }
 
 func (p IPv4Packet) updateIPChecksum() {
-	// Reset checksum field
-	p[10] = 0
-	p[11] = 0
-
-	// Calculate new checksum for IP header only
-	var sum uint32
-	headerLen := p.PayloadOffset()
-	for i := 0; i < headerLen; i += 2 {
-		sum += uint32(p[i]) << 8
-		sum += uint32(p[i+1])
-	}
-
-	sum = (sum >> 16) + (sum & 0xffff)
-	sum += sum >> 16
-
-	checksum := ^uint16(sum)
-	p[10] = byte(checksum >> 8)
-	p[11] = byte(checksum)
+	p[10], p[11] = 0, 0                              // clear field
+	sum := ^fold(addWords(0, p[:p.PayloadOffset()])) // header only
+	p[10] = byte(sum >> 8)                           // high byte
+	p[11] = byte(sum)                                // low byte
 }
 
 func (p IPv4Packet) updateTCPChecksum() {
-	offset := p.PayloadOffset()
-	tcpLen := p.TotalLength() - offset
-
-	// Reset TCP checksum field (offset + 16 is the TCP checksum location)
-	p[offset+16] = 0
-	p[offset+17] = 0
-
-	// Calculate pseudo-header sum
-	sum := p.pseudoHeaderSum(tcpLen)
-
-	// Add TCP header and payload
-	for i := 0; i < tcpLen-1; i += 2 {
-		sum += uint32(p[offset+i]) << 8
-		sum += uint32(p[offset+i+1])
-	}
-
-	if tcpLen%2 == 1 {
-		sum += uint32(p[offset+tcpLen-1]) << 8
-	}
-
-	sum = (sum >> 16) + (sum & 0xffff)
-	sum += sum >> 16
-
-	checksum := ^uint16(sum)
-	p[offset+16] = byte(checksum >> 8)
-	p[offset+17] = byte(checksum)
+	offset := p.PayloadOffset()                  // start of TCP
+	tcpLen := p.TotalLength() - offset           // TCP length
+	p[offset+16], p[offset+17] = 0, 0            // clear field
+	sum := p.pseudoHeaderSum(tcpLen)             // pseudo-header
+	sum = addWords(sum, p[offset:offset+tcpLen]) // TCP segment
+	csum := ^fold(sum)                           // one's complement
+	p[offset+16] = byte(csum >> 8)               // high byte
+	p[offset+17] = byte(csum)                    // low byte
 }
 
 func (p IPv4Packet) updateUDPChecksum() {
-	offset := p.PayloadOffset()
-
-	// Validate we have enough space for UDP header (8 bytes)
+	offset := p.PayloadOffset() // start of UDP
 	if len(p) < offset+8 {
-		return
+		return // too short for a UDP header
 	}
-
-	// Get UDP length and validate it
-	udpLen := int(uint16(p[offset+4])<<8 | uint16(p[offset+5])) //binary.BigEndian.Uint16(p[offset+4 : offset+6])
+	udpLen := int(binary.BigEndian.Uint16(p[offset+4 : offset+6])) // length field
 	if offset+udpLen > len(p) {
-		return // UDP length exceeds packet bounds
+		return // length exceeds packet
 	}
-
-	// Reset UDP checksum field (offset + 6 is the UDP checksum location)
-	p[offset+6] = 0
-	p[offset+7] = 0
-
-	// Calculate pseudo-header sum
-	sum := p.pseudoHeaderSum(int(udpLen))
-
-	// Add UDP header and payload
-	for i := 0; i < udpLen-1; i += 2 {
-		sum += uint32(p[offset+i]) << 8
-		sum += uint32(p[offset+i+1])
+	p[offset+6], p[offset+7] = 0, 0              // clear field
+	sum := p.pseudoHeaderSum(udpLen)             // pseudo-header
+	sum = addWords(sum, p[offset:offset+udpLen]) // UDP datagram
+	csum := ^fold(sum)                           // one's complement
+	if csum == 0 {
+		csum = 0xffff // 0 means "none", so use all-ones
 	}
-
-	if udpLen%2 == 1 {
-		sum += uint32(p[offset+udpLen-1]) << 8
-	}
-
-	sum = (sum >> 16) + (sum & 0xffff)
-	sum += sum >> 16
-
-	checksum := ^uint16(sum)
-	// Special case: UDP checksum 0 is replaced with all ones
-	if checksum == 0 {
-		checksum = 0xffff
-	}
-	p[offset+6] = byte(checksum >> 8)
-	p[offset+7] = byte(checksum)
+	p[offset+6] = byte(csum >> 8) // high byte
+	p[offset+7] = byte(csum)      // low byte
 }
 
 func (p IPv4Packet) updateICMPChecksum() {
-	offset := p.PayloadOffset()
-	icmpLen := p.TotalLength() - offset
-
-	// Reset ICMP checksum field
-	p[offset+2] = 0
-	p[offset+3] = 0
-
-	var sum uint32
-	for i := 0; i < icmpLen-1; i += 2 {
-		sum += uint32(p[offset+i]) << 8
-		sum += uint32(p[offset+i+1])
-	}
-
-	sum = (sum >> 16) + (sum & 0xffff)
-	sum += sum >> 16
-
-	checksum := ^uint16(sum)
-	p[offset+2] = byte(checksum >> 8)
-	p[offset+3] = byte(checksum)
+	offset := p.PayloadOffset()                          // start of ICMP
+	icmpLen := p.TotalLength() - offset                  // ICMP length
+	p[offset+2], p[offset+3] = 0, 0                      // clear field
+	csum := ^fold(addWords(0, p[offset:offset+icmpLen])) // no pseudo-header
+	p[offset+2] = byte(csum >> 8)                        // high byte
+	p[offset+3] = byte(csum)                             // low byte
 }
 
-func (p IPv4Packet) pseudoHeaderSum(transportLen int) uint32 {
-	var sum uint32
-
-	// Source IP (4 bytes)
-	sum += uint32(p[12]) << 8
-	sum += uint32(p[13])
-	sum += uint32(p[14]) << 8
-	sum += uint32(p[15])
-
-	// Destination IP (4 bytes)
-	sum += uint32(p[16]) << 8
-	sum += uint32(p[17])
-	sum += uint32(p[18]) << 8
-	sum += uint32(p[19])
-
-	// Protocol and Length
-	sum += uint32(p[9])         // Protocol
-	sum += uint32(transportLen) // TCP/UDP length
-
+func (p IPv4Packet) pseudoHeaderSum(transportLen int) uint64 {
+	sum := addWords(0, p[12:20])               // src + dst
+	sum += uint64(p[9]) + uint64(transportLen) // protocol + length
 	return sum
 }

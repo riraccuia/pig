@@ -17,9 +17,8 @@ package network
 func (p IPv6Packet) UpdateChecksum() {
 	protocol, offset, transportLen, ok := p.transportHeader()
 	if !ok {
-		return
+		return // no usable transport header
 	}
-
 	switch protocol {
 	case ipProtoTCP:
 		p.updateTCPChecksum()
@@ -32,137 +31,54 @@ func (p IPv6Packet) UpdateChecksum() {
 
 func (p IPv6Packet) updateTCPChecksum() {
 	protocol, offset, tcpLen, ok := p.transportHeader()
-	if !ok || protocol != ipProtoTCP {
-		return
+	if !ok || protocol != ipProtoTCP || len(p) < offset+20 {
+		return // missing or truncated TCP
 	}
-
-	if len(p) < offset+20 {
-		return
-	}
-
-	// Reset TCP checksum field (offset + 16 is the TCP checksum location)
-	p[offset+16] = 0
-	p[offset+17] = 0
-
-	// Calculate pseudo-header sum
-	sum := p.pseudoHeaderSum(ipProtoTCP, tcpLen)
-
-	// Add TCP header and payload
-	for i := 0; i < tcpLen-1; i += 2 {
-		sum += uint32(p[offset+i]) << 8
-		sum += uint32(p[offset+i+1])
-	}
-
-	if tcpLen%2 == 1 {
-		sum += uint32(p[offset+tcpLen-1]) << 8
-	}
-
-	sum = (sum >> 16) + (sum & 0xffff)
-	sum += sum >> 16
-
-	checksum := ^uint16(sum)
-	p[offset+16] = byte(checksum >> 8)
-	p[offset+17] = byte(checksum)
+	p[offset+16], p[offset+17] = 0, 0            // clear field
+	sum := p.pseudoHeaderSum(ipProtoTCP, tcpLen) // pseudo-header
+	sum = addWords(sum, p[offset:offset+tcpLen]) // TCP segment
+	csum := ^fold(sum)                           // one's complement
+	p[offset+16] = byte(csum >> 8)               // high byte
+	p[offset+17] = byte(csum)                    // low byte
 }
 
 func (p IPv6Packet) updateUDPChecksum() {
 	protocol, offset, transportLen, ok := p.transportHeader()
-	if !ok || protocol != ipProtoUDP {
-		return
+	if !ok || protocol != ipProtoUDP || len(p) < offset+8 {
+		return // missing or truncated UDP
 	}
-
-	// Validate we have enough space for UDP header (8 bytes)
-	if len(p) < offset+8 {
-		return
-	}
-
-	// Get UDP length and validate it (0 is allowed for IPv6 jumbograms).
-	udpLen := int(uint16(p[offset+4])<<8 | uint16(p[offset+5]))
+	udpLen := int(uint16(p[offset+4])<<8 | uint16(p[offset+5])) // length field
 	if udpLen == 0 {
-		udpLen = transportLen
+		udpLen = transportLen // jumbogram: length is zero on the wire
 	}
 	if udpLen < 8 || offset+udpLen > len(p) {
-		return
+		return // invalid length
 	}
-
-	// Reset UDP checksum field (offset + 6 is the UDP checksum location)
-	p[offset+6] = 0
-	p[offset+7] = 0
-
-	// Calculate pseudo-header sum
-	sum := p.pseudoHeaderSum(ipProtoUDP, udpLen)
-
-	// Add UDP header and payload
-	for i := 0; i < udpLen-1; i += 2 {
-		sum += uint32(p[offset+i]) << 8
-		sum += uint32(p[offset+i+1])
+	p[offset+6], p[offset+7] = 0, 0              // clear field
+	sum := p.pseudoHeaderSum(ipProtoUDP, udpLen) // pseudo-header
+	sum = addWords(sum, p[offset:offset+udpLen]) // UDP datagram
+	csum := ^fold(sum)                           // one's complement
+	if csum == 0 {
+		csum = 0xffff // 0 means "none", so use all-ones
 	}
-
-	if udpLen%2 == 1 {
-		sum += uint32(p[offset+udpLen-1]) << 8
-	}
-
-	sum = (sum >> 16) + (sum & 0xffff)
-	sum += sum >> 16
-
-	checksum := ^uint16(sum)
-	// Special case: UDP checksum 0 is replaced with all ones
-	if checksum == 0 {
-		checksum = 0xffff
-	}
-	p[offset+6] = byte(checksum >> 8)
-	p[offset+7] = byte(checksum)
+	p[offset+6] = byte(csum >> 8) // high byte
+	p[offset+7] = byte(csum)      // low byte
 }
 
 func (p IPv6Packet) updateICMPv6Checksum(offset, icmpLen int) {
 	if len(p) < offset+4 || offset+icmpLen > len(p) || icmpLen < 4 {
-		return
+		return // truncated ICMPv6
 	}
-
-	// Reset ICMPv6 checksum field
-	p[offset+2] = 0
-	p[offset+3] = 0
-
-	// ICMPv6 checksum includes IPv6 pseudo-header.
-	sum := p.pseudoHeaderSum(ipProtoICMPv6, icmpLen)
-	for i := 0; i < icmpLen-1; i += 2 {
-		sum += uint32(p[offset+i]) << 8
-		sum += uint32(p[offset+i+1])
-	}
-
-	if icmpLen%2 == 1 {
-		sum += uint32(p[offset+icmpLen-1]) << 8
-	}
-
-	sum = (sum >> 16) + (sum & 0xffff)
-	sum += sum >> 16
-
-	checksum := ^uint16(sum)
-	p[offset+2] = byte(checksum >> 8)
-	p[offset+3] = byte(checksum)
+	p[offset+2], p[offset+3] = 0, 0                  // clear field
+	sum := p.pseudoHeaderSum(ipProtoICMPv6, icmpLen) // pseudo-header required
+	sum = addWords(sum, p[offset:offset+icmpLen])    // ICMPv6 message
+	csum := ^fold(sum)                               // one's complement
+	p[offset+2] = byte(csum >> 8)                    // high byte
+	p[offset+3] = byte(csum)                         // low byte
 }
 
-func (p IPv6Packet) pseudoHeaderSum(nextHeader uint8, upperLayerLen int) uint32 {
-	var sum uint32
-
-	// Source IP (16 bytes)
-	for i := 8; i < 24; i += 2 {
-		sum += uint32(p[i]) << 8
-		sum += uint32(p[i+1])
-	}
-
-	// Destination IP (16 bytes)
-	for i := 24; i < 40; i += 2 {
-		sum += uint32(p[i]) << 8
-		sum += uint32(p[i+1])
-	}
-
-	// Upper-layer packet length (32-bit value)
-	sum += uint32(uint16(uint32(upperLayerLen) >> 16))
-	sum += uint32(uint16(upperLayerLen))
-
-	// Next Header
-	sum += uint32(nextHeader)
-
+func (p IPv6Packet) pseudoHeaderSum(nextHeader uint8, upperLayerLen int) uint64 {
+	sum := addWords(0, p[8:40])                       // src + dst
+	sum += uint64(upperLayerLen) + uint64(nextHeader) // length + next header
 	return sum
 }
