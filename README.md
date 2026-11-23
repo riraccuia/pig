@@ -191,6 +191,7 @@ Packages that make this project possible. Thanks to the authors for their work!
 - [rs/zerolog](https://github.com/rs/zerolog) - logging
 - [golang.zx2c4.com/wintun](https://golang.zx2c4.com/wintun) - Windows TUN driver
 - [golang.zx2c4.com/wireguard](https://golang.zx2c4.com/wireguard) - WireGuard transport
+- [elazarl/goproxy](https://github.com/elazarl/goproxy) - HTTP proxy adapter
 
 ## License
 
