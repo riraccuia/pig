@@ -95,6 +95,9 @@ pig-windows:
 
 pig-win: pig-windows
 
+pig-freebsd:
+	GOOS=freebsd GOARCH=amd64 PIG_BINNAME=$(PIG_BINNAME)-freebsd-amd64 $(MAKE) pig
+
 signtool-linux:
 	GOOS=linux GOARCH=amd64 SIGNTOOL_BINNAME=$(SIGNTOOL_BINNAME)-linux-amd64 $(MAKE) signtool
 

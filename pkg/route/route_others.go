@@ -35,8 +35,8 @@ func (s *stubManager) ExcludeAdapterForLookup(adapterName string) {
 	return
 }
 
-func (s *stubManager) AddRoute(route *Route) error {
-	return fmt.Errorf("route management not implemented for this platform")
+func (s *stubManager) AddRoute(route *Route) (*Route, error) {
+	return nil, fmt.Errorf("route management not implemented for this platform")
 }
 
 func (s *stubManager) RemoveRoute(route *Route) error {

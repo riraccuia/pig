@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !windows && !darwin && unix
+//go:build !windows && !darwin && !freebsd && unix
 
 package network
 
