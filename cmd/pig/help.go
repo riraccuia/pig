@@ -32,12 +32,12 @@ func printMainUsage() {
 	fmt.Fprintf(w, "Usage: %s [subcommand] [-h|--help] [options]\n", binaryName)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Subcommands:")
-	printFlag(w, "-"+FLAG_MAIN_CONNECT, "Connect mode, establish a tunnel with a listening node.")
-	printFlag(w, "-"+FLAG_MAIN_LISTEN, "Listen mode, listen for incoming connections.")
-	printFlag(w, "-"+FLAG_MAIN_STUN, "STUN (Session Traversal Utilities for NAT) tools.")
-	printFlag(w, "-"+FLAG_MAIN_CONFIG, "Load settings from a json or toml file.")
-	printFlag(w, "-"+FLAG_MAIN_DOCS, "Pig user documentation.")
-	printFlag(w, "-"+FLAG_MAIN_VERSION, "Print the version and exit.")
+	printFlag(w, "-"+FLAG_MAIN_CONNECT, "", "Connect mode, establish a tunnel with a listening node.")
+	printFlag(w, "-"+FLAG_MAIN_LISTEN, "", "Listen mode, listen for incoming connections.")
+	printFlag(w, "-"+FLAG_MAIN_STUN, "", "STUN (Session Traversal Utilities for NAT) tools.")
+	printFlag(w, "-"+FLAG_MAIN_CONFIG, "", "Load settings from a json or toml file.")
+	printFlag(w, "-"+FLAG_MAIN_DOCS, "", "Pig user documentation.")
+	printFlag(w, "-"+FLAG_MAIN_VERSION, "", "Print the version and exit.")
 	w.Flush()
 }
 
@@ -51,6 +51,10 @@ func printListenConnectUsage(mode Mode) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "OPTIONS")
 	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Adapters:")
+	printFlagMode(w, mode, pigFlags[FLAG_NETCAT])
+	printFlagMode(w, mode, pigFlags[FLAG_HTTP_PROXY])
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, "General options:")
 	printFlagMode(w, mode, pigFlags[FLAG_SIMPLE])
 	printFlagMode(w, mode, pigFlags[FLAG_ID])
@@ -62,13 +66,13 @@ func printListenConnectUsage(mode Mode) {
 	printFlagMode(w, mode, pigFlags[FLAG_RETRY])
 	printFlagMode(w, mode, pigFlags[FLAG_IDLE_TIMEOUT])
 	printFlagMode(w, mode, pigFlags[FLAG_ROUTE])
-	printFlagMode(w, mode, pigFlags[FLAG_NETCAT])
 	printFlagMode(w, mode, pigFlags[FLAG_ACCEPT_ONCE])
-	printFlagMode(w, mode, pigFlags[FLAG_HTTP_PROXY])
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Scripting options:")
-	printFlagMode(w, mode, pigFlags[FLAG_SCRIPT])
-	fmt.Fprintln(w)
+	if mode == ModeConnect {
+		fmt.Fprintln(w, "Scripting options:")
+		printFlagMode(w, mode, pigFlags[FLAG_SCRIPT])
+		fmt.Fprintln(w)
+	}
 	fmt.Fprintln(w, "Logging options:")
 	printFlagMode(w, mode, pigFlags[FLAG_VERBOSE])
 	fmt.Fprintln(w)
@@ -106,11 +110,11 @@ func printStunUsage() {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
 	fmt.Fprintf(w, "Usage: %s -%s [options]\n", binaryName, FLAG_MAIN_STUN)
 	fmt.Fprintln(w)
-	printFlag(w, "-"+stunModeFlags["c"][0], stunModeFlags["c"][1])
-	printFlag(w, "-"+stunModeFlags["l"][0], stunModeFlags["l"][1])
-	printFlag(w, "-"+stunModeFlags["proto"][0], stunModeFlags["proto"][1])
-	printFlag(w, "-"+stunModeFlags["p"][0], stunModeFlags["p"][1])
-	printFlag(w, "-"+stunModeFlags["v"][0], stunModeFlags["v"][1])
+	printFlag(w, "-"+stunModeFlags["c"][0], stunModeFlags["c"][1], stunModeFlags["c"][2])
+	printFlag(w, "-"+stunModeFlags["l"][0], stunModeFlags["l"][1], stunModeFlags["l"][2])
+	printFlag(w, "-"+stunModeFlags["proto"][0], stunModeFlags["proto"][1], stunModeFlags["proto"][2])
+	printFlag(w, "-"+stunModeFlags["p"][0], stunModeFlags["p"][1], stunModeFlags["p"][2])
+	printFlag(w, "-"+stunModeFlags["v"][0], stunModeFlags["v"][1], stunModeFlags["v"][2])
 	w.Flush()
 }
 
@@ -118,8 +122,8 @@ func printConfigUsage() {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
 	fmt.Fprintf(w, "Usage: %s -%s <path> [-%s <json|toml>]\n", binaryName, FLAG_MAIN_CONFIG, FLAG_TO_CFG)
 	fmt.Fprintln(w)
-	printFlag(w, "-"+FLAG_MAIN_CONFIG, "json or toml config file path.")
-	printFlag(w, "-"+FLAG_TO_CFG, "'json' or 'toml'. Prints the configuration in the desired format and exits.")
+	printFlag(w, "-"+FLAG_MAIN_CONFIG, "<path> (string)", "json or toml config file path.")
+	printFlag(w, "-"+FLAG_TO_CFG, pigFlags[FLAG_TO_CFG][1], pigFlags[FLAG_TO_CFG][3])
 	w.Flush()
 }
 
@@ -128,12 +132,12 @@ func printDocsUsage() {
 	fmt.Fprintf(w, "Usage: %s -%s [section] [-%s]\n", binaryName, FLAG_MAIN_DOCS, FLAG_OUT_MARKDOWN)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Options:")
-	printFlag(w, "-"+FLAG_OUT_MARKDOWN, "Output in markdown format.")
+	printFlag(w, "-"+FLAG_OUT_MARKDOWN, "", "Output in markdown format.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Sections:")
-	printFlag(w, FLAG_DOCS_CONFIG, "Configuration documentation")
-	printFlag(w, FLAG_DOCS_ENV, "Environment variables documentation")
-	printFlag(w, FLAG_DOCS_PROTOS, "List the supported transport protocols")
+	printFlag(w, FLAG_DOCS_CONFIG, "", "Configuration documentation")
+	printFlag(w, FLAG_DOCS_ENV, "", "Environment variables documentation")
+	printFlag(w, FLAG_DOCS_PROTOS, "", "List the supported transport protocols")
 	w.Flush()
 }
 
@@ -213,20 +217,20 @@ func printCliHelpTable(w *tabwriter.Writer, rows [][2]string) {
 	w.Flush()
 }
 
-func printFlagMode(w io.Writer, mode Mode, f [3]string) {
-	if mode == ModeConnect && f[1] == FLAG_MAIN_LISTEN {
+func printFlagMode(w io.Writer, mode Mode, f [4]string) {
+	if mode == ModeConnect && f[2] == FLAG_MAIN_LISTEN {
 		return
 	}
-	if mode == ModeListen && f[1] == FLAG_MAIN_CONNECT {
+	if mode == ModeListen && f[2] == FLAG_MAIN_CONNECT {
 		return
 	}
-	printFlag(w, "-"+f[0], f[2])
+	printFlag(w, "-"+f[0], f[1], f[3])
 }
 
-func printFlag(w io.Writer, flagName, flagDescription string) {
+func printFlag(w io.Writer, flagName, flagArgument, flagDescription string) {
 	lines := strings.Split(common.WrapText(flagDescription, "", false, common.TerminalWidth(11)), "\n")
-	fmt.Fprintf(w, " %s\t%s\n", flagName, lines[0])
+	fmt.Fprintf(w, " %s %s\n\t  %s\n", flagName, flagArgument, lines[0])
 	for _, line := range lines[1:] {
-		fmt.Fprintf(w, "\t%s\n", line)
+		fmt.Fprintf(w, "\t  %s\n", line)
 	}
 }

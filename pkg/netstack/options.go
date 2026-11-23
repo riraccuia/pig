@@ -41,7 +41,7 @@ const (
 	// RFC 9293 §3.8.6.3 caps the delay at 500ms.
 	delayedAckTimeout = 10 * time.Millisecond
 	maxSynRetries     = 6
-	maxDataRetries    = 15
+	maxDataRetries    = 6
 
 	maxWindowScale = 14 // RFC 7323 §2.3
 	maxWindowField = 0xffff

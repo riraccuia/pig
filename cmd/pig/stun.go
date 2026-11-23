@@ -34,12 +34,12 @@ import (
 )
 
 var (
-	stunModeFlags = map[string][2]string{
-		"proto": {"proto", "Protocol to use, valid options are: udp, tcp."},
-		"c":     {"c", "host:port of the remote stun server to query."},
-		"l":     {"l", "The local port to listen for incoming stun requests. E.g. '" + binaryName + " -stun -l 3478'."},
-		"p":     {"p", "Source port to use to query a remote server, leave empty for random port."},
-		"v":     {"v", "Print more verbose output, only useful with -l. Use 0 (default) for info, 1 for debug, 2 for trace."},
+	stunModeFlags = map[string][3]string{
+		"proto": {"proto", "<protocol> (string)", "The protocol to use, udp or tcp."},
+		"c":     {"c", "<host:port> (string)", "The address of the remote stun server to query."},
+		"l":     {"l", "<port> (int)", "The local port to listen for incoming stun requests. E.g. '" + binaryName + " -stun -l 3478'."},
+		"p":     {"p", "<port> (int)", "Source port to use to query a remote server, leave empty for random port."},
+		"v":     {"v", "<level> (int)", "Print more verbose output, only useful with -l. Use 1 (default) for info, 2 for debug, 3 for trace. 0 disables logging."},
 	}
 )
 
@@ -67,6 +67,8 @@ func parseStunFlags() *stunFlags {
 
 	if !isFlagPassed(flagSet, "l") && !isFlagPassed(flagSet, "c") {
 		fmt.Fprintln(os.Stderr, "Either -l or -c is required")
+		fmt.Fprintln(os.Stderr)
+		printStunUsage()
 		os.Exit(1)
 	}
 

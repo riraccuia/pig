@@ -80,50 +80,51 @@ const (
 	FLAG_OUT_MARKDOWN = "md"
 )
 
-// map values for all flags: flag name, [supported mode (c=connect, l=listen, a=all), description]
-var pigFlags = map[string][3]string{
+// map values for all flags: flag name, argument, [supported mode (c=connect, l=listen, a=all), description]
+var pigFlags = map[string][4]string{
 	// output settings
-	FLAG_TO_CFG: {FLAG_TO_CFG, "a", "Takes either 'json' or 'toml'. Turns the current CLI options into a config file and exits."},
+	FLAG_TO_CFG: {FLAG_TO_CFG, "<format> (string)", "a", "Takes either 'json' or 'toml'. Turns the current CLI options into a config file and exits."},
+	// adapters
+	FLAG_NETCAT:     {FLAG_NETCAT, "", "a", "Stdio adapter. Enables netcat mode: stdin is redirected to the stdout of the connected peer (and vice versa) over the encrypted tunnel."},
+	FLAG_HTTP_PROXY: {FLAG_HTTP_PROXY, "<[host]:port> (string)", "c", "Http proxy adapter. Exposes a local http proxy server over the specified address whose outgoing traffic always traverses the tunnel."},
 	// general settings
-	FLAG_SIMPLE:       {FLAG_SIMPLE, "a", "Simple mode. Disables NAT traversal to establish direct connections, in which case ports need to be opened manually on edge routers and/or firewalls."},
-	FLAG_ID:           {FLAG_ID, "a", "ID or friendly name for a listening node. This identifier is registered for signaling during NAT traversal. When the connecting side uses it, it doesn't need to know the other node's address."},
-	FLAG_ADDR:         {FLAG_ADDR, "a", "Address [host]:port. Or use -id in NAT traversal mode. In simple mode, this is the connect node's target address and the listen node's bind address."},
-	FLAG_BIND:         {FLAG_BIND, "a", "The adapter/interface to bind to, required only when '-P' is *-ICMP."},
-	FLAG_PROTO:        {FLAG_PROTO, "a", "Transport protocol for the tunnel. See '" + binaryName + " -docs protos' for the list of supported ones. The special '.' option selects all available protocols for candidate generation with NAT traversal."},
-	FLAG_SPORT:        {FLAG_SPORT, "c", "Source port to use for the connection."},
-	FLAG_TADDR:        {FLAG_TADDR, "a", "Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR values. Defaults to random generated /" + strconv.Itoa(config.DefaultConnectPrefixLengthV4) + " within " + config.DefaultConnectBasePrefixV4 + " for connect nodes and /" + strconv.Itoa(config.DefaultListenPrefixLengthV4) + " within " + config.DefaultListenBasePrefixV4 + " for listening nodes."},
-	FLAG_RETRY:        {FLAG_RETRY, "c", "Reconnect interval in seconds. Defaults to " + strconv.Itoa(config.DefaultRetryInterval) + "."},
-	FLAG_IDLE_TIMEOUT: {FLAG_IDLE_TIMEOUT, "a", "Idle timeout in seconds for tunnels. Defaults to " + strconv.Itoa(config.DefaultIdleTimeout) + "."},
-	FLAG_ROUTE:        {FLAG_ROUTE, "c", "Route subnets through the tunnel. Use 'full4', 'full6', 'full' (as shortcuts for full tunnel routing) or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'."},
-	FLAG_NETCAT:       {FLAG_NETCAT, "a", "Enables netcat mode: stdin is redirected to the stdout of the connected peer (and vice versa) over the encrypted tunnel."},
-	FLAG_ACCEPT_ONCE:  {FLAG_ACCEPT_ONCE, "l", "Accept one client, then exit after it disconnects."},
-	FLAG_HTTP_PROXY:   {FLAG_HTTP_PROXY, "c", "Listen address [host]:port. Exposes a local HTTP proxy server whose outgoing traffic always traverses the tunnel."},
+	FLAG_SIMPLE:       {FLAG_SIMPLE, "", "a", "Simple mode. Disables NAT traversal to establish direct connections, in which case ports need to be opened manually on edge routers and/or firewalls."},
+	FLAG_ID:           {FLAG_ID, "<id> (string)", "a", "ID or friendly name for a listening node. This identifier is registered for signaling during NAT traversal. When the connecting side uses it, it doesn't need to know the other node's address."},
+	FLAG_ADDR:         {FLAG_ADDR, "<[host]:port> (string)", "a", "Listen or connect address for simple mode. Use -id in NAT traversal mode."},
+	FLAG_BIND:         {FLAG_BIND, "<adapter> (string)", "a", "The adapter/interface to bind to, required only when '-P' is *-ICMP."},
+	FLAG_PROTO:        {FLAG_PROTO, "<protocol> (string)", "a", "Transport protocol for the tunnel. See '" + binaryName + " -docs protos' for the list of supported ones. The special '.' option selects all available protocols for candidate generation with NAT traversal."},
+	FLAG_SPORT:        {FLAG_SPORT, "<port> (int)", "c", "Source port to use for the connection."},
+	FLAG_TADDR:        {FLAG_TADDR, "<addr1,addr2,...> (string)", "a", "Tunnel address. Multiple addresses (IPv4 and/or IPv6) can be specified as a comma separated CIDR values. Defaults to random generated /" + strconv.Itoa(config.DefaultConnectPrefixLengthV4) + " within " + config.DefaultConnectBasePrefixV4 + " for connect nodes and /" + strconv.Itoa(config.DefaultListenPrefixLengthV4) + " within " + config.DefaultListenBasePrefixV4 + " for listening nodes."},
+	FLAG_RETRY:        {FLAG_RETRY, "<seconds> (int)", "c", "Reconnect interval in seconds. Defaults to " + strconv.Itoa(config.DefaultRetryInterval) + "."},
+	FLAG_IDLE_TIMEOUT: {FLAG_IDLE_TIMEOUT, "<seconds> (int)", "a", "Idle timeout in seconds for tunnels. Defaults to " + strconv.Itoa(config.DefaultIdleTimeout) + "."},
+	FLAG_ROUTE:        {FLAG_ROUTE, "<cidr1,cidr2,...> (string)", "c", "Route subnets through the tunnel. Use 'full4', 'full6', 'full' (as shortcuts for full tunnel routing) or a comma separated list of CIDR prefixes, e.g. '192.168.1.0/24,10.0.0.0/8'."},
+	FLAG_ACCEPT_ONCE:  {FLAG_ACCEPT_ONCE, "", "l", "Accept one client, then exit after it disconnects."},
 	// scripting settings
-	FLAG_SCRIPT: {FLAG_SCRIPT, "c", "Takes the path to an executable file that will be called on tunnel events. See '" + binaryName + " -docs env' for the list of environment variables that are passed to the script."},
+	FLAG_SCRIPT: {FLAG_SCRIPT, "<path> (string)", "c", "Takes the path to an executable file that will be called on tunnel events. See '" + binaryName + " -docs env' for the list of environment variables that are passed to the script."},
 	// logging settings
-	FLAG_VERBOSE: {FLAG_VERBOSE, "a", "Print more verbose output. Use 0 (default) for info, 1 for debug, 2 for trace."},
+	FLAG_VERBOSE: {FLAG_VERBOSE, "<level> (int)", "a", "Print more verbose output. Use 1 (default) for info, 2 for debug, 3 for trace. 0 disables logging."},
 	// certificate settings
-	FLAG_CERT: {FLAG_CERT, "a", "Path to a certificate file for mTLS."},
-	FLAG_KEY:  {FLAG_KEY, "a", "Path to a private key file for mTLS."},
+	FLAG_CERT: {FLAG_CERT, "<path> (string)", "a", "Path to a certificate file for mTLS."},
+	FLAG_KEY:  {FLAG_KEY, "<path> (string)", "a", "Path to a private key file for mTLS."},
 	// trust settings
-	FLAG_INSECURE: {FLAG_INSECURE, "a", "Insecure. Disable certificate verification."},
-	FLAG_CA:       {FLAG_CA, "a", "Path to a CA certificate or bundle file for mTLS."},
+	FLAG_INSECURE: {FLAG_INSECURE, "", "a", "Insecure. Disable certificate verification."},
+	FLAG_CA:       {FLAG_CA, "<path> (string)", "a", "Path to a CA certificate or bundle file for mTLS."},
 	// auth settings
-	FLAG_AUTH:  {FLAG_AUTH, "a", "Authentication type. Set to 'jwt' to enable JWT authentication. More types will be supported in future versions."},
-	FLAG_JWK:   {FLAG_JWK, "l", "Path to a public key file used to verify JWT tokens. This can be a local file or a URL. PEM and JWKS (json) formats are supported."},
-	FLAG_TOKEN: {FLAG_TOKEN, "c", "Sets the token string for JWT client authentication. It is recommended to populate the " + config.EnvToken.Name() + " environment variable instead of using this flag."},
+	FLAG_AUTH:  {FLAG_AUTH, "<type> (string)", "a", "Authentication type. Set to 'jwt' to enable JWT authentication. More types will be supported in future versions."},
+	FLAG_JWK:   {FLAG_JWK, "<path> (string)", "l", "Path to a public key file used to verify JWT tokens. This can be a local file or a URL. PEM and JWKS (json) formats are supported."},
+	FLAG_TOKEN: {FLAG_TOKEN, "<token> (string)", "c", "Sets the token string for JWT client authentication. It is recommended to populate the " + config.EnvToken.Name() + " environment variable instead of using this flag."},
 	// NAT traversal settings
-	FLAG_STUN:   {FLAG_STUN, "a", "STUN server to query during NAT traversal."},
-	FLAG_MQTT:   {FLAG_MQTT, "a", "MQTT broker to use for NAT traversal signaling. See '" + binaryName + " -docs env' for additional configuration options."},
-	FLAG_SIGKEY: {FLAG_SIGKEY, "a", "Encryption key for signaling messages. Connecting peers need to use the same key as the listeners."},
+	FLAG_STUN:   {FLAG_STUN, "<host:port> (string)", "a", "STUN server to query during NAT traversal."},
+	FLAG_MQTT:   {FLAG_MQTT, "<proto://host:port> (string)", "a", "MQTT broker to use for NAT traversal signaling. See '" + binaryName + " -docs env' for additional configuration options."},
+	FLAG_SIGKEY: {FLAG_SIGKEY, "<key> (string)", "a", "Encryption key for signaling messages. Connecting peers need to use the same key as the listeners."},
 	// nerd settings
-	FLAG_MTU:     {FLAG_MTU, "a", "MTU (Maximum Transmission Unit) size of the tunnel adapter."},
-	FLAG_STREAMS: {FLAG_STREAMS, "c", "Open streams. The number of individual streams that the connecting side will open with stream based protocols like quic. Defaults to the number of CPU cores."},
-	FLAG_QSIZE:   {FLAG_QSIZE, "a", "Size of the packet queues used by tunnels."},
+	FLAG_MTU:     {FLAG_MTU, "<mtu> (int)", "a", "MTU (Maximum Transmission Unit) size of the tunnel adapter. Defaults to " + strconv.Itoa(config.DefaultMTU) + "."},
+	FLAG_STREAMS: {FLAG_STREAMS, "<streams> (int)", "c", "Open streams. The number of individual streams that the connecting side will open with stream based protocols like quic. Defaults to the number of CPU cores."},
+	FLAG_QSIZE:   {FLAG_QSIZE, "<size> (int)", "a", "Size of the packet queues used by tunnels. Defaults to " + strconv.Itoa(config.DefaultQueueSize) + "."},
 	// WRED settings
-	FLAG_WRED_WF: {FLAG_WRED_WF, "a", "Weight factor for WRED, lower values mean more weight to recent packets. Defaults to " + strconv.FormatFloat(config.DefaultWredWF, 'f', -1, 64) + "."},
-	FLAG_WRED_DP: {FLAG_WRED_DP, "a", "Drop probability for WRED. Accepts decimals between 0 and 1. Defaults to " + strconv.FormatFloat(config.DefaultWredDP, 'f', -1, 64) + "."},
-	FLAG_WRED_TH: {FLAG_WRED_TH, "a", "Threshold for WRED as a fraction of the queue length. Accepts decimals between 0 and 1. Defaults to " + strconv.FormatFloat(config.DefaultWredThresh, 'f', -1, 64) + "."},
+	FLAG_WRED_WF: {FLAG_WRED_WF, "<value> (float)", "a", "Weight factor for WRED, lower values mean more weight to recent packets. Defaults to " + strconv.FormatFloat(config.DefaultWredWF, 'f', -1, 64) + "."},
+	FLAG_WRED_DP: {FLAG_WRED_DP, "<value> (float)", "a", "Drop probability for WRED. Accepts decimals between 0 and 1. Defaults to " + strconv.FormatFloat(config.DefaultWredDP, 'f', -1, 64) + "."},
+	FLAG_WRED_TH: {FLAG_WRED_TH, "<value> (float)", "a", "Threshold for WRED as a fraction of the queue length. Accepts decimals between 0 and 1. Defaults to " + strconv.FormatFloat(config.DefaultWredThresh, 'f', -1, 64) + "."},
 }
 
 type Flags struct {
@@ -313,46 +314,47 @@ func defineFlags(flagSet *flag.FlagSet) *Flags {
 	flags := &Flags{}
 
 	// output settings
-	flagSet.StringVar(&flags.toConfig, pigFlags[FLAG_TO_CFG][0], "", pigFlags[FLAG_TO_CFG][2])
+	flagSet.StringVar(&flags.toConfig, pigFlags[FLAG_TO_CFG][0], "", "")
+	// adapters
+	flagSet.BoolVar(&flags.netcat, pigFlags[FLAG_NETCAT][0], false, "")
+	flagSet.StringVar(&flags.httpProxy, pigFlags[FLAG_HTTP_PROXY][0], "", "")
 	// general settings
-	flagSet.BoolVar(&flags.iceDisabled, pigFlags[FLAG_SIMPLE][0], false, pigFlags[FLAG_SIMPLE][2])
-	flagSet.StringVar(&flags.iceSignalingID, pigFlags[FLAG_ID][0], "", pigFlags[FLAG_ID][2])
-	flagSet.StringVar(&flags.address, pigFlags[FLAG_ADDR][0], "", pigFlags[FLAG_ADDR][2])
-	flagSet.StringVar(&flags.bindAdapter, pigFlags[FLAG_BIND][0], "", pigFlags[FLAG_BIND][2])
-	flagSet.StringVar(&flags.proto, pigFlags[FLAG_PROTO][0], string(config.DefaultICEProtocol), pigFlags[FLAG_PROTO][2])
-	flagSet.IntVar(&flags.srcPort, pigFlags[FLAG_SPORT][0], 0, pigFlags[FLAG_SPORT][2])
-	flagSet.StringVar(&flags.tunnelAddress, pigFlags[FLAG_TADDR][0], "", pigFlags[FLAG_TADDR][2])
-	flagSet.IntVar(&flags.retryInterval, pigFlags[FLAG_RETRY][0], config.DefaultRetryInterval, pigFlags[FLAG_RETRY][2])
-	flagSet.IntVar(&flags.idleTimeout, pigFlags[FLAG_IDLE_TIMEOUT][0], config.DefaultIdleTimeout, pigFlags[FLAG_IDLE_TIMEOUT][2])
-	flagSet.StringVar(&flags.route, pigFlags[FLAG_ROUTE][0], "", pigFlags[FLAG_ROUTE][2])
-	flagSet.BoolVar(&flags.netcat, pigFlags[FLAG_NETCAT][0], false, pigFlags[FLAG_NETCAT][2])
-	flagSet.BoolVar(&flags.acceptOnce, pigFlags[FLAG_ACCEPT_ONCE][0], false, pigFlags[FLAG_ACCEPT_ONCE][2])
-	flagSet.StringVar(&flags.httpProxy, pigFlags[FLAG_HTTP_PROXY][0], "", pigFlags[FLAG_HTTP_PROXY][2])
+	flagSet.BoolVar(&flags.iceDisabled, pigFlags[FLAG_SIMPLE][0], false, "")
+	flagSet.StringVar(&flags.iceSignalingID, pigFlags[FLAG_ID][0], "", "")
+	flagSet.StringVar(&flags.address, pigFlags[FLAG_ADDR][0], "", "")
+	flagSet.StringVar(&flags.bindAdapter, pigFlags[FLAG_BIND][0], "", "")
+	flagSet.StringVar(&flags.proto, pigFlags[FLAG_PROTO][0], string(config.DefaultICEProtocol), "")
+	flagSet.IntVar(&flags.srcPort, pigFlags[FLAG_SPORT][0], 0, "")
+	flagSet.StringVar(&flags.tunnelAddress, pigFlags[FLAG_TADDR][0], "", "")
+	flagSet.IntVar(&flags.retryInterval, pigFlags[FLAG_RETRY][0], config.DefaultRetryInterval, "")
+	flagSet.IntVar(&flags.idleTimeout, pigFlags[FLAG_IDLE_TIMEOUT][0], config.DefaultIdleTimeout, "")
+	flagSet.StringVar(&flags.route, pigFlags[FLAG_ROUTE][0], "", "")
+	flagSet.BoolVar(&flags.acceptOnce, pigFlags[FLAG_ACCEPT_ONCE][0], false, "")
 	// scripting settings
-	flagSet.StringVar(&flags.scriptPath, pigFlags[FLAG_SCRIPT][0], "", pigFlags[FLAG_SCRIPT][2])
+	flagSet.StringVar(&flags.scriptPath, pigFlags[FLAG_SCRIPT][0], "", "")
 	// logging settings
-	flagSet.IntVar(&flags.verbose, pigFlags[FLAG_VERBOSE][0], 1, pigFlags[FLAG_VERBOSE][2])
+	flagSet.IntVar(&flags.verbose, pigFlags[FLAG_VERBOSE][0], 1, "")
 	// certificate settings
-	flagSet.StringVar(&flags.certFile, pigFlags[FLAG_CERT][0], "", pigFlags[FLAG_CERT][2])
-	flagSet.StringVar(&flags.keyFile, pigFlags[FLAG_KEY][0], "", pigFlags[FLAG_KEY][2])
+	flagSet.StringVar(&flags.certFile, pigFlags[FLAG_CERT][0], "", "")
+	flagSet.StringVar(&flags.keyFile, pigFlags[FLAG_KEY][0], "", "")
 	// trust settings
-	flagSet.BoolVar(&flags.insecure, pigFlags[FLAG_INSECURE][0], false, pigFlags[FLAG_INSECURE][2])
-	flagSet.StringVar(&flags.mtlsCA, pigFlags[FLAG_CA][0], "", pigFlags[FLAG_CA][2])
+	flagSet.BoolVar(&flags.insecure, pigFlags[FLAG_INSECURE][0], false, "")
+	flagSet.StringVar(&flags.mtlsCA, pigFlags[FLAG_CA][0], "", "")
 	// auth settings
-	flagSet.StringVar(&flags.authType, pigFlags[FLAG_AUTH][0], string(config.AuthTypeNone), pigFlags[FLAG_AUTH][2])
-	flagSet.StringVar(&flags.jwkSource, pigFlags[FLAG_JWK][0], "", pigFlags[FLAG_JWK][2])
-	flagSet.StringVar(&flags.token, pigFlags[FLAG_TOKEN][0], "", pigFlags[FLAG_TOKEN][2])
+	flagSet.StringVar(&flags.authType, pigFlags[FLAG_AUTH][0], string(config.AuthTypeNone), "")
+	flagSet.StringVar(&flags.jwkSource, pigFlags[FLAG_JWK][0], "", "")
+	flagSet.StringVar(&flags.token, pigFlags[FLAG_TOKEN][0], "", "")
 	// NAT traversal settings
-	flagSet.StringVar(&flags.stunServerAddr, pigFlags[FLAG_STUN][0], config.DefaultICESTUNServer, pigFlags[FLAG_STUN][2])
-	flagSet.StringVar(&flags.iceMQTTBroker, pigFlags[FLAG_MQTT][0], config.DefaultICEBrokerAddress, pigFlags[FLAG_MQTT][2])
-	flagSet.StringVar(&flags.iceKey, pigFlags[FLAG_SIGKEY][0], "", pigFlags[FLAG_SIGKEY][2])
+	flagSet.StringVar(&flags.stunServerAddr, pigFlags[FLAG_STUN][0], config.DefaultICESTUNServer, "")
+	flagSet.StringVar(&flags.iceMQTTBroker, pigFlags[FLAG_MQTT][0], config.DefaultICEBrokerAddress, "")
+	flagSet.StringVar(&flags.iceKey, pigFlags[FLAG_SIGKEY][0], "", "")
 	// nerd settings
-	flagSet.IntVar(&flags.mtu, pigFlags[FLAG_MTU][0], config.DefaultMTU, pigFlags[FLAG_MTU][2])
-	flagSet.IntVar(&flags.streamCount, pigFlags[FLAG_STREAMS][0], config.DefaultStreamCount, pigFlags[FLAG_STREAMS][2])
-	flagSet.IntVar(&flags.queueSize, pigFlags[FLAG_QSIZE][0], config.DefaultQueueSize, pigFlags[FLAG_QSIZE][2])
-	flagSet.Float64Var(&flags.wredWF, pigFlags[FLAG_WRED_WF][0], config.DefaultWredWF, pigFlags[FLAG_WRED_WF][2])
-	flagSet.Float64Var(&flags.wredDP, pigFlags[FLAG_WRED_DP][0], config.DefaultWredDP, pigFlags[FLAG_WRED_DP][2])
-	flagSet.Float64Var(&flags.wredThresh, pigFlags[FLAG_WRED_TH][0], config.DefaultWredThresh, pigFlags[FLAG_WRED_TH][2])
+	flagSet.IntVar(&flags.mtu, pigFlags[FLAG_MTU][0], config.DefaultMTU, "")
+	flagSet.IntVar(&flags.streamCount, pigFlags[FLAG_STREAMS][0], config.DefaultStreamCount, "")
+	flagSet.IntVar(&flags.queueSize, pigFlags[FLAG_QSIZE][0], config.DefaultQueueSize, "")
+	flagSet.Float64Var(&flags.wredWF, pigFlags[FLAG_WRED_WF][0], config.DefaultWredWF, "")
+	flagSet.Float64Var(&flags.wredDP, pigFlags[FLAG_WRED_DP][0], config.DefaultWredDP, "")
+	flagSet.Float64Var(&flags.wredThresh, pigFlags[FLAG_WRED_TH][0], config.DefaultWredThresh, "")
 	return flags
 }
 
