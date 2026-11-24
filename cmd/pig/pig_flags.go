@@ -304,7 +304,7 @@ func validatePassedFlag(f *flag.Flag, mode Mode) error {
 		// flagSet.Parse() will return an error if the flag is not defined
 		return nil
 	}
-	if fd[1] == wantMode || fd[1] == "a" {
+	if fd[2] == wantMode || fd[2] == "a" {
 		return nil
 	}
 	return errors.New("illegal flag")
