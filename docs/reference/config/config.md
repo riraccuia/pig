@@ -22,8 +22,8 @@
 
 | Field | Type | Optional | Default | Description |
 | --- | --- | --- | --- | --- |
-| `adapter_type` | string | false | tun | Adapter type. This can be one of "tun", "http_proxy", "stdio". |
-| `adapter_config` | any? | true | - | Adapter configuration, fields depend on the adapter type. Use AdapterTunConfig for "tun", AdapterHTTPProxyConfig for "http_proxy", and AdapterStdIOConfig for "stdio". |
+| `adapter_type` | string | false | tun | Adapter type. This can be one of "tun", "http_proxy", "socks_proxy", "stdio". |
+| `adapter_config` | any? | true | - | Adapter configuration, fields depend on the adapter type. Use AdapterTunConfig for "tun", AdapterHTTPProxyConfig for "http_proxy", AdapterSocksProxyConfig for "socks_proxy", and AdapterStdIOConfig for "stdio". |
 
 ## RouteConfig
 
@@ -73,6 +73,16 @@
 | `multi_queue` | bool? | true | - | MultiQueue enables tun multi-queue support. It is only valid on Linux platforms. |
 
 ## AdapterHTTPProxyConfig
+
+| Field | Type | Optional | Default | Description |
+| --- | --- | --- | --- | --- |
+| `tunnel_address` | []string? | true | - | CIDR format. |
+| `use_ipv6` | bool? | true | - | Use IPv6. The proxy will attempt to resolve IPv6 addresses for targets first. |
+| `mtu` | int? | true | 1420 | Maximum Transmission Unit. |
+| `listen_address` | string? | true | :8080 | HTTP proxy listen address. |
+| `dns_address` | string? | true | - | HTTP proxy DNS server address. |
+
+## AdapterSocksProxyConfig
 
 | Field | Type | Optional | Default | Description |
 | --- | --- | --- | --- | --- |

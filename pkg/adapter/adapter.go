@@ -23,9 +23,10 @@ import (
 type AdapterType string
 
 const (
-	AdapterTypeTun       AdapterType = "tun"
-	AdapterTypeStdio     AdapterType = "stdio"
-	AdapterTypeHTTPProxy AdapterType = "http_proxy"
+	AdapterTypeTun        AdapterType = "tun"
+	AdapterTypeStdio      AdapterType = "stdio"
+	AdapterTypeHTTPProxy  AdapterType = "http_proxy"
+	AdapterTypeSocksProxy AdapterType = "socks_proxy"
 )
 
 type AdapterConfig struct {
@@ -49,7 +50,11 @@ func NewAdapter(logger common.Logger, adapterType AdapterType, cfg any) (common.
 	case AdapterTypeHTTPProxy:
 		cfg := cfg.(*AdapterHTTPProxyConfig)
 		cfg.Logger = logger
-		return NewProxyAdapter(cfg)
+		return NewProxyHTTPAdapter(cfg)
+	case AdapterTypeSocksProxy:
+		cfg := cfg.(*AdapterSocksProxyConfig)
+		cfg.Logger = logger
+		return NewProxySocksAdapter(cfg)
 	default:
 		return nil, fmt.Errorf("invalid adapter type: %s", adapterType)
 	}

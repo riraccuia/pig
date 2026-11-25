@@ -20,18 +20,15 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"net/netip"
 	"time"
 
-	"github.com/elazarl/goproxy"
 	"github.com/riraccuia/pig/pkg/common"
 	"github.com/riraccuia/pig/pkg/netstack"
 	"github.com/riraccuia/pig/pkg/network"
 )
 
 const (
-	proxyAdapterName       = "http_proxy"
 	defaultProxyListenAddr = ":8080"
 	proxyDialTimeout       = 30 * time.Second
 	proxyLookupTimeout     = 5 * time.Second
@@ -40,30 +37,11 @@ const (
 	proxyTCPIPOverhead = 60
 )
 
-var _ common.TunnelAdapter = (*ProxyAdapter)(nil)
+var _ common.TunnelAdapter = (*ProxyHTTPAdapter)(nil)
 
-// AdapterHTTPProxyConfig extends AdapterConfig with the local proxy settings.
-type AdapterHTTPProxyConfig struct {
-	Address []string
-	MTU     int
-	// ListenAddr is where local applications reach the HTTP/HTTPS proxy.
-	ListenAddr string
-	// DNSServer (host:port), when set, resolves target names through the
-	// tunnel using DNS over TCP. Otherwise the system resolver is used.
-	DNSServer string
-	UseIPv6   bool
-	Logger    common.Logger
-}
-
-// ProxyAdapter implements common.TunnelAdapter with a userspace TCP stack
-// fronted by an HTTP/HTTPS proxy. Local applications connect to the proxy over
-// OS TCP; the proxy dials resolved targets through the netstack, whose IP
-// datagrams are exchanged with the tunnel through Read and Write. No TUN device
-// or OS routing is involved.
-type ProxyAdapter struct {
+type proxyBackend struct {
 	logger        common.Logger
 	stack         *netstack.Stack
-	server        *http.Server
 	listener      net.Listener
 	resolver      *net.Resolver
 	dnsServer     netip.AddrPort
@@ -75,28 +53,38 @@ type ProxyAdapter struct {
 	mtu           int
 }
 
-// NewProxyAdapter creates the netstack from cfg.Address (one IPv4 and/or one
-// IPv6 CIDR) and starts serving the proxy on cfg.ListenAddr.
-func NewProxyAdapter(cfg *AdapterHTTPProxyConfig) (*ProxyAdapter, error) {
-	logger := cfg.Logger
-	if logger == nil {
+// AdapterBackendProxyConfig extends AdapterConfig with the local proxy settings.
+type AdapterBackendProxyConfig struct {
+	Address []string
+	MTU     int
+	// ListenAddr is where local applications reach the proxy.
+	ListenAddr string
+	// DNSServer (host:port), when set, resolves target names through the
+	// tunnel. Otherwise the system resolver is used.
+	DNSServer string
+	UseIPv6   bool
+	Logger    common.Logger
+}
+
+func NewProxyBackend(cfg *AdapterBackendProxyConfig) (*proxyBackend, error) {
+	if cfg.Logger == nil {
 		return nil, errors.New("proxy adapter: logger is required")
 	}
 	if cfg.MTU <= proxyTCPIPOverhead {
 		return nil, fmt.Errorf("proxy adapter: MTU %d too small", cfg.MTU)
 	}
-	a := &ProxyAdapter{logger: logger, mtu: cfg.MTU}
-	if err := a.configureAddresses(cfg.Address, cfg.UseIPv6); err != nil {
+	pb := &proxyBackend{logger: cfg.Logger, mtu: cfg.MTU}
+	if err := pb.configureAddresses(cfg.Address, cfg.UseIPv6); err != nil {
 		return nil, err
 	}
-	if err := a.setupResolver(cfg.DNSServer); err != nil {
+	if err := pb.setupResolver(cfg.DNSServer); err != nil {
 		return nil, err
 	}
-	stack, err := netstack.New(logger, a.ip4, a.ip6, netstack.Options{MTU: cfg.MTU})
+	stack, err := netstack.New(cfg.Logger, pb.ip4, pb.ip6, netstack.Options{MTU: cfg.MTU})
 	if err != nil {
 		return nil, fmt.Errorf("proxy adapter: %w", err)
 	}
-	a.stack = stack
+	pb.stack = stack
 
 	listenAddr := cmp.Or(cfg.ListenAddr, defaultProxyListenAddr)
 	ln, err := net.Listen("tcp", listenAddr)
@@ -104,14 +92,11 @@ func NewProxyAdapter(cfg *AdapterHTTPProxyConfig) (*ProxyAdapter, error) {
 		stack.Close()
 		return nil, fmt.Errorf("proxy adapter: listen %s: %w", listenAddr, err)
 	}
-	a.listener = ln
-	a.server = &http.Server{Handler: a.newProxy(), ReadHeaderTimeout: proxyReadHeaderTimeout}
-	go a.serve()
-	logger.Infof("proxy adapter: HTTP proxy listening on %s", ln.Addr())
-	return a, nil
+	pb.listener = ln
+	return pb, nil
 }
 
-func (a *ProxyAdapter) parseAddress(address []string, useIPv6 bool) error {
+func (a *proxyBackend) parseAddress(address []string, useIPv6 bool) error {
 	for _, addr := range address {
 		prefix, err := netip.ParsePrefix(addr)
 		if err != nil {
@@ -153,7 +138,7 @@ func (a *ProxyAdapter) parseAddress(address []string, useIPv6 bool) error {
 	return nil
 }
 
-func (a *ProxyAdapter) configureAddresses(address []string, useIPv6 bool) error {
+func (a *proxyBackend) configureAddresses(address []string, useIPv6 bool) error {
 	if address != nil {
 		return a.parseAddress(address, useIPv6)
 	}
@@ -183,7 +168,7 @@ func (a *ProxyAdapter) configureAddresses(address []string, useIPv6 bool) error 
 	return nil
 }
 
-func (a *ProxyAdapter) setupResolver(dnsServer string) error {
+func (a *proxyBackend) setupResolver(dnsServer string) error {
 	a.resolver = net.DefaultResolver
 	if dnsServer == "" {
 		return nil
@@ -198,39 +183,13 @@ func (a *ProxyAdapter) setupResolver(dnsServer string) error {
 }
 
 // dialDNS hands the Go resolver a netstack UDP connection.
-func (a *ProxyAdapter) dialDNS(ctx context.Context, _, _ string) (net.Conn, error) {
+func (a *proxyBackend) dialDNS(ctx context.Context, _, _ string) (net.Conn, error) {
 	return a.stack.DialUDP(net.UDPAddrFromAddrPort(a.dnsServer))
-}
-
-// newProxy routes both CONNECT tunnels and plain HTTP requests through
-// dialContext. goproxy's default transport skips TLS verification and honors
-// proxy environment variables, so it is replaced.
-func (a *ProxyAdapter) newProxy() *goproxy.ProxyHttpServer {
-	px := goproxy.NewProxyHttpServer()
-	px.Logger = proxyLogger{logger: a.logger}
-	px.ConnectDial = nil
-	px.Tr = &http.Transport{
-		DialContext:           a.dialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: time.Second,
-	}
-	return px
-}
-
-func (a *ProxyAdapter) serve() {
-	err := a.server.Serve(a.listener)
-	if errors.Is(err, http.ErrServerClosed) {
-		return
-	}
-	a.logger.Errorf("proxy adapter: serve: %v", err)
 }
 
 // dialContext resolves address and dials each candidate through the netstack
 // until one connects.
-func (a *ProxyAdapter) dialContext(ctx context.Context, network, address string) (net.Conn, error) {
+func (a *proxyBackend) dialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	if network != "tcp" && network != "tcp4" && network != "tcp6" {
 		return nil, fmt.Errorf("proxy adapter: unsupported network %s", network)
 	}
@@ -264,7 +223,7 @@ func (a *ProxyAdapter) dialContext(ctx context.Context, network, address string)
 
 // resolve returns the addresses of host that the netstack has a local
 // address family for.
-func (a *ProxyAdapter) resolve(ctx context.Context, host string) ([]netip.Addr, error) {
+func (a *proxyBackend) resolve(ctx context.Context, host string) ([]netip.Addr, error) {
 	ctx, cancel := context.WithTimeout(ctx, proxyLookupTimeout)
 	defer cancel()
 
@@ -286,7 +245,7 @@ func (a *ProxyAdapter) resolve(ctx context.Context, host string) ([]netip.Addr, 
 	return reachable, nil
 }
 
-func (a *ProxyAdapter) lookup(ctx context.Context, host string) ([]netip.Addr, error) {
+func (a *proxyBackend) lookup(ctx context.Context, host string) ([]netip.Addr, error) {
 	if addr, err := netip.ParseAddr(host); err == nil {
 		return []netip.Addr{addr}, nil
 	}
@@ -294,74 +253,61 @@ func (a *ProxyAdapter) lookup(ctx context.Context, host string) ([]netip.Addr, e
 }
 
 // ProxyAddr returns the address local applications use to reach the proxy.
-func (a *ProxyAdapter) ProxyAddr() net.Addr {
+func (a *proxyBackend) ProxyAddr() net.Addr {
 	return a.listener.Addr()
 }
 
-func (a *ProxyAdapter) SetDeadline(t time.Time) error {
+func (a *proxyBackend) SetDeadline(t time.Time) error {
 	return a.SetReadDeadline(t)
 }
 
-func (a *ProxyAdapter) SetReadDeadline(t time.Time) error {
+func (a *proxyBackend) SetReadDeadline(t time.Time) error {
 	return a.stack.SetReadDeadline(t)
 }
 
-func (a *ProxyAdapter) SetWriteDeadline(t time.Time) error {
+func (a *proxyBackend) SetWriteDeadline(t time.Time) error {
 	// not implemented
 	return nil
 }
 
-func (a *ProxyAdapter) Read(buf []byte) (int, error) {
+func (a *proxyBackend) Read(buf []byte) (int, error) {
 	return a.stack.Read(buf)
 }
 
-func (a *ProxyAdapter) Write(b []byte) (int, error) {
+func (a *proxyBackend) Write(b []byte) (int, error) {
 	return a.stack.Write(b)
 }
 
 // Close stops the proxy and tears down every netstack connection, which also
 // ends the proxied client connections.
-func (a *ProxyAdapter) Close() error {
-	return errors.Join(a.server.Close(), a.stack.Close())
+func (a *proxyBackend) Close() error {
+	return errors.Join(a.listener.Close(), a.stack.Close())
 }
 
-func (a *ProxyAdapter) MTU() int {
+func (a *proxyBackend) MTU() int {
 	return a.mtu
 }
 
-func (a *ProxyAdapter) BlockSize() int {
+func (a *proxyBackend) BlockSize() int {
 	return a.mtu
 }
 
-func (a *ProxyAdapter) IP() net.IP {
+func (a *proxyBackend) IP() net.IP {
 	return a.ip4
 }
 
-func (a *ProxyAdapter) IPNet() *net.IPNet {
+func (a *proxyBackend) IPNet() *net.IPNet {
 	return a.ipNet4
 }
 
-func (a *ProxyAdapter) IP6() net.IP {
+func (a *proxyBackend) IP6() net.IP {
 	return a.ip6
 }
 
-func (a *ProxyAdapter) IPNet6() *net.IPNet {
+func (a *proxyBackend) IPNet6() *net.IPNet {
 	return a.ipNet6
 }
 
-func (a *ProxyAdapter) Name() string {
-	return proxyAdapterName
-}
-
-func (a *ProxyAdapter) Index() int {
+func (a *proxyBackend) Index() int {
 	return -1
-}
-
-// proxyLogger adapts common.Logger to goproxy's Printf logger.
-type proxyLogger struct {
-	logger common.Logger
-}
-
-func (l proxyLogger) Printf(format string, args ...any) {
-	l.logger.Debugf("proxy adapter: "+format, args...)
 }

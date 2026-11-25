@@ -58,6 +58,13 @@ var (
 	DefaultWGKeepaliveConnect = 25
 )
 
+func mtuOrDefault(mtu int) int {
+	if mtu == 0 {
+		return DefaultMTU
+	}
+	return mtu
+}
+
 func (b *MQTTBrokerConfig) Initialize() error {
 	if b.Address == "" {
 		b.Address = EnvMQTTBroker.Get()
@@ -180,40 +187,46 @@ func (c *RouteConfig) Initialize() error {
 
 func (c *AdapterConfig) InitializeAdapter(direction TunnelDirection) error {
 	c.AdapterType = cmp.Or(c.AdapterType, DefaultAdapterType)
-	switch c.AdapterType {
-	case string(adapter.AdapterTypeTun):
+	switch adapter.AdapterType(c.AdapterType) {
+	case adapter.AdapterTypeTun:
 		if c.AdapterConfig == nil {
 			c.AdapterConfig = &AdapterTunConfig{}
 		}
 		cfg := c.AdapterConfig.(*AdapterTunConfig)
 		return cfg.Initialize(direction)
-	case string(adapter.AdapterTypeStdio):
+	case adapter.AdapterTypeStdio:
 		if c.AdapterConfig == nil {
 			c.AdapterConfig = &AdapterStdIOConfig{}
 		}
 		cfg := c.AdapterConfig.(*AdapterStdIOConfig)
-		if cfg.MTU == 0 {
-			cfg.MTU = DefaultMTU
-		}
-	case string(adapter.AdapterTypeHTTPProxy):
+		cfg.MTU = mtuOrDefault(cfg.MTU)
+	case adapter.AdapterTypeHTTPProxy, adapter.AdapterTypeSocksProxy:
 		if direction == TunnelDirectionListen {
 			return fmt.Errorf("HTTP proxy adapter is only supported for connect tunnels")
 		}
 		if c.AdapterConfig == nil {
-			c.AdapterConfig = &AdapterHTTPProxyConfig{}
+			c.AdapterConfig, _ = newAdapterSettings(c.AdapterType)
 		}
-		cfg := c.AdapterConfig.(*AdapterHTTPProxyConfig)
-		if cfg.MTU == 0 {
-			cfg.MTU = DefaultMTU
+		cfg := c.AdapterConfig.(interface{ Initialize() error })
+		if err := cfg.Initialize(); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
+func (c *AdapterHTTPProxyConfig) Initialize() error {
+	c.MTU = mtuOrDefault(c.MTU)
+	return nil
+}
+
+func (c *AdapterSocksProxyConfig) Initialize() error {
+	c.MTU = mtuOrDefault(c.MTU)
+	return nil
+}
+
 func (c *AdapterTunConfig) Initialize(direction TunnelDirection) error {
-	if c.MTU == 0 {
-		c.MTU = DefaultMTU
-	}
+	c.MTU = mtuOrDefault(c.MTU)
 	if len(c.TunnelAddress) != 0 {
 		return nil
 	}
@@ -237,16 +250,14 @@ func (c *AdapterTunConfig) Initialize(direction TunnelDirection) error {
 func (c *AdapterConfig) InitializeDefaultAdapter() error {
 	c.AdapterType = cmp.Or(c.AdapterType, string(adapter.AdapterTypeTun))
 	if c.AdapterType != string(adapter.AdapterTypeTun) {
-		return nil
+		return fmt.Errorf("illegal default adapter type: %s, expected: %s", c.AdapterType, adapter.AdapterTypeTun)
 	}
 	if c.AdapterConfig == nil {
 		// no adapter config specified, use default settings
 		c.AdapterConfig = &AdapterTunConfig{}
 	}
 	adapterConfig := c.AdapterConfig.(*AdapterTunConfig)
-	if adapterConfig.MTU == 0 {
-		adapterConfig.MTU = DefaultMTU
-	}
+	adapterConfig.MTU = mtuOrDefault(adapterConfig.MTU)
 	if len(adapterConfig.TunnelAddress) == 0 {
 		generatedNet, err := network.GenerateIPPrefix(DefaultConnectBasePrefixV4, DefaultConnectPrefixLengthV4, true)
 		if err != nil {

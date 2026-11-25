@@ -39,6 +39,7 @@ Table of contents for pig user documentation. New guides are added here by topic
 
 - [TUN](adapters/tun.md)
 - [HTTP proxy](adapters/http_proxy.md)
+- [SOCKS proxy](adapters/socks_proxy.md)
 - [Stdio](adapters/stdio.md)
 
 ## NAT

@@ -162,11 +162,12 @@ type Config struct {
 
 type AdapterConfig struct {
 	// default=DefaultAdapterType
-	// desc=Adapter type. This can be one of "tun", "http_proxy", "stdio".
+	// desc=Adapter type. This can be one of "tun", "http_proxy", "socks_proxy", "stdio".
 	AdapterType string `toml:"adapter_type" json:"adapter_type"`
 	// optional=true
 	// desc=Adapter configuration, fields depend on the adapter type.
-	// Use AdapterTunConfig for "tun", AdapterHTTPProxyConfig for "http_proxy", and AdapterStdIOConfig for "stdio".
+	// Use AdapterTunConfig for "tun", AdapterHTTPProxyConfig for "http_proxy", AdapterSocksProxyConfig for "socks_proxy",
+	// and AdapterStdIOConfig for "stdio".
 	AdapterConfig any `toml:"adapter_config,omitempty" json:"adapter_config,omitzero"`
 
 	// hidden=true
@@ -175,6 +176,9 @@ type AdapterConfig struct {
 	// hidden=true
 	// desc=This is only used for documentation purposes.
 	_ *AdapterHTTPProxyConfig `toml:"http_proxy,omitempty"` // json:"http_proxy,omitzero"`
+	// hidden=true
+	// desc=This is only used for documentation purposes.
+	_ *AdapterSocksProxyConfig `toml:"socks_proxy,omitempty"` // json:"socks_proxy,omitzero"`
 	// hidden=true
 	// desc=This is only used for documentation purposes.
 	_ *AdapterStdIOConfig `toml:"stdio,omitempty"` // json:"stdio,omitzero"`
@@ -196,6 +200,15 @@ func (a *AdapterConfig) ToAdapterConfig() any {
 	case "http_proxy":
 		cfg := a.AdapterConfig.(*AdapterHTTPProxyConfig)
 		return &adapter.AdapterHTTPProxyConfig{
+			Address:    cfg.TunnelAddress,
+			UseIPv6:    cfg.UseIPv6,
+			MTU:        cfg.MTU,
+			ListenAddr: cfg.ListenAddress,
+			DNSServer:  cfg.DNSAddress,
+		}
+	case "socks_proxy":
+		cfg := a.AdapterConfig.(*AdapterSocksProxyConfig)
+		return &adapter.AdapterSocksProxyConfig{
 			Address:    cfg.TunnelAddress,
 			UseIPv6:    cfg.UseIPv6,
 			MTU:        cfg.MTU,
@@ -228,6 +241,14 @@ type AdapterTunConfig struct {
 }
 
 type AdapterHTTPProxyConfig struct {
+	AdapterBaseProxyConfig
+}
+
+type AdapterSocksProxyConfig struct {
+	AdapterBaseProxyConfig
+}
+
+type AdapterBaseProxyConfig struct {
 	// optional=true
 	// desc=CIDR format.
 	TunnelAddress []string `toml:"tunnel_address,omitempty" json:"tunnel_address,omitzero"`
@@ -257,6 +278,10 @@ func (a *AdapterConfig) SetStdIOAdapter() {
 
 func (a *AdapterConfig) SetHTTPProxyAdapter() {
 	a.AdapterType = string(adapter.AdapterTypeHTTPProxy)
+}
+
+func (a *AdapterConfig) SetSocksProxyAdapter() {
+	a.AdapterType = string(adapter.AdapterTypeSocksProxy)
 }
 
 type TunnelConfig struct {
