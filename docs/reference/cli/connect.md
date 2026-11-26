@@ -15,6 +15,9 @@ Adapters:
  -http-proxy <[host]:port> (string)
    Http proxy adapter. Exposes a local http proxy server over the specified address whose outgoing
    traffic always traverses the tunnel.
+ -socks-proxy <[host]:port> (string)
+   Socks proxy adapter. Exposes a local socks proxy server over the specified address whose outgoing
+   traffic always traverses the tunnel.
 
 General options:
  -s 

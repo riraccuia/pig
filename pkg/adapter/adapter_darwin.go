@@ -93,6 +93,7 @@ func (uta *utunAdapter) Write(buf []byte) (int, error) {
 	}
 	uta.w = uta.w[:len(buf)+4]
 
+	uta.w[0], uta.w[1], uta.w[2] = 0, 0, 0
 	ipFamily := buf[0] >> 4
 	switch ipFamily {
 	case 4:

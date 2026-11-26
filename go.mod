@@ -14,6 +14,7 @@ require (
 	github.com/pion/transport/v5 v5.1.5
 	github.com/quic-go/quic-go v0.62.0
 	github.com/rs/zerolog v1.35.1
+	github.com/things-go/go-socks5 v0.1.4
 	golang.org/x/crypto v0.57.0
 	golang.org/x/net v0.59.0
 	golang.org/x/oauth2 v0.37.0

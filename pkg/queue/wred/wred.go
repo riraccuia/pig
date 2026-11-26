@@ -71,7 +71,7 @@ func NewWRED(qlen int, weight, dropProbability, minThPercent, maxThPercent float
 		return nil, fmt.Errorf("wred's queue length must be > 0")
 	}
 	maxT := maxThPercent * float64(qlen)
-	minT := math.Round(maxT*0.5*100) / 0.5 // default to half of the max threshold
+	minT := maxT * 0.5 // default to half of the max threshold
 	if minThPercent > 0 && minThPercent < maxThPercent {
 		minT = minThPercent * float64(qlen)
 	}

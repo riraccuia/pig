@@ -2,27 +2,45 @@
 
 This page assumes pig is already installed. If it is not, start with [Installation](../installation/installation.md).
 
-## First tunnel
+## Adapters
+
+Adapters are the way local traffic enters and leaves the tunnel on each pig side.
+
+Unless specified otherwise, pig always uses the **[TUN](../adapters/tun.md)** adapter (`adapter_type = "tun"`).
+
+| Adapter | When to use it | Privileges |
+| ------- | -------------- | ---------- |
+| [TUN](../adapters/tun.md) (default) | OS routes / exit node / site-to-site | Elevated |
+| [HTTP](../adapters/http_proxy.md) / [SOCKS](../adapters/socks_proxy.md) proxy | Point apps at a local proxy; no OS routing | None on the proxy side, granted the listen port is not privileged (>1024) |
+| [Stdio](../adapters/stdio.md) (`-nc`) | Netcat-style byte streams over the tunnel | None |
+
+For proxy or `-nc` examples, see the related doc pages linked above.
+
+## First tunnel (TUN)
+
+This section uses the default **TUN** adapter on both sides: pig creates a tunnel interface and Bob installs routes with `-R`. You do not pass an adapter flag: TUN is implied.
 
 Two machines. Alice listens. Bob connects. With NAT traversal enabled (`-id`), Bob does not need to know Alice’s public address.
 
-Choose a shared id (any unique string) and an encryption passphrase for encrypted signaling between the nodes. 
+NAT-T relies on signaling (MQTT) and STUN; both ship with defaults you can override, but only the **signaling** server must match on both sides. See [NAT traversal](../nat/nat.md).
+
+Choose a shared id (any unique string) and an encryption passphrase for encrypted signaling between the nodes.
 
 > [!WARNING]
-> Always set a passphrase, especially if using default or public [STUN and MQTT](../nat/nat.md).
+> Always set a passphrase, especially if using the default or any public MQTT server.
 
 **Alice (listen):**
 
 ```bash
 # Alice's private ip address is 192.168.1.100
-sudo pig -l -id pig-demo-alice -P . -k -sk passphrase
+sudo ./pig -l -id pig-demo-alice -P . -k -sk passphrase
 ```
 
 **Bob (connect):**
 
 ```bash
 # Connect to Alice, routing Alice's private ip address through the tunnel
-sudo pig -c -id pig-demo-alice -k -sk passphrase -R 192.168.1.100/32
+sudo ./pig -c -id pig-demo-alice -k -sk passphrase -R 192.168.1.100/32
 ```
 
 On Windows, run the same commands from an Administrator terminal (`pig.exe` instead of `pig`, and without `sudo`).
@@ -52,7 +70,7 @@ Full flag list: [CLI reference](../reference/cli/pig.md) or `pig -h`.
 
 ## Simple mode
 
-If you prefer a fixed address and open ports yourself (no smarts):
+Still the default TUN adapter, but with a fixed address and ports you open yourself (no NAT traversal):
 
 ```bash
 # Alice
@@ -75,14 +93,14 @@ sudo ./pig -config alice.json
 
 Json and toml formats are supported (`-to-cfg toml`).\
 
-Check out the [config reference](../reference/config/config.md) for the full list of options.
+Omit `adapter_type` (or set it to `"tun"`) for the same default TUN behavior. Check out the [config reference](../reference/config/config.md) for the full list of options.
 
 ## Next steps
 
+- [Adapters](../index.md#adapters)
 - [CLI overview](cli-overview.md)
 - [CLI reference](../reference/cli/pig.md)
 - [Connect](../reference/cli/connect.md) / [Listen](../reference/cli/listen.md)
 - [NAT traversal](../nat/nat.md)
 - [Docker](../deploy/docker.md)
 - [Examples](../../examples/)
-

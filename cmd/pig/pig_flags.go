@@ -72,6 +72,7 @@ const (
 	FLAG_NETCAT       = "nc"
 	FLAG_ACCEPT_ONCE  = "o"
 	FLAG_HTTP_PROXY   = "http-proxy"
+	FLAG_SOCKS_PROXY  = "socks-proxy"
 
 	FLAG_DOCS_CONFIG = FLAG_MAIN_CONFIG
 	FLAG_DOCS_ENV    = "env"
@@ -85,8 +86,9 @@ var pigFlags = map[string][4]string{
 	// output settings
 	FLAG_TO_CFG: {FLAG_TO_CFG, "<format> (string)", "a", "Takes either 'json' or 'toml'. Turns the current CLI options into a config file and exits."},
 	// adapters
-	FLAG_NETCAT:     {FLAG_NETCAT, "", "a", "Stdio adapter. Enables netcat mode: stdin is redirected to the stdout of the connected peer (and vice versa) over the encrypted tunnel."},
-	FLAG_HTTP_PROXY: {FLAG_HTTP_PROXY, "<[host]:port> (string)", "c", "Http proxy adapter. Exposes a local http proxy server over the specified address whose outgoing traffic always traverses the tunnel."},
+	FLAG_NETCAT:      {FLAG_NETCAT, "", "a", "Stdio adapter. Enables netcat mode: stdin is redirected to the stdout of the connected peer (and vice versa) over the encrypted tunnel."},
+	FLAG_HTTP_PROXY:  {FLAG_HTTP_PROXY, "<[host]:port> (string)", "c", "Http proxy adapter. Exposes a local http proxy server over the specified address whose outgoing traffic always traverses the tunnel."},
+	FLAG_SOCKS_PROXY: {FLAG_SOCKS_PROXY, "<[host]:port> (string)", "c", "Socks proxy adapter. Exposes a local socks proxy server over the specified address whose outgoing traffic always traverses the tunnel."},
 	// general settings
 	FLAG_SIMPLE:       {FLAG_SIMPLE, "", "a", "Simple mode. Disables NAT traversal to establish direct connections, in which case ports need to be opened manually on edge routers and/or firewalls."},
 	FLAG_ID:           {FLAG_ID, "<id> (string)", "a", "ID or friendly name for a listening node. This identifier is registered for signaling during NAT traversal. When the connecting side uses it, it doesn't need to know the other node's address."},
@@ -159,7 +161,7 @@ type Flags struct {
 	toConfig       string
 	netcat         bool
 	acceptOnce     bool
-	httpProxy      string
+	proxy          string
 }
 
 func parsePigFlags(mode Mode, flagSet *flag.FlagSet) *Flags {
@@ -317,7 +319,8 @@ func defineFlags(flagSet *flag.FlagSet) *Flags {
 	flagSet.StringVar(&flags.toConfig, pigFlags[FLAG_TO_CFG][0], "", "")
 	// adapters
 	flagSet.BoolVar(&flags.netcat, pigFlags[FLAG_NETCAT][0], false, "")
-	flagSet.StringVar(&flags.httpProxy, pigFlags[FLAG_HTTP_PROXY][0], "", "")
+	flagSet.StringVar(&flags.proxy, pigFlags[FLAG_HTTP_PROXY][0], "", "")
+	flagSet.StringVar(&flags.proxy, pigFlags[FLAG_SOCKS_PROXY][0], "", "")
 	// general settings
 	flagSet.BoolVar(&flags.iceDisabled, pigFlags[FLAG_SIMPLE][0], false, "")
 	flagSet.StringVar(&flags.iceSignalingID, pigFlags[FLAG_ID][0], "", "")
@@ -638,7 +641,7 @@ func setupAdapterMode(cfg *config.Config, flags *Flags, flagSet *flag.FlagSet, l
 	if setupNetcatMode(cfg, flags, flagSet, logger) {
 		return
 	}
-	if setupHTTPProxyMode(cfg, flags, flagSet, logger) {
+	if setupProxyMode(cfg, flags, flagSet, logger) {
 		return
 	}
 	setupTunMode(cfg, flags, flagSet, logger)
@@ -673,8 +676,8 @@ func setupNetcatMode(cfg *config.Config, flags *Flags, flagSet *flag.FlagSet, lo
 	return true
 }
 
-func setupHTTPProxyMode(cfg *config.Config, flags *Flags, flagSet *flag.FlagSet, logger common.Logger) (configured bool) {
-	if flags.httpProxy == "" {
+func setupProxyMode(cfg *config.Config, flags *Flags, flagSet *flag.FlagSet, logger common.Logger) (configured bool) {
+	if flags.proxy == "" {
 		return
 	}
 
@@ -692,11 +695,25 @@ func setupHTTPProxyMode(cfg *config.Config, flags *Flags, flagSet *flag.FlagSet,
 
 	tc = &cfg.Tunnels[0]
 
-	tc.Adapter.SetHTTPProxyAdapter()
-	httpProxyCfg := &config.AdapterHTTPProxyConfig{}
-	setConfigField(&httpProxyCfg.MTU, flags.mtu)
-	tc.Adapter.AdapterConfig = httpProxyCfg
-	httpProxyCfg.ListenAddress = flags.httpProxy
+	proxyType := "http"
+	if isFlagPassed(flagSet, FLAG_SOCKS_PROXY) {
+		proxyType = "socks"
+	}
+
+	switch proxyType {
+	case "http":
+		tc.Adapter.SetHTTPProxyAdapter()
+		proxyCfg := &config.AdapterHTTPProxyConfig{}
+		setConfigField(&proxyCfg.MTU, flags.mtu)
+		tc.Adapter.AdapterConfig = proxyCfg
+		proxyCfg.ListenAddress = flags.proxy
+	case "socks":
+		tc.Adapter.SetSocksProxyAdapter()
+		proxyCfg := &config.AdapterSocksProxyConfig{}
+		setConfigField(&proxyCfg.MTU, flags.mtu)
+		tc.Adapter.AdapterConfig = proxyCfg
+		proxyCfg.ListenAddress = flags.proxy
+	}
 
 	cfg.RouteConfig.Enabled = false
 	return true

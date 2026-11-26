@@ -19,6 +19,8 @@ func newAdapterSettings(adapterType string) (any, error) {
 		return &AdapterStdIOConfig{}, nil
 	case adapter.AdapterTypeHTTPProxy:
 		return &AdapterHTTPProxyConfig{}, nil
+	case adapter.AdapterTypeSocksProxy:
+		return &AdapterSocksProxyConfig{}, nil
 	}
 	return nil, fmt.Errorf("invalid adapter type: %q", adapterType)
 }

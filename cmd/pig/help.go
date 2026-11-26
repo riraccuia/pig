@@ -54,6 +54,7 @@ func printListenConnectUsage(mode Mode) {
 	fmt.Fprintln(w, "Adapters:")
 	printFlagMode(w, mode, pigFlags[FLAG_NETCAT])
 	printFlagMode(w, mode, pigFlags[FLAG_HTTP_PROXY])
+	printFlagMode(w, mode, pigFlags[FLAG_SOCKS_PROXY])
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "General options:")
 	printFlagMode(w, mode, pigFlags[FLAG_SIMPLE])

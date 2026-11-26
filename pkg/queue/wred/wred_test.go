@@ -239,11 +239,11 @@ func TestIsDrop_AboveMaxTUsesMaxDP(t *testing.T) {
 		tolerance = 0.03
 	)
 
-	w, err := NewWRED(100, 0, maxDP, 0, 0.5)
+	w, err := NewWRED(100, 1, maxDP, 0, 0.5)
 	if err != nil {
 		t.Fatalf("NewWRED: %v", err)
 	}
-	w.Update(90) // avg > maxT → still p = maxDP (not forced drop)
+	w.avgQueueLen = 90
 
 	drops := 0
 	for range samples {
@@ -269,11 +269,11 @@ func TestIsDrop_MidRampLinearProbability(t *testing.T) {
 		tolerance = 0.03
 	)
 
-	w, err := NewWRED(100, 0, maxDP, 0, 0.5)
+	w, err := NewWRED(100, 1, maxDP, 0, 0.5)
 	if err != nil {
 		t.Fatalf("NewWRED: %v", err)
 	}
-	w.Update(37.5)
+	w.avgQueueLen = 37.5
 
 	drops := 0
 	for range samples {
@@ -291,11 +291,11 @@ func TestIsDrop_MidRampLinearProbability(t *testing.T) {
 func TestIsDrop_ForcedWhenMaxDPOneAndAboveMaxT(t *testing.T) {
 	t.Parallel()
 
-	w, err := NewWRED(100, 0, 1.0, 0, 0.5)
+	w, err := NewWRED(100, 1, 1.0, 0, 0.5)
 	if err != nil {
 		t.Fatalf("NewWRED: %v", err)
 	}
-	w.Update(50)
+	w.avgQueueLen = 50
 
 	for range 100 {
 		if !w.IsDrop() {
